@@ -8,7 +8,8 @@ import { SidebarNav } from '@/components/layout/sidebar-nav'
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter()
   const { user, setUser } = useAuthStore()
-  const [unreadCount, setUnreadCount] = useState(0)
+  const [unreadCount,           setUnreadCount]           = useState(0)
+  const [pendingRequestsCount,  setPendingRequestsCount]  = useState(0)
   const [checking, setChecking] = useState(true)
 
   useEffect(() => {
@@ -33,7 +34,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (!user) return
-    const fetchUnread = async () => {
+    const fetchCounts = async () => {
       try {
         const res = await fetch('/api/notifications?unread=true')
         if (res.ok) {
@@ -41,9 +42,18 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           setUnreadCount(data.unreadCount || 0)
         }
       } catch {}
+      if (['ADMIN', 'MANAGER', 'PLANNER'].includes(user.role)) {
+        try {
+          const res = await fetch('/api/requests?status=SUBMITTED')
+          if (res.ok) {
+            const data = await res.json()
+            setPendingRequestsCount(Array.isArray(data) ? data.length : 0)
+          }
+        } catch {}
+      }
     }
-    fetchUnread()
-    const interval = setInterval(fetchUnread, 30000)
+    fetchCounts()
+    const interval = setInterval(fetchCounts, 30000)
     return () => clearInterval(interval)
   }, [user])
 
@@ -62,7 +72,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="flex h-screen overflow-hidden bg-background">
-      <SidebarNav unreadCount={unreadCount} />
+      <SidebarNav unreadCount={unreadCount} pendingRequestsCount={pendingRequestsCount} />
       <main className="flex-1 overflow-auto">
         {children}
       </main>

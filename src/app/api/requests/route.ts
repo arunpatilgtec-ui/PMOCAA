@@ -15,7 +15,7 @@ export async function GET(req: NextRequest) {
         assignee: { select: { id: true, name: true } },
         project: { select: { id: true, name: true, status: true } },
       },
-      orderBy: [{ priority: 'asc' }, { createdAt: 'desc' }],
+      orderBy: [{ createdAt: 'desc' }],
     })
     return Response.json(requests)
   } catch (err: unknown) {
@@ -44,6 +44,30 @@ export async function POST(req: NextRequest) {
         submitter: { select: { id: true, name: true } },
       },
     })
+
+    // Notify all active ADMIN / MANAGER / PLANNER users
+    const managers = await prisma.user.findMany({
+      where: {
+        role: { in: ['ADMIN', 'MANAGER', 'PLANNER'] },
+        isActive: true,
+        NOT: { id: session.id },
+      },
+      select: { id: true },
+    })
+
+    if (managers.length > 0) {
+      await prisma.notification.createMany({
+        data: managers.map((m) => ({
+          userId: m.id,
+          senderId: session.id,
+          type: 'APPROVAL_REQUIRED' as const,
+          title: 'New Request Submitted',
+          message: `${session.name} submitted a new request: "${request.title}"`,
+          actionUrl: '/requests',
+        })),
+      })
+    }
+
     return Response.json(request, { status: 201 })
   } catch (err: unknown) {
     if (err instanceof Error && err.message === 'Unauthorized') {

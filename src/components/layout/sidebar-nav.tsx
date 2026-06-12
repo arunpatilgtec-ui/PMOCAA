@@ -49,7 +49,7 @@ const navItems: NavItem[] = [
   { label: 'Users', href: '/users', icon: Settings, roles: ['ADMIN'] },
 ]
 
-export function SidebarNav({ unreadCount = 0 }: { unreadCount?: number }) {
+export function SidebarNav({ unreadCount = 0, pendingRequestsCount = 0 }: { unreadCount?: number; pendingRequestsCount?: number }) {
   const pathname = usePathname()
   const router = useRouter()
   const { user, logout } = useAuthStore()
@@ -118,6 +118,16 @@ export function SidebarNav({ unreadCount = 0 }: { unreadCount?: number }) {
                   {item.label === 'Notifications' && unreadCount > 0 && (
                     <Badge variant="destructive" className="text-xs px-1.5 py-0 h-5">
                       {unreadCount > 9 ? '9+' : unreadCount}
+                    </Badge>
+                  )}
+                  {item.label === 'Requests' && pendingRequestsCount > 0 && (
+                    <Badge className="text-xs px-1.5 py-0 h-5 bg-orange-500 hover:bg-orange-500">
+                      {pendingRequestsCount > 9 ? '9+' : pendingRequestsCount}
+                    </Badge>
+                  )}
+                  {item.label === 'Approvals' && pendingRequestsCount > 0 && (
+                    <Badge className="text-xs px-1.5 py-0 h-5 bg-orange-500 hover:bg-orange-500">
+                      {pendingRequestsCount > 9 ? '9+' : pendingRequestsCount}
                     </Badge>
                   )}
                 </>
