@@ -2,6 +2,21 @@ import type { NextRequest } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { requireAuth, hashPassword } from '@/lib/auth'
 
+export async function DELETE(_req: NextRequest, ctx: RouteContext<'/api/users/[id]'>) {
+  try {
+    const session = await requireAuth()
+    if (session.role !== 'ADMIN') return Response.json({ error: 'Forbidden' }, { status: 403 })
+    const { id } = await ctx.params
+    if (session.id === id) return Response.json({ error: 'Cannot delete your own account' }, { status: 400 })
+    await prisma.user.delete({ where: { id } })
+    return Response.json({ success: true })
+  } catch (err: unknown) {
+    if (err instanceof Error && err.message === 'Unauthorized')
+      return Response.json({ error: 'Unauthorized' }, { status: 401 })
+    return Response.json({ error: 'Internal server error' }, { status: 500 })
+  }
+}
+
 export async function PATCH(req: NextRequest, ctx: RouteContext<'/api/users/[id]'>) {
   try {
     const session = await requireAuth()
