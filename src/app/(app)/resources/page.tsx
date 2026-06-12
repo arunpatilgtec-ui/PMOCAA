@@ -1,14 +1,17 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { useAuthStore } from '@/store/auth'
+import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import { Progress } from '@/components/ui/progress'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { AlertTriangle, Users, Briefcase, Clock, Search } from 'lucide-react'
+import { AlertTriangle, Users, Briefcase, Clock, Search, ClipboardCheck, UserPlus } from 'lucide-react'
+import { AssignWorkDialog } from '@/components/assign-work-dialog'
 
 interface Resource {
   id: string; name: string; email: string; role: string
@@ -27,17 +30,25 @@ const ROLE_LABELS: Record<string, string> = {
 }
 
 export default function ResourcesPage() {
+  const { user } = useAuthStore()
   const [resources, setResources] = useState<Resource[]>([])
-  const [loading, setLoading] = useState(true)
-  const [search, setSearch] = useState('')
-  const [filter, setFilter] = useState<string | null>('ALL')
+  const [loading,   setLoading]   = useState(true)
+  const [search,    setSearch]    = useState('')
+  const [filter,    setFilter]    = useState<string | null>('ALL')
 
-  useEffect(() => {
+  // Direct assign dialog state
+  const [assignOpen,      setAssignOpen]      = useState(false)
+  const [assignTarget,    setAssignTarget]    = useState<{ id: string; name: string } | null>(null)
+
+  const canAssign = user && ['ADMIN', 'MANAGER', 'PLANNER'].includes(user.role)
+
+  const load = () =>
     fetch('/api/resources').then((r) => r.json()).then((d) => {
       setResources(Array.isArray(d) ? d : [])
       setLoading(false)
     })
-  }, [])
+
+  useEffect(() => { load() }, [])
 
   const filtered = resources.filter((r) => {
     const matchSearch = r.name.toLowerCase().includes(search.toLowerCase()) ||
@@ -50,51 +61,48 @@ export default function ResourcesPage() {
   })
 
   const overloaded = resources.filter((r) => r.isOverloaded).length
-  const available = resources.filter((r) => !r.isOverloaded && r.utilizationPct < 80).length
-  const avgUtil = resources.length
+  const available  = resources.filter((r) => !r.isOverloaded && r.utilizationPct < 80).length
+  const avgUtil    = resources.length
     ? Math.round(resources.reduce((s, r) => s + r.utilizationPct, 0) / resources.length)
     : 0
 
+  function openAssign(r: Resource) {
+    setAssignTarget({ id: r.id, name: r.name })
+    setAssignOpen(true)
+  }
+
   return (
     <div className="p-6 space-y-5">
-      <div>
-        <h1 className="text-2xl font-bold">Resource Planning</h1>
-        <p className="text-muted-foreground text-sm">{resources.length} team members</p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold">Resource Planning</h1>
+          <p className="text-muted-foreground text-sm">{resources.length} team members</p>
+        </div>
+        {canAssign && (
+          <Button onClick={() => { setAssignTarget(null); setAssignOpen(true) }} size="sm" className="bg-blue-600 hover:bg-blue-700">
+            <UserPlus className="mr-1.5 h-4 w-4" /> Assign Work
+          </Button>
+        )}
       </div>
 
       {/* Stats */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <Card>
           <CardContent className="p-4 flex items-center gap-3">
-            <div className="p-2 bg-red-50 rounded-lg">
-              <AlertTriangle className="h-5 w-5 text-red-600" />
-            </div>
-            <div>
-              <p className="text-2xl font-bold text-red-600">{overloaded}</p>
-              <p className="text-sm text-muted-foreground">Overloaded</p>
-            </div>
+            <div className="p-2 bg-red-50 rounded-lg"><AlertTriangle className="h-5 w-5 text-red-600" /></div>
+            <div><p className="text-2xl font-bold text-red-600">{overloaded}</p><p className="text-sm text-muted-foreground">Overloaded</p></div>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="p-4 flex items-center gap-3">
-            <div className="p-2 bg-green-50 rounded-lg">
-              <Users className="h-5 w-5 text-green-600" />
-            </div>
-            <div>
-              <p className="text-2xl font-bold text-green-600">{available}</p>
-              <p className="text-sm text-muted-foreground">Available</p>
-            </div>
+            <div className="p-2 bg-green-50 rounded-lg"><Users className="h-5 w-5 text-green-600" /></div>
+            <div><p className="text-2xl font-bold text-green-600">{available}</p><p className="text-sm text-muted-foreground">Available</p></div>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="p-4 flex items-center gap-3">
-            <div className="p-2 bg-blue-50 rounded-lg">
-              <Clock className="h-5 w-5 text-blue-600" />
-            </div>
-            <div>
-              <p className="text-2xl font-bold text-blue-600">{avgUtil}%</p>
-              <p className="text-sm text-muted-foreground">Avg Utilization</p>
-            </div>
+            <div className="p-2 bg-blue-50 rounded-lg"><Clock className="h-5 w-5 text-blue-600" /></div>
+            <div><p className="text-2xl font-bold text-blue-600">{avgUtil}%</p><p className="text-sm text-muted-foreground">Avg Utilization</p></div>
           </CardContent>
         </Card>
       </div>
@@ -106,9 +114,7 @@ export default function ResourcesPage() {
           <Input placeholder="Search resources..." className="pl-9" value={search} onChange={(e) => setSearch(e.target.value)} />
         </div>
         <Select value={filter} onValueChange={setFilter}>
-          <SelectTrigger className="w-40">
-            <SelectValue />
-          </SelectTrigger>
+          <SelectTrigger className="w-40"><SelectValue /></SelectTrigger>
           <SelectContent>
             <SelectItem value="ALL">All Resources</SelectItem>
             <SelectItem value="OVERLOADED">Overloaded</SelectItem>
@@ -169,11 +175,29 @@ export default function ResourcesPage() {
                     </div>
                   </div>
                 )}
+
+                {/* Assign Work button per card */}
+                {canAssign && (
+                  <Button size="sm" variant="outline" className="w-full h-7 text-xs"
+                    onClick={() => openAssign(r)}>
+                    <ClipboardCheck className="mr-1.5 h-3.5 w-3.5 text-blue-600" />
+                    Assign Work to {r.name.split(' ')[0]}
+                  </Button>
+                )}
               </CardContent>
             </Card>
           ))}
         </div>
       )}
+
+      {/* Direct Assign Work Dialog */}
+      <AssignWorkDialog
+        open={assignOpen}
+        onOpenChange={(v) => { setAssignOpen(v); if (!v) setAssignTarget(null) }}
+        prefillUserId={assignTarget?.id}
+        prefillName={assignTarget?.name}
+        onAssigned={load}
+      />
     </div>
   )
 }

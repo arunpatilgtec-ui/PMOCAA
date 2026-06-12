@@ -138,10 +138,11 @@ model Request {
   priority    Priority      @default(MEDIUM)
   type        ProjectType
   status      RequestStatus @default(SUBMITTED)
-  submitterId String
-  assigneeId  String?
-  projectId   String?       @unique
-  notes       String?
+  submitterId    String
+  assigneeId     String?
+  projectId      String?       @unique
+  notes          String?
+  estimatedHours Float?
   createdAt   DateTime      @default(now())
   updatedAt   DateTime      @updatedAt
 

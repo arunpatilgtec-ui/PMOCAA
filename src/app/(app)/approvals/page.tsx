@@ -17,8 +17,9 @@ import {
 } from '@/components/ui/dialog'
 import {
   CheckCircle2, XCircle, Clock, AlertTriangle, ChevronDown, ChevronUp,
-  ClipboardList, FolderPlus, ArrowRight,
+  ClipboardList, FolderPlus, ArrowRight, UserPlus,
 } from 'lucide-react'
+import { AssignWorkDialog } from '@/components/assign-work-dialog'
 
 // ── Schedule Change types ───────────────────────────────────────────────────
 interface ImpactItem { id: string; name: string; type: string; delayDays?: number; reason: string }
@@ -39,9 +40,12 @@ interface ScheduleChange {
 interface WorkRequest {
   id: string; title: string; description: string; priority: string
   type: string; status: string; notes?: string; createdAt: string
+  estimatedHours?: number
   submitter: { id: string; name: string }
+  assignee?: { id: string; name: string }
   project?: { id: string; name: string }
 }
+interface TeamMember { id: string; name: string; role: string; capacityPct: number; department?: string }
 
 const SEVERITY_COLORS: Record<string, string> = {
   LOW: 'text-green-600 bg-green-50', MEDIUM: 'text-blue-600 bg-blue-50',
@@ -83,6 +87,13 @@ export default function ApprovalsPage() {
   const [convEnd,      setConvEnd]      = useState('')
   const [convPriority, setConvPriority] = useState('MEDIUM')
 
+  // Assignment state
+  const [teamMembers,   setTeamMembers]   = useState<TeamMember[]>([])
+  const [assignDialogOpen, setAssignDialogOpen] = useState(false)
+  // Inline per-request assignment fields (keyed by requestId)
+  const [inlineAssign,  setInlineAssign]  = useState<Record<string, { assigneeId: string; estimatedHours: string }>>({})
+  const [savingAssign,  setSavingAssign]  = useState<string | null>(null)
+
   const canApprove = user && canApproveChanges(user.role)
 
   // ── Load schedule changes
@@ -115,6 +126,34 @@ export default function ApprovalsPage() {
 
   useEffect(() => { loadChanges() }, [scFilter])
   useEffect(() => { loadRequests() }, [wFilter])
+
+  // Load team members for assignee dropdowns
+  useEffect(() => {
+    if (!canApprove) return
+    fetch('/api/users')
+      .then(r => r.json())
+      .then(d => setTeamMembers(Array.isArray(d) ? d.filter((u: TeamMember & { isActive: boolean }) => u.isActive) : []))
+  }, [canApprove])
+
+  async function saveInlineAssign(reqId: string) {
+    const vals = inlineAssign[reqId]
+    if (!vals?.assigneeId && !vals?.estimatedHours) return
+    setSavingAssign(reqId)
+    try {
+      const body: Record<string, unknown> = {}
+      if (vals.assigneeId) body.assigneeId = vals.assigneeId
+      if (vals.estimatedHours) body.estimatedHours = parseFloat(vals.estimatedHours)
+      const res = await fetch(`/api/requests/${reqId}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      if (!res.ok) throw new Error((await res.json()).error)
+      toast.success('Assignment saved')
+      setInlineAssign(prev => { const n = { ...prev }; delete n[reqId]; return n })
+      loadRequests()
+    } catch (e: unknown) { toast.error(e instanceof Error ? e.message : 'Failed') }
+    finally { setSavingAssign(null) }
+  }
 
   // ── Schedule change actions
   async function handleDecision(approved: boolean) {
@@ -181,9 +220,16 @@ export default function ApprovalsPage() {
 
   return (
     <div className="p-6 space-y-5">
-      <div>
-        <h1 className="text-2xl font-bold">Approvals</h1>
-        <p className="text-muted-foreground text-sm">Review work requests and schedule changes</p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold">Approvals</h1>
+          <p className="text-muted-foreground text-sm">Review work requests and schedule changes</p>
+        </div>
+        {canApprove && (
+          <Button onClick={() => setAssignDialogOpen(true)} size="sm" className="bg-blue-600 hover:bg-blue-700">
+            <UserPlus className="mr-1.5 h-4 w-4" /> Assign Work
+          </Button>
+        )}
       </div>
 
       {/* Tab bar */}
@@ -241,9 +287,12 @@ export default function ApprovalsPage() {
             </div>
           ) : (
             <div className="space-y-3">
-              {wRequests.map((req) => (
+              {wRequests.map((req) => {
+                const ia = inlineAssign[req.id] ?? { assigneeId: req.assignee?.id ?? '', estimatedHours: req.estimatedHours?.toString() ?? '' }
+                const isDirty = ia.assigneeId !== (req.assignee?.id ?? '') || ia.estimatedHours !== (req.estimatedHours?.toString() ?? '')
+                return (
                 <Card key={req.id} className={req.status === 'REJECTED' ? 'opacity-60' : ''}>
-                  <CardContent className="p-4">
+                  <CardContent className="p-4 space-y-3">
                     <div className="flex items-start gap-3">
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
@@ -253,11 +302,17 @@ export default function ApprovalsPage() {
                           </span>
                           <Badge variant="outline" className="text-xs">{req.type}</Badge>
                           <Badge variant="secondary" className="text-xs">{req.priority}</Badge>
+                          {req.estimatedHours && (
+                            <Badge variant="outline" className="text-xs text-blue-600 border-blue-300">
+                              <Clock className="mr-1 h-3 w-3" />{req.estimatedHours}h
+                            </Badge>
+                          )}
                         </div>
                         <p className="text-sm text-muted-foreground mt-1 line-clamp-2">{req.description}</p>
                         <div className="flex items-center gap-3 mt-1.5 text-xs text-muted-foreground">
                           <span>By {req.submitter.name}</span>
                           <span>{format(new Date(req.createdAt), 'MMM d, yyyy')}</span>
+                          {req.assignee && <span className="text-green-600">→ {req.assignee.name}</span>}
                           {req.project && <a href={`/projects/${req.project.id}`} className="text-blue-600 hover:underline">→ {req.project.name}</a>}
                         </div>
                       </div>
@@ -296,9 +351,58 @@ export default function ApprovalsPage() {
                         </div>
                       )}
                     </div>
+
+                    {/* ── Inline assign + time estimate ── */}
+                    {canApprove && req.status !== 'CONVERTED' && req.status !== 'REJECTED' && (
+                      <div className="border-t pt-3 flex flex-wrap items-end gap-2">
+                        <div className="flex-1 min-w-40 space-y-1">
+                          <Label className="text-xs text-muted-foreground flex items-center gap-1">
+                            <UserPlus className="h-3 w-3" /> Assign to
+                          </Label>
+                          <Select
+                            value={ia.assigneeId || 'none'}
+                            onValueChange={(v) => {
+                              const s = v as string | null
+                              setInlineAssign(prev => ({ ...prev, [req.id]: { ...ia, assigneeId: (!s || s === 'none') ? '' : s } }))
+                            }}
+                          >
+                            <SelectTrigger className="h-7 text-xs"><SelectValue placeholder="Unassigned" /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="none">— Unassigned —</SelectItem>
+                              {teamMembers.map(m => (
+                                <SelectItem key={m.id} value={m.id}>{m.name}
+                                  {m.department ? ` · ${m.department}` : ''}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="w-28 space-y-1">
+                          <Label className="text-xs text-muted-foreground flex items-center gap-1">
+                            <Clock className="h-3 w-3" /> Est. Hours
+                          </Label>
+                          <Input className="h-7 text-xs" type="number" min="0" step="0.5" placeholder="e.g. 16"
+                            value={ia.estimatedHours}
+                            onChange={e => setInlineAssign(prev => ({ ...prev, [req.id]: { ...ia, estimatedHours: e.target.value } }))}
+                          />
+                        </div>
+                        {isDirty && (
+                          <Button size="sm" className="h-7 text-xs" disabled={savingAssign === req.id}
+                            onClick={() => saveInlineAssign(req.id)}>
+                            {savingAssign === req.id ? 'Saving…' : 'Save'}
+                          </Button>
+                        )}
+                        {!isDirty && req.assignee && (
+                          <p className="text-xs text-green-600">
+                            Assigned to {req.assignee.name}{req.estimatedHours ? ` · ${req.estimatedHours}h` : ''}
+                          </p>
+                        )}
+                      </div>
+                    )}
                   </CardContent>
                 </Card>
-              ))}
+                )
+              })}
             </div>
           )}
         </div>
@@ -491,6 +595,12 @@ export default function ApprovalsPage() {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* ── Direct Assign Work Dialog ── */}
+      <AssignWorkDialog
+        open={assignDialogOpen}
+        onOpenChange={setAssignDialogOpen}
+      />
     </div>
   )
 }

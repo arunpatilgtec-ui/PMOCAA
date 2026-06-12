@@ -12,8 +12,8 @@ export async function GET(req: NextRequest) {
       where: { ...(status ? { status: status as never } : {}) },
       include: {
         submitter: { select: { id: true, name: true, avatarUrl: true } },
-        assignee: { select: { id: true, name: true } },
-        project: { select: { id: true, name: true, status: true } },
+        assignee:  { select: { id: true, name: true, role: true } },
+        project:   { select: { id: true, name: true, status: true } },
       },
       orderBy: [{ createdAt: 'desc' }],
     })

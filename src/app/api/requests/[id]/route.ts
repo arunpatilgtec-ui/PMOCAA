@@ -67,8 +67,24 @@ export async function PATCH(req: NextRequest, ctx: RouteContext<'/api/requests/[
         ...(data.priority !== undefined && { priority: data.priority }),
         ...(data.assigneeId !== undefined && { assigneeId: data.assigneeId }),
         ...(data.notes !== undefined && { notes: data.notes }),
+        ...(data.estimatedHours !== undefined && { estimatedHours: data.estimatedHours ? parseFloat(data.estimatedHours) : null }),
       },
     })
+
+    // Notify newly assigned person
+    if (data.assigneeId && data.assigneeId !== session.id) {
+      const hours = data.estimatedHours ? ` · ${data.estimatedHours}h estimated` : ''
+      await prisma.notification.create({
+        data: {
+          userId: data.assigneeId,
+          senderId: session.id,
+          type: 'TASK_ASSIGNED',
+          title: 'Request Assigned to You',
+          message: `${session.name} assigned you to review the request: "${existing.title}"${hours}`,
+          actionUrl: '/approvals',
+        },
+      })
+    }
 
     // Notify submitter on key status changes
     if (data.status && existing.submitterId !== session.id) {
