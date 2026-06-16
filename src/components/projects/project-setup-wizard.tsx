@@ -9,10 +9,10 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select'
 import {
-  Loader2, X, Plus, ChevronRight, ChevronLeft, Wand2, Check, Calendar, Layers,
+  Loader2, X, Plus, ChevronRight, ChevronLeft, Wand2, Check, Calendar, Layers, AlertTriangle,
 } from 'lucide-react'
 import {
-  ALL_CATEGORIES, CATEGORY_TEMPLATES, CATEGORY_TYPES, CATEGORY_TYPE_LABELS, templateTotalDays,
+  ALL_CATEGORIES, CATEGORY_TEMPLATES, CATEGORY_TYPES, CATEGORY_TYPE_LABELS,
 } from '@/lib/project-templates'
 import { addWorkingDays } from '@/lib/date-utils'
 import { format } from 'date-fns'
@@ -29,45 +29,45 @@ export interface ProjectSetupWizardProps {
   projectType: string
   projectClassification?: string
   startDate: string
+  hasWorkstreams?: boolean
   onComplete: () => void
   onDismiss: () => void
 }
+
+const TOTAL_STEPS = 4
 
 export function ProjectSetupWizard({
   projectId,
   projectType,
   projectClassification,
   startDate,
+  hasWorkstreams = false,
   onComplete,
   onDismiss,
 }: ProjectSetupWizardProps) {
-  const isTeardown = projectType === 'TEARDOWN'
-  const totalSteps = isTeardown ? 4 : 3
-
   const [step, setStep] = useState(1)
   const [submitting, setSubmitting] = useState(false)
   const [users, setUsers] = useState<User[]>([])
 
-  // Teardown-specific
+  // Step 1
   const [category, setCategory] = useState('')
   const [productType, setProductType] = useState('')
-
-  // Non-teardown
-  const [endDate, setEndDate] = useState('')
-  const [priority, setPriority] = useState('MEDIUM')
-
-  // Common
+  // Step 2
   const [leadId, setLeadId] = useState('')
+  // Step 3
   const [links, setLinks] = useState<string[]>([''])
 
   useEffect(() => {
-    fetch('/api/users')
-      .then((r) => r.json())
-      .then((d) => setUsers(Array.isArray(d) ? d.filter((u: User) => u.isActive !== false) : []))
-      .catch(() => {})
+    async function fetchUsers() {
+      try {
+        const res = await fetch('/api/users')
+        const d = await res.json()
+        setUsers(Array.isArray(d) ? d.filter((u: User) => u.isActive !== false) : [])
+      } catch {}
+    }
+    fetchUsers()
   }, [])
 
-  // Client-side end-date preview from template
   const hasTemplate = !!(category && CATEGORY_TEMPLATES[category])
   let previewEndDate: Date | null = null
   if (hasTemplate && startDate) {
@@ -86,41 +86,28 @@ export function ProjectSetupWizard({
     ? CATEGORY_TEMPLATES[category].reduce((s, ws) => s + ws.tasks.length, 0)
     : 0
   const workstreamCount = hasTemplate ? CATEGORY_TEMPLATES[category].length : 0
-  const totalDays = hasTemplate ? templateTotalDays(category) : 0
 
   function canProceed() {
-    if (isTeardown) {
-      if (step === 1) return !!category
-      return true
-    } else {
-      if (step === 1) return !!endDate
-      return true
-    }
+    if (step === 1) return !!category
+    return true
   }
 
   async function handleSubmit() {
     setSubmitting(true)
     try {
-      const body: Record<string, unknown> = {
+      const body = {
+        category: category || null,
+        productType: productType || null,
         leadId: leadId || null,
         projectLinks: links.filter((l) => l.trim()),
       }
-
-      if (isTeardown) {
-        body.category = category || null
-        body.productType = productType || null
-      } else {
-        body.endDate = endDate
-        body.priority = priority
-      }
-
       const res = await fetch(`/api/projects/${projectId}/setup`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       })
       if (!res.ok) throw new Error((await res.json()).error || 'Setup failed')
-      toast.success(hasTemplate ? 'Schedule generated!' : 'Project setup saved!')
+      toast.success(hasTemplate ? 'Schedule generated! Check the Timeline tab.' : 'Project setup saved!')
       onComplete()
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Setup failed')
@@ -135,21 +122,21 @@ export function ProjectSetupWizard({
     setLinks(next)
   }
 
-  const isLastStep = step === totalSteps
+  const isLastStep = step === TOTAL_STEPS
+  const projectLabel = projectType === 'TEARDOWN' ? 'Teardown' : (projectClassification || 'Project')
 
   return (
     <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-      <div className="bg-background rounded-xl border shadow-xl w-full max-w-lg">
+      <div className="bg-background rounded-xl border shadow-xl w-full max-w-lg flex flex-col max-h-[90vh]">
         {/* Header */}
-        <div className="flex items-center justify-between p-5 border-b">
+        <div className="flex items-center justify-between p-5 border-b shrink-0">
           <div>
             <div className="flex items-center gap-2">
               <Wand2 className="h-4.5 w-4.5 text-blue-600" />
               <h2 className="text-base font-semibold">Project Setup</h2>
             </div>
             <p className="text-xs text-muted-foreground mt-0.5">
-              Step {step} of {totalSteps}
-              {isTeardown ? ' — Teardown configuration' : ` — ${projectClassification || 'Project'} configuration`}
+              Step {step} of {TOTAL_STEPS} — {projectLabel} configuration
             </p>
           </div>
           <Button variant="ghost" size="icon" className="h-8 w-8" onClick={onDismiss}>
@@ -158,29 +145,31 @@ export function ProjectSetupWizard({
         </div>
 
         {/* Progress bar */}
-        <div className="h-1 bg-muted">
+        <div className="h-1 bg-muted shrink-0">
           <div
             className="h-full bg-blue-600 transition-all duration-300"
-            style={{ width: `${(step / totalSteps) * 100}%` }}
+            style={{ width: `${(step / TOTAL_STEPS) * 100}%` }}
           />
         </div>
 
         {/* Body */}
-        <div className="p-5 space-y-4 min-h-[220px]">
+        <div className="p-5 space-y-4 overflow-y-auto flex-1">
 
-          {/* ── Teardown steps ── */}
-
-          {isTeardown && step === 1 && (
+          {/* ── Step 1: Category + Product Type ── */}
+          {step === 1 && (
             <>
               <div>
                 <h3 className="text-sm font-semibold">Product Category</h3>
                 <p className="text-xs text-muted-foreground mt-0.5">
-                  Select the product category to auto-generate the teardown schedule.
+                  Select the product category to auto-generate the project schedule.
                 </p>
               </div>
               <div className="space-y-1.5">
                 <Label>Category *</Label>
-                <Select value={category} onValueChange={(v) => { const s = v as string | null; if (s) { setCategory(s); setProductType('') } }}>
+                <Select
+                  value={category}
+                  onValueChange={(v) => { const s = v as string | null; if (s) { setCategory(s); setProductType('') } }}
+                >
                   <SelectTrigger><SelectValue placeholder="Select category…" /></SelectTrigger>
                   <SelectContent>
                     {ALL_CATEGORIES.filter((c) => c !== 'Other').map((c) => (
@@ -193,7 +182,10 @@ export function ProjectSetupWizard({
               {productTypeOptions.length > 0 && (
                 <div className="space-y-1.5">
                   <Label>Product Type</Label>
-                  <Select value={productType} onValueChange={(v) => { const s = v as string | null; if (s) setProductType(s) }}>
+                  <Select
+                    value={productType}
+                    onValueChange={(v) => { const s = v as string | null; if (s) setProductType(s) }}
+                  >
                     <SelectTrigger><SelectValue placeholder="Select type…" /></SelectTrigger>
                     <SelectContent>
                       {productTypeOptions.map((t) => (
@@ -209,7 +201,7 @@ export function ProjectSetupWizard({
                     <Calendar className="h-3.5 w-3.5" /> Auto-calculated timeline
                   </p>
                   <p className="text-xs text-blue-700 dark:text-blue-400">
-                    {workstreamCount} phases · {taskCount} tasks · {totalDays} working days
+                    {workstreamCount} phases · {taskCount} tasks
                   </p>
                   <p className="text-xs text-blue-700 dark:text-blue-400">
                     Est. completion: <strong>{format(previewEndDate, 'MMM d, yyyy')}</strong>
@@ -218,13 +210,14 @@ export function ProjectSetupWizard({
               )}
               {category === 'Other' && (
                 <p className="text-xs text-muted-foreground bg-muted/50 rounded px-3 py-2">
-                  No template available for "Other". You can add workstreams and tasks manually after setup.
+                  No template for &quot;Other&quot;. You can add workstreams and tasks manually after setup.
                 </p>
               )}
             </>
           )}
 
-          {isTeardown && step === 2 && (
+          {/* ── Step 2: Project Lead ── */}
+          {step === 2 && (
             <>
               <div>
                 <h3 className="text-sm font-semibold">Assign Project Lead</h3>
@@ -234,7 +227,10 @@ export function ProjectSetupWizard({
               </div>
               <div className="space-y-1.5">
                 <Label>Project Lead</Label>
-                <Select value={leadId || 'none'} onValueChange={(v) => { const s = v as string | null; setLeadId(!s || s === 'none' ? '' : s) }}>
+                <Select
+                  value={leadId || 'none'}
+                  onValueChange={(v) => { const s = v as string | null; setLeadId(!s || s === 'none' ? '' : s) }}
+                >
                   <SelectTrigger><SelectValue placeholder="No lead" /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="none">No lead assigned</SelectItem>
@@ -249,12 +245,13 @@ export function ProjectSetupWizard({
             </>
           )}
 
-          {isTeardown && step === 3 && (
+          {/* ── Step 3: Links ── */}
+          {step === 3 && (
             <>
               <div>
                 <h3 className="text-sm font-semibold">Project Links</h3>
                 <p className="text-xs text-muted-foreground mt-0.5">
-                  Attach Google Drive folders, datasheets, or reference documents.
+                  Attach Google Drive folders, datasheets, or reference documents (optional).
                 </p>
               </div>
               <div className="space-y-2">
@@ -277,21 +274,37 @@ export function ProjectSetupWizard({
                     )}
                   </div>
                 ))}
-                <Button variant="outline" size="sm" className="h-7 text-xs w-full" onClick={() => setLinks([...links, ''])}>
+                <Button
+                  variant="outline" size="sm"
+                  className="h-7 text-xs w-full"
+                  onClick={() => setLinks([...links, ''])}
+                >
                   <Plus className="h-3 w-3 mr-1" /> Add Another Link
                 </Button>
               </div>
             </>
           )}
 
-          {isTeardown && step === 4 && (
+          {/* ── Step 4: Review + Generate ── */}
+          {step === 4 && (
             <>
               <div>
-                <h3 className="text-sm font-semibold">Review & Generate</h3>
+                <h3 className="text-sm font-semibold">Review &amp; Generate</h3>
                 <p className="text-xs text-muted-foreground mt-0.5">
                   Confirm the details below, then generate the project schedule.
                 </p>
               </div>
+
+              {hasWorkstreams && (
+                <div className="bg-orange-50 dark:bg-orange-950/20 border border-orange-200 dark:border-orange-800 rounded-md px-3 py-2 flex gap-2 items-start">
+                  <AlertTriangle className="h-4 w-4 text-orange-600 shrink-0 mt-0.5" />
+                  <p className="text-xs text-orange-800 dark:text-orange-300">
+                    <strong>Existing schedule will be replaced.</strong>{' '}
+                    Current workstreams and tasks will be deleted and regenerated from the template.
+                  </p>
+                </div>
+              )}
+
               <div className="bg-muted/40 rounded-lg p-3 space-y-2 text-sm">
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Category</span>
@@ -305,7 +318,7 @@ export function ProjectSetupWizard({
                 )}
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Project Lead</span>
-                  <span className="font-medium">{users.find((u) => u.id === leadId)?.name || '—'}</span>
+                  <span className="font-medium">{users.find((u) => u.id === leadId)?.name || 'None'}</span>
                 </div>
                 {previewEndDate && (
                   <div className="flex justify-between">
@@ -316,7 +329,7 @@ export function ProjectSetupWizard({
                 {hasTemplate && (
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">Schedule</span>
-                    <span className="font-medium">{workstreamCount} phases, {taskCount} tasks</span>
+                    <span className="font-medium">{workstreamCount} phases · {taskCount} tasks</span>
                   </div>
                 )}
                 {links.filter((l) => l.trim()).length > 0 && (
@@ -326,126 +339,51 @@ export function ProjectSetupWizard({
                   </div>
                 )}
               </div>
+
               {hasTemplate && (
-                <div className="space-y-1">
-                  <p className="text-xs font-medium text-muted-foreground">Phases to be created:</p>
-                  <div className="space-y-0.5">
+                <div className="space-y-1.5">
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                    Phases &amp; Tasks
+                  </p>
+                  <div className="space-y-1 max-h-56 overflow-y-auto pr-1">
                     {CATEGORY_TEMPLATES[category].map((ws) => (
-                      <div key={ws.name} className="flex items-center justify-between text-xs py-1 px-2 rounded bg-muted/40">
-                        <span className="flex items-center gap-1.5">
-                          <Layers className="h-3 w-3 text-muted-foreground" /> {ws.name}
-                        </span>
-                        <span className="text-muted-foreground">{ws.tasks.length} tasks</span>
+                      <div key={ws.name} className="rounded-md border border-border/60 overflow-hidden">
+                        <div className="flex items-center justify-between text-xs py-1.5 px-2.5 bg-muted/30">
+                          <span className="flex items-center gap-1.5 font-semibold">
+                            <Layers className="h-3 w-3 text-blue-500" /> {ws.name}
+                          </span>
+                          <span className="text-muted-foreground">{ws.tasks.length} tasks</span>
+                        </div>
+                        <div className="px-2.5 py-1 space-y-0.5">
+                          {ws.tasks.map((t) => (
+                            <p key={t.name} className="text-xs text-muted-foreground py-0.5 flex items-center justify-between">
+                              <span>· {t.name}</span>
+                              <span className="text-blue-500/70 text-[10px] shrink-0 ml-2">{t.durationDays}d</span>
+                            </p>
+                          ))}
+                        </div>
                       </div>
                     ))}
                   </div>
                 </div>
               )}
-            </>
-          )}
 
-          {/* ── Non-teardown steps ── */}
-
-          {!isTeardown && step === 1 && (
-            <>
-              <div>
-                <h3 className="text-sm font-semibold">Project Details</h3>
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  Set the target completion date and priority for this {projectClassification || 'project'}.
+              {!hasTemplate && category === 'Other' && (
+                <p className="text-xs text-muted-foreground bg-muted/50 rounded px-3 py-2">
+                  No auto-schedule for &quot;Other&quot; category. Workstreams and tasks can be added manually from the Timeline tab.
                 </p>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1.5">
-                  <Label>End Date *</Label>
-                  <Input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
-                </div>
-                <div className="space-y-1.5">
-                  <Label>Priority</Label>
-                  <Select value={priority} onValueChange={(v) => { const s = v as string | null; if (s) setPriority(s) }}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="LOW">Low</SelectItem>
-                      <SelectItem value="MEDIUM">Medium</SelectItem>
-                      <SelectItem value="HIGH">High</SelectItem>
-                      <SelectItem value="CRITICAL">Critical</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-            </>
-          )}
-
-          {!isTeardown && step === 2 && (
-            <>
-              <div>
-                <h3 className="text-sm font-semibold">Assign Project Lead</h3>
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  The lead manages task updates and submits plans for approval.
-                </p>
-              </div>
-              <div className="space-y-1.5">
-                <Label>Project Lead</Label>
-                <Select value={leadId || 'none'} onValueChange={(v) => { const s = v as string | null; setLeadId(!s || s === 'none' ? '' : s) }}>
-                  <SelectTrigger><SelectValue placeholder="No lead" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">No lead assigned</SelectItem>
-                    {users.map((u) => (
-                      <SelectItem key={u.id} value={u.id}>
-                        {u.name} <span className="text-muted-foreground text-xs">({u.role.replace(/_/g, ' ')})</span>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </>
-          )}
-
-          {!isTeardown && step === 3 && (
-            <>
-              <div>
-                <h3 className="text-sm font-semibold">Project Links</h3>
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  Optionally attach reference links, then save the project setup.
-                </p>
-              </div>
-              <div className="space-y-2">
-                {links.map((link, i) => (
-                  <div key={i} className="flex gap-2 items-center">
-                    <Input
-                      placeholder="https://drive.google.com/…"
-                      value={link}
-                      onChange={(e) => updateLink(i, e.target.value)}
-                      className="h-8 text-sm"
-                    />
-                    {links.length > 1 && (
-                      <Button
-                        variant="ghost" size="icon"
-                        className="h-8 w-8 shrink-0 text-muted-foreground hover:text-red-500"
-                        onClick={() => setLinks(links.filter((_, j) => j !== i))}
-                      >
-                        <X className="h-3.5 w-3.5" />
-                      </Button>
-                    )}
-                  </div>
-                ))}
-                <Button variant="outline" size="sm" className="h-7 text-xs w-full" onClick={() => setLinks([...links, ''])}>
-                  <Plus className="h-3 w-3 mr-1" /> Add Another Link
-                </Button>
-              </div>
+              )}
             </>
           )}
         </div>
 
         {/* Footer */}
-        <div className="flex items-center justify-between p-5 border-t bg-muted/20">
+        <div className="flex items-center justify-between p-5 border-t bg-muted/20 shrink-0">
           <Button
             variant="ghost" size="sm"
             onClick={step === 1 ? onDismiss : () => setStep((s) => s - 1)}
           >
-            {step === 1
-              ? 'Skip for now'
-              : <><ChevronLeft className="h-4 w-4 mr-1" />Back</>
-            }
+            {step === 1 ? 'Skip for now' : <><ChevronLeft className="h-4 w-4 mr-1" />Back</>}
           </Button>
 
           {!isLastStep ? (
@@ -460,13 +398,15 @@ export function ProjectSetupWizard({
           ) : (
             <Button
               size="sm"
-              disabled={submitting || !canProceed()}
+              disabled={submitting}
               onClick={handleSubmit}
               className="bg-blue-600 hover:bg-blue-700"
             >
               {submitting
                 ? <><Loader2 className="h-4 w-4 mr-1.5 animate-spin" />Generating…</>
-                : <><Check className="h-4 w-4 mr-1.5" />{isTeardown && hasTemplate ? 'Generate Schedule' : 'Save Setup'}</>
+                : <><Check className="h-4 w-4 mr-1.5" />
+                    {hasWorkstreams ? 'Replace Schedule' : (hasTemplate ? 'Generate Schedule' : 'Save Setup')}
+                  </>
               }
             </Button>
           )}

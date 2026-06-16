@@ -24,8 +24,11 @@ import {
   ArrowLeft, Users, Layers, GitBranch,
   MoreHorizontal, Edit2, Trash2, ShieldCheck, ShieldOff, CalendarRange,
   UserPlus, MessageSquarePlus, AlertTriangle, Siren, Send, CheckCheck,
-  Link as LinkIcon, Plus, X,
+  Link as LinkIcon, Plus, X, Wand2,
 } from 'lucide-react'
+import {
+  ALL_CATEGORIES, CATEGORY_TYPES, CATEGORY_TYPE_LABELS,
+} from '@/lib/project-templates'
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
@@ -81,6 +84,7 @@ export default function ProjectDetailPage() {
   const [project, setProject] = useState<Project | null>(null)
   const [loading, setLoading] = useState(true)
   const [wizardOpen, setWizardOpen] = useState(false)
+  const [activeTab, setActiveTab] = useState('workstreams')
 
   // Edit project dialog
   const [editProjectOpen, setEditProjectOpen] = useState(false)
@@ -88,6 +92,8 @@ export default function ProjectDetailPage() {
   const [editStatus, setEditStatus] = useState('')
   const [editPriority, setEditPriority] = useState('')
   const [editLeadId, setEditLeadId] = useState<string>('')
+  const [editCategory, setEditCategory] = useState('')
+  const [editProductType, setEditProductType] = useState('')
   const [editUsers, setEditUsers] = useState<Array<{ id: string; name: string; role: string }>>([])
   const [editSaving, setEditSaving] = useState(false)
 
@@ -186,8 +192,9 @@ export default function ProjectDetailPage() {
     setEditStatus(project.status)
     setEditPriority(project.priority)
     setEditLeadId(project.leadId || '')
+    setEditCategory(project.category || '')
+    setEditProductType(project.productType || '')
     setEditProjectOpen(true)
-    // Fetch users for the lead selector (PLANNER only)
     if (user && isPlanner(user.role) && editUsers.length === 0) {
       fetch('/api/users')
         .then((r) => r.json())
@@ -199,9 +206,10 @@ export default function ProjectDetailPage() {
     setEditSaving(true)
     try {
       const body: Record<string, unknown> = { name: editName, status: editStatus, priority: editPriority }
-      // Only PLANNER can change the lead
       if (user && isPlanner(user.role)) {
         body.leadId = editLeadId || null
+        body.category = editCategory || null
+        body.productType = editProductType || null
       }
       const res = await fetch(`/api/projects/${id}`, {
         method: 'PATCH',
@@ -441,6 +449,9 @@ export default function ProjectDetailPage() {
               <DropdownMenuItem onClick={openEditProject}>
                 <Edit2 className="mr-2 h-4 w-4" /> Edit Project
               </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setWizardOpen(true)}>
+                <Wand2 className="mr-2 h-4 w-4 text-blue-600" /> Reconfigure Schedule
+              </DropdownMenuItem>
               {userIsPlanner && (
                 <>
                   <DropdownMenuItem onClick={openEditTimeline}>
@@ -591,7 +602,7 @@ export default function ProjectDetailPage() {
       )}
 
       {/* Tabs */}
-      <Tabs defaultValue="workstreams">
+      <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList>
           <TabsTrigger value="workstreams">
             <Layers className="mr-1.5 h-3.5 w-3.5" /> Timeline
@@ -716,32 +727,65 @@ export default function ProjectDetailPage() {
                 </Select>
               </div>
             </div>
-            {/* Project Lead selector — PLANNER only */}
+            {/* Planner-only fields: Lead, Category, Product Type */}
             {user && isPlanner(user.role) && (
-              <div className="space-y-1.5">
-                <Label>Project Lead</Label>
-                <Select
-                  value={editLeadId || 'none'}
-                  onValueChange={(v) => { const s = v as string | null; setEditLeadId(!s || s === 'none' ? '' : s) }}
-                >
-                  <SelectTrigger className="w-full">
-                    <SelectValue placeholder="No lead assigned">
-                      {editUsers.find((u) => u.id === editLeadId)?.name || null}
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">No lead</SelectItem>
-                    {editUsers.map((u) => (
-                      <SelectItem key={u.id} value={u.id}>
-                        {u.name} ({u.role.replace('_', ' ')})
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <p className="text-xs text-muted-foreground">
-                  Assign someone as Project Lead — they will see this project in their dashboard
-                </p>
-              </div>
+              <>
+                <div className="space-y-1.5">
+                  <Label>Project Lead</Label>
+                  <Select
+                    value={editLeadId || 'none'}
+                    onValueChange={(v) => { const s = v as string | null; setEditLeadId(!s || s === 'none' ? '' : s) }}
+                  >
+                    <SelectTrigger className="w-full">
+                      <SelectValue placeholder="No lead assigned">
+                        {editUsers.find((u) => u.id === editLeadId)?.name || null}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">No lead</SelectItem>
+                      {editUsers.map((u) => (
+                        <SelectItem key={u.id} value={u.id}>
+                          {u.name} ({u.role.replace('_', ' ')})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Category</Label>
+                  <Select
+                    value={editCategory || 'none'}
+                    onValueChange={(v) => { const s = v as string | null; setEditCategory(!s || s === 'none' ? '' : s); setEditProductType('') }}
+                  >
+                    <SelectTrigger><SelectValue placeholder="Not set" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">Not set</SelectItem>
+                      {ALL_CATEGORIES.map((c) => (
+                        <SelectItem key={c} value={c}>{c}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                {editCategory && editCategory !== 'Other' && (CATEGORY_TYPES[editCategory] ?? []).length > 0 && (
+                  <div className="space-y-1.5">
+                    <Label>Product Type</Label>
+                    <Select
+                      value={editProductType || 'none'}
+                      onValueChange={(v) => { const s = v as string | null; setEditProductType(!s || s === 'none' ? '' : s) }}
+                    >
+                      <SelectTrigger><SelectValue placeholder="Not set" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">Not set</SelectItem>
+                        {(CATEGORY_TYPES[editCategory] ?? []).map((t) => (
+                          <SelectItem key={t} value={t}>
+                            {(CATEGORY_TYPE_LABELS[editCategory] ?? {})[t] || t}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+              </>
             )}
             <div className="flex justify-end gap-2 pt-1">
               <Button variant="outline" onClick={() => setEditProjectOpen(false)}>Cancel</Button>
@@ -958,9 +1002,11 @@ export default function ProjectDetailPage() {
           projectType={project.type}
           projectClassification={project.projectClassification}
           startDate={project.startDate.slice(0, 10)}
+          hasWorkstreams={(project.workstreams?.length ?? 0) > 0}
           onComplete={() => {
             setWizardOpen(false)
             localStorage.setItem(`wizard-dismissed-${project.id}`, '1')
+            setActiveTab('workstreams')
             load()
           }}
           onDismiss={() => {

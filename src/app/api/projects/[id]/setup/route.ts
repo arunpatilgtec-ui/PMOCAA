@@ -41,13 +41,15 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         where: { id },
         data: {
           endDate,
-          ...(data.priority ? { priority: data.priority } : {}),
           ...(data.leadId !== undefined ? { leadId: data.leadId || null } : {}),
           ...(data.category !== undefined ? { category: data.category || null } : {}),
           ...(data.productType !== undefined ? { productType: data.productType || null } : {}),
           ...(data.projectLinks !== undefined ? { projectLinks: data.projectLinks } : {}),
         },
       })
+
+      // Clear existing workstreams (cascades to tasks) before regenerating
+      await tx.workstream.deleteMany({ where: { projectId: id } })
 
       if (wsTemplates) {
         let cursor = new Date(startDate)
