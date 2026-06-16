@@ -17,13 +17,12 @@ import {
   TrendingUp,
   AlertCircle,
   ChevronRight,
-  Milestone,
   ListTodo,
   PlayCircle,
   Eye,
 } from 'lucide-react'
 import Link from 'next/link'
-import { format, isPast, isWithinInterval, addDays } from 'date-fns'
+import { format, isPast } from 'date-fns'
 
 interface Project {
   id: string
@@ -37,7 +36,6 @@ interface Project {
   workstreams: Array<{
     tasks: Array<{ id: string; status: string; priority: string }>
   }>
-  milestones: Array<{ id: string; name: string; dueDate: string; completed: boolean }>
   _count: { workstreams: number }
 }
 
@@ -133,20 +131,6 @@ export default function DashboardPage() {
   const activeProjects = projects.filter((p) => p.status === 'ACTIVE')
   const delayedProjects = projects.filter(isProjectDelayed)
   const overloadedResources = resources.filter((r) => r.isOverloaded)
-
-  const upcomingMilestones = projects
-    .flatMap((p) =>
-      p.milestones
-        .filter((m) => !m.completed)
-        .map((m) => ({ ...m, projectName: p.name, projectId: p.id }))
-    )
-    .filter((m) =>
-      isWithinInterval(new Date(m.dueDate), {
-        start: new Date(),
-        end: addDays(new Date(), 14),
-      })
-    )
-    .sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime())
 
   const activeTasks = myTasks.filter((t) => !['COMPLETED', 'CANCELLED'].includes(t.status))
   const inProgressTasks = myTasks.filter((t) => t.status === 'IN_PROGRESS')
@@ -393,29 +377,29 @@ export default function DashboardPage() {
 
         {/* Right column */}
         <div className="space-y-4">
-          {/* Upcoming Milestones */}
+          {/* Delayed Projects */}
           <Card>
             <CardHeader className="pb-3">
               <CardTitle className="text-base font-semibold flex items-center gap-2">
-                <Milestone className="h-4 w-4 text-blue-500" />
-                Upcoming Milestones
+                <AlertTriangle className="h-4 w-4 text-red-500" />
+                Delayed Projects
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-2">
-              {upcomingMilestones.length === 0 ? (
+              {delayedProjects.length === 0 ? (
                 <p className="text-muted-foreground text-sm text-center py-4">
-                  No milestones in the next 14 days
+                  No delayed projects
                 </p>
               ) : (
-                upcomingMilestones.slice(0, 5).map((m) => (
-                  <Link key={m.id} href={`/projects/${m.projectId}`}>
+                delayedProjects.slice(0, 5).map((p) => (
+                  <Link key={p.id} href={`/projects/${p.id}`}>
                     <div className="flex items-start gap-2 p-2 rounded-md hover:bg-muted/50 transition-colors">
-                      <CheckCircle2 className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
+                      <AlertCircle className="h-4 w-4 text-red-500 mt-0.5 shrink-0" />
                       <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium truncate">{m.name}</p>
-                        <p className="text-xs text-muted-foreground truncate">{m.projectName}</p>
-                        <p className="text-xs text-orange-600">
-                          Due {format(new Date(m.dueDate), 'MMM d')}
+                        <p className="text-sm font-medium truncate">{p.name}</p>
+                        <p className="text-xs text-muted-foreground">{p.type} · {p.status.replace('_', ' ')}</p>
+                        <p className="text-xs text-red-600">
+                          End {format(new Date(p.endDate), 'MMM d, yyyy')}
                         </p>
                       </div>
                     </div>
