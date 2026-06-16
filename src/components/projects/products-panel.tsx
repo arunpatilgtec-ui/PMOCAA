@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useAuthStore } from '@/store/auth'
 import { toast } from 'sonner'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -12,26 +12,32 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select'
-import { Plus, Pencil, Trash2, ChevronDown, ChevronRight, X, User2 } from 'lucide-react'
+import {
+  Plus, Pencil, Trash2, ChevronDown, ChevronRight, X, User2, History,
+  ClipboardList, Users,
+} from 'lucide-react'
+import { format } from 'date-fns'
 
 interface ProductUser { id: string; name: string; role: string }
 
 interface ProductResource {
-  id: string
-  userId: string
-  subsystems: string[]
-  costingTypes: string[]
+  id: string; userId: string; subsystems: string[]; costingTypes: string[]
   user: ProductUser
 }
 
 interface Product {
-  id: string
-  brand: string
-  modelNo: string
-  leadId?: string
-  order: number
+  id: string; brand: string; modelNo: string; leadId?: string; resourceCount?: number; order: number
   lead?: ProductUser
   resources: ProductResource[]
+}
+
+interface HistoryEntry {
+  id: string
+  action: string
+  data: Record<string, unknown>
+  changedAt: string
+  changedBy: { id: string; name: string; role: string }
+  targetUser?: { id: string; name: string } | null
 }
 
 interface ProjectInfo {
@@ -42,31 +48,126 @@ interface ProjectInfo {
   allocations: Array<{ userId: string; user: ProductUser }>
 }
 
-const REFRIGERATION_SUBSYSTEMS = [
-  'Cabinet', 'Compressor', 'Evaporator', 'Condenser', 'Liner',
-  'Door', 'Harness', 'PCB', 'Foam', 'Thermoformed Parts', 'Motors', 'Lighting',
-]
-
-const COSTING_TYPES = ['MECHANICAL', 'HARNESS', 'PCB']
-const COSTING_LABELS: Record<string, string> = {
-  MECHANICAL: 'Mechanical', HARNESS: 'Harness', PCB: 'PCB',
-}
-
-function getSubsystemsForCategory(category?: string): string[] {
-  if (category === 'Refrigeration') return REFRIGERATION_SUBSYSTEMS
-  return []
-}
-
 interface ProductFormState {
   brand: string
   modelNo: string
   leadId: string
+  resourceCount: string
   resources: Array<{ userId: string; subsystems: string[]; costingTypes: string[] }>
 }
 
-function emptyForm(): ProductFormState {
-  return { brand: '', modelNo: '', leadId: '', resources: [] }
+// ── Subsystem sets per category ──────────────────────────────────────────────
+
+const SUBSYSTEMS_BY_CATEGORY: Record<string, string[]> = {
+  Refrigeration: [
+    'Cabinet', 'Compressor', 'Evaporator', 'Condenser', 'Liner',
+    'Door', 'Harness', 'PCB', 'Foam', 'Thermoformed Parts', 'Motors', 'Lighting',
+  ],
+  Cooking: ['Chassis', 'Cooktop', 'Accessories', 'Cavity', 'Controls', 'Drawer', 'UI Console', 'Door'],
+  Dishwasher: ['Racks', 'Water Delivery', 'Door & Aesthetics', 'Control System', 'Wash System', 'Tub & Chassis'],
+  Laundry: ['Aesthetics', 'Structures', 'Performance Enablers', 'SES'],
+  KASA: ['Steam & Milk Frother', 'Aesthetics & Cabinet', 'Brewing System', 'Grinding System', 'Heating System', 'Controls'],
+  'Food Disposer': ['Accessories', 'Aesthetic', 'Structure', 'Water & Heating', 'Control'],
 }
+
+const COSTING_TYPES = ['MECHANICAL', 'HARNESS', 'PCB'] as const
+const COSTING_LABELS: Record<string, string> = { MECHANICAL: 'Mechanical', HARNESS: 'Harness', PCB: 'PCB' }
+
+function emptyForm(): ProductFormState {
+  return { brand: '', modelNo: '', leadId: '', resourceCount: '', resources: [] }
+}
+
+// ── History action description ────────────────────────────────────────────────
+
+function describeAction(entry: HistoryEntry): { label: string; detail: string } {
+  const d = entry.data
+  const target = entry.targetUser?.name ?? (d.userName as string) ?? '?'
+
+  switch (entry.action) {
+    case 'PRODUCT_CREATED':
+      return { label: 'Product created', detail: `${d.brand || ''} ${d.modelNo || ''}`.trim() }
+    case 'RESOURCE_ADDED': {
+      const subs = (d.subsystems as string[]) ?? []
+      const cts = (d.costingTypes as string[]) ?? []
+      const parts = []
+      if (subs.length) parts.push(subs.join(', '))
+      if (cts.length) parts.push(`Costing: ${cts.map((c) => COSTING_LABELS[c] || c).join(', ')}`)
+      return { label: `${target} assigned`, detail: parts.join(' · ') || 'No subsystems' }
+    }
+    case 'RESOURCE_REMOVED':
+      return { label: `${target} removed`, detail: '' }
+    case 'SUBSYSTEMS_CHANGED': {
+      const from = (d.from as string[]) ?? []
+      const to = (d.to as string[]) ?? []
+      return {
+        label: `${target} — subsystems updated`,
+        detail: `${from.join(', ') || 'none'} → ${to.join(', ') || 'none'}`,
+      }
+    }
+    case 'COSTING_CHANGED': {
+      const from = ((d.from as string[]) ?? []).map((c) => COSTING_LABELS[c] || c)
+      const to = ((d.to as string[]) ?? []).map((c) => COSTING_LABELS[c] || c)
+      return {
+        label: `${target} — costing updated`,
+        detail: `${from.join(', ') || 'none'} → ${to.join(', ') || 'none'}`,
+      }
+    }
+    case 'LEAD_ASSIGNED':
+      return { label: 'Lead assigned', detail: d.toName as string ?? '—' }
+    case 'LEAD_CHANGED': {
+      const from = (d.fromName as string) || 'None'
+      const to = (d.toName as string) || 'None'
+      return { label: 'Lead changed', detail: `${from} → ${to}` }
+    }
+    default:
+      return { label: entry.action.replace(/_/g, ' '), detail: '' }
+  }
+}
+
+// ── ProductHistoryPanel ───────────────────────────────────────────────────────
+
+function ProductHistoryPanel({ productId, projectId }: { productId: string; projectId: string }) {
+  const [history, setHistory] = useState<HistoryEntry[]>([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    const fetchHistory = async () => {
+      try {
+        const res = await fetch(`/api/projects/${projectId}/products/${productId}/history`)
+        const data = await res.json()
+        setHistory(Array.isArray(data) ? data : [])
+      } catch { /* silent */ } finally {
+        setLoading(false)
+      }
+    }
+    fetchHistory()
+  }, [productId, projectId])
+
+  if (loading) return <p className="text-xs text-muted-foreground py-2">Loading history…</p>
+  if (history.length === 0) return <p className="text-xs text-muted-foreground py-2">No changes recorded yet.</p>
+
+  return (
+    <div className="space-y-2">
+      {history.map((entry) => {
+        const { label, detail } = describeAction(entry)
+        return (
+          <div key={entry.id} className="flex gap-3 text-xs">
+            <div className="w-[90px] shrink-0 text-muted-foreground tabular-nums">
+              {format(new Date(entry.changedAt), 'MMM d, HH:mm')}
+            </div>
+            <div className="flex-1 min-w-0">
+              <span className="font-medium">{label}</span>
+              {detail && <span className="text-muted-foreground ml-1">— {detail}</span>}
+              <div className="text-muted-foreground/70">by {entry.changedBy.name}</div>
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+// ── Main panel ────────────────────────────────────────────────────────────────
 
 export function ProductsPanel({
   project,
@@ -79,18 +180,30 @@ export function ProductsPanel({
   const [products, setProducts] = useState<Product[]>([])
   const [loading, setLoading] = useState(true)
   const [expandedId, setExpandedId] = useState<string | null>(null)
+  const [expandedTab, setExpandedTab] = useState<Record<string, 'resources' | 'history'>>({})
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editingProduct, setEditingProduct] = useState<Product | null>(null)
   const [form, setForm] = useState<ProductFormState>(emptyForm())
   const [saving, setSaving] = useState(false)
   const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [deleteConfirm, setDeleteConfirm] = useState<Product | null>(null)
 
   const canManage =
     ['ADMIN', 'PLANNER', 'MANAGER'].includes(user?.role || '') ||
     (user?.role === 'PROJECT_LEAD' && user.id === project.leadId)
 
-  const subsystems = getSubsystemsForCategory(project.category)
+  const subsystems = SUBSYSTEMS_BY_CATEGORY[project.category ?? ''] ?? []
   const allocatedUsers = project.allocations.map((a) => a.user)
+
+  // Also fetch all project users for lead selection (not just allocated)
+  const [allUsers, setAllUsers] = useState<ProductUser[]>([])
+  useEffect(() => {
+    if (!canManage) return
+    fetch('/api/users')
+      .then((r) => r.json())
+      .then((d) => setAllUsers(Array.isArray(d) ? d.filter((u: ProductUser & { isActive?: boolean }) => u.isActive !== false) : []))
+      .catch(() => {})
+  }, [canManage])
 
   const load = useCallback(async () => {
     try {
@@ -103,17 +216,8 @@ export function ProductsPanel({
   }, [project.id])
 
   useEffect(() => {
-    const fetchProducts = async () => {
-      try {
-        const res = await fetch(`/api/projects/${project.id}/products`)
-        const data = await res.json()
-        setProducts(Array.isArray(data) ? data : [])
-      } catch { /* silent */ } finally {
-        setLoading(false)
-      }
-    }
-    fetchProducts()
-  }, [project.id])
+    load()
+  }, [load])
 
   function openAdd() {
     setEditingProduct(null)
@@ -121,12 +225,14 @@ export function ProductsPanel({
     setDialogOpen(true)
   }
 
-  function openEdit(p: Product) {
+  function openEdit(p: Product, e: React.MouseEvent) {
+    e.stopPropagation()
     setEditingProduct(p)
     setForm({
       brand: p.brand,
       modelNo: p.modelNo,
       leadId: p.leadId || '',
+      resourceCount: p.resourceCount ? String(p.resourceCount) : '',
       resources: p.resources.map((r) => ({
         userId: r.userId,
         subsystems: [...r.subsystems],
@@ -144,6 +250,7 @@ export function ProductsPanel({
         brand: form.brand.trim(),
         modelNo: form.modelNo.trim(),
         leadId: form.leadId || null,
+        resourceCount: form.resourceCount ? parseInt(form.resourceCount, 10) : null,
         resources: form.resources.filter((r) => r.userId),
       }
       let res: Response
@@ -170,17 +277,17 @@ export function ProductsPanel({
     } finally { setSaving(false) }
   }
 
-  async function deleteProduct(id: string) {
-    setDeletingId(id)
+  async function confirmDelete(p: Product) {
+    setDeletingId(p.id)
     try {
-      const res = await fetch(`/api/projects/${project.id}/products/${id}`, { method: 'DELETE' })
+      const res = await fetch(`/api/projects/${project.id}/products/${p.id}`, { method: 'DELETE' })
       if (!res.ok) throw new Error()
       toast.success('Product removed')
       load()
       onRefresh()
     } catch {
       toast.error('Failed to remove product')
-    } finally { setDeletingId(null) }
+    } finally { setDeletingId(null); setDeleteConfirm(null) }
   }
 
   function addResource() {
@@ -199,31 +306,33 @@ export function ProductsPanel({
     })
   }
 
-  function toggleSubsystem(resourceIdx: number, sub: string) {
+  function toggleSubsystem(ri: number, sub: string) {
     setForm((f) => {
       const next = [...f.resources]
-      const subs = next[resourceIdx].subsystems
-      next[resourceIdx] = {
-        ...next[resourceIdx],
-        subsystems: subs.includes(sub) ? subs.filter((s) => s !== sub) : [...subs, sub],
-      }
+      const subs = next[ri].subsystems
+      next[ri] = { ...next[ri], subsystems: subs.includes(sub) ? subs.filter((s) => s !== sub) : [...subs, sub] }
       return { ...f, resources: next }
     })
   }
 
-  function toggleCostingType(resourceIdx: number, ct: string) {
+  function toggleCostingType(ri: number, ct: string) {
     setForm((f) => {
       const next = [...f.resources]
-      const cts = next[resourceIdx].costingTypes
-      next[resourceIdx] = {
-        ...next[resourceIdx],
-        costingTypes: cts.includes(ct) ? cts.filter((c) => c !== ct) : [...cts, ct],
-      }
+      const cts = next[ri].costingTypes
+      next[ri] = { ...next[ri], costingTypes: cts.includes(ct) ? cts.filter((c) => c !== ct) : [...cts, ct] }
       return { ...f, resources: next }
     })
   }
 
-  const selectedLeadName = allocatedUsers.find((u) => u.id === form.leadId)?.name
+  function getTab(productId: string) {
+    return expandedTab[productId] ?? 'resources'
+  }
+
+  function setTab(productId: string, tab: 'resources' | 'history') {
+    setExpandedTab((t) => ({ ...t, [productId]: tab }))
+  }
+
+  const leadOptions = allUsers.length > 0 ? allUsers : allocatedUsers
 
   if (loading) {
     return <div className="text-sm text-muted-foreground p-4">Loading products…</div>
@@ -231,13 +340,12 @@ export function ProductsPanel({
 
   return (
     <div className="space-y-4">
+      {/* Header */}
       <div className="flex items-center justify-between">
-        <div>
-          <p className="text-sm text-muted-foreground">
-            {products.length} product{products.length !== 1 ? 's' : ''}
-            {project.numberOfProducts ? ` · ${project.numberOfProducts} planned` : ''}
-          </p>
-        </div>
+        <p className="text-sm text-muted-foreground">
+          {products.length} product{products.length !== 1 ? 's' : ''}
+          {project.numberOfProducts ? ` of ${project.numberOfProducts} planned` : ''}
+        </p>
         {canManage && (
           <Button size="sm" onClick={openAdd}>
             <Plus className="mr-1.5 h-3.5 w-3.5" /> Add Product
@@ -245,10 +353,11 @@ export function ProductsPanel({
         )}
       </div>
 
+      {/* Empty state */}
       {products.length === 0 ? (
-        <div className="text-center py-12 text-muted-foreground">
+        <div className="text-center py-14 text-muted-foreground border-2 border-dashed rounded-lg">
           <User2 className="h-10 w-10 mx-auto mb-3 opacity-30" />
-          <p className="text-sm">No products added yet</p>
+          <p className="text-sm font-medium">No products added yet</p>
           {canManage && (
             <Button variant="link" className="mt-1 text-xs" onClick={openAdd}>Add the first product</Button>
           )}
@@ -257,36 +366,51 @@ export function ProductsPanel({
         <div className="space-y-3">
           {products.map((p) => {
             const isOpen = expandedId === p.id
+            const tab = getTab(p.id)
+            const assignedCount = p.resources.length
+            const plannedCount = p.resourceCount
+
             return (
-              <Card key={p.id}>
+              <Card key={p.id} className="overflow-hidden">
+                {/* Card header row */}
                 <CardHeader
                   className="p-3 cursor-pointer hover:bg-muted/30 transition-colors"
                   onClick={() => setExpandedId(isOpen ? null : p.id)}
                 >
                   <div className="flex items-center gap-3">
-                    {isOpen ? <ChevronDown className="h-4 w-4 text-muted-foreground shrink-0" /> : <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" />}
+                    {isOpen
+                      ? <ChevronDown className="h-4 w-4 text-muted-foreground shrink-0" />
+                      : <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" />
+                    }
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
-                        <CardTitle className="text-sm font-semibold">{p.brand}</CardTitle>
-                        {p.modelNo && <span className="text-xs text-muted-foreground">· {p.modelNo}</span>}
-                        {p.lead && (
-                          <Badge variant="outline" className="text-xs">Lead: {p.lead.name}</Badge>
+                        <span className="text-sm font-semibold">{p.brand}</span>
+                        {p.modelNo && (
+                          <span className="text-xs text-muted-foreground font-mono">{p.modelNo}</span>
                         )}
-                        <Badge variant="secondary" className="text-xs">
-                          {p.resources.length} person{p.resources.length !== 1 ? 's' : ''}
+                      </div>
+                      <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                        {p.lead && (
+                          <Badge variant="outline" className="text-xs h-5">
+                            Lead: {p.lead.name}
+                          </Badge>
+                        )}
+                        <Badge variant="secondary" className="text-xs h-5">
+                          {assignedCount}{plannedCount ? `/${plannedCount}` : ''} resource{assignedCount !== 1 ? 's' : ''}
                         </Badge>
                       </div>
                     </div>
                     {canManage && (
                       <div className="flex gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
-                        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEdit(p)}>
+                        <Button variant="ghost" size="icon" className="h-7 w-7" title="Edit product" onClick={(e) => openEdit(p, e)}>
                           <Pencil className="h-3.5 w-3.5" />
                         </Button>
                         <Button
                           variant="ghost" size="icon"
                           className="h-7 w-7 text-red-500 hover:text-red-600 hover:bg-red-50"
-                          onClick={() => deleteProduct(p.id)}
+                          title="Remove product"
                           disabled={deletingId === p.id}
+                          onClick={(e) => { e.stopPropagation(); setDeleteConfirm(p) }}
                         >
                           <Trash2 className="h-3.5 w-3.5" />
                         </Button>
@@ -295,41 +419,95 @@ export function ProductsPanel({
                   </div>
                 </CardHeader>
 
+                {/* Expanded content */}
                 {isOpen && (
-                  <CardContent className="p-3 pt-0 border-t border-border/50">
-                    {p.resources.length === 0 ? (
-                      <p className="text-xs text-muted-foreground py-2">No resources assigned</p>
-                    ) : (
-                      <div className="space-y-2 mt-2">
-                        {p.resources.map((r) => (
-                          <div key={r.id} className="rounded-md border p-2 text-sm">
-                            <div className="flex items-center gap-2 mb-1">
-                              <div className="h-5 w-5 rounded-full bg-blue-100 flex items-center justify-center text-[10px] font-bold text-blue-700 shrink-0">
-                                {r.user.name.split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase()}
-                              </div>
-                              <span className="font-medium text-sm">{r.user.name}</span>
-                              <span className="text-xs text-muted-foreground capitalize">· {r.user.role.replace(/_/g, ' ').toLowerCase()}</span>
+                  <CardContent className="p-0 border-t border-border/50">
+                    {/* Tab switcher */}
+                    <div className="flex gap-0 border-b border-border/50">
+                      <button
+                        className={`flex items-center gap-1.5 px-4 py-2 text-xs font-medium transition-colors border-b-2 -mb-px ${
+                          tab === 'resources'
+                            ? 'border-primary text-foreground'
+                            : 'border-transparent text-muted-foreground hover:text-foreground'
+                        }`}
+                        onClick={() => setTab(p.id, 'resources')}
+                      >
+                        <Users className="h-3.5 w-3.5" /> Resources
+                      </button>
+                      <button
+                        className={`flex items-center gap-1.5 px-4 py-2 text-xs font-medium transition-colors border-b-2 -mb-px ${
+                          tab === 'history'
+                            ? 'border-primary text-foreground'
+                            : 'border-transparent text-muted-foreground hover:text-foreground'
+                        }`}
+                        onClick={() => setTab(p.id, 'history')}
+                      >
+                        <History className="h-3.5 w-3.5" /> History
+                      </button>
+                    </div>
+
+                    <div className="p-3">
+                      {/* Resources tab */}
+                      {tab === 'resources' && (
+                        <>
+                          {p.resources.length === 0 ? (
+                            <div className="text-xs text-muted-foreground py-3 text-center">
+                              No resources assigned
+                              {plannedCount && assignedCount < plannedCount && (
+                                <span> ({plannedCount - assignedCount} slot{plannedCount - assignedCount !== 1 ? 's' : ''} open)</span>
+                              )}
                             </div>
-                            {r.subsystems.length > 0 && (
-                              <div className="flex flex-wrap gap-1 mt-1">
-                                <span className="text-xs text-muted-foreground mr-1">Teardown:</span>
-                                {r.subsystems.map((s) => (
-                                  <span key={s} className="text-xs px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-200">{s}</span>
-                                ))}
-                              </div>
-                            )}
-                            {r.costingTypes.length > 0 && (
-                              <div className="flex flex-wrap gap-1 mt-1">
-                                <span className="text-xs text-muted-foreground mr-1">Costing:</span>
-                                {r.costingTypes.map((c) => (
-                                  <span key={c} className="text-xs px-1.5 py-0.5 rounded bg-orange-50 text-orange-700 border border-orange-200">{COSTING_LABELS[c] || c}</span>
-                                ))}
-                              </div>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    )}
+                          ) : (
+                            <div className="space-y-2">
+                              {p.resources.map((r) => (
+                                <div key={r.id} className="rounded-md border p-2.5">
+                                  <div className="flex items-center gap-2 mb-1.5">
+                                    <div className="h-6 w-6 rounded-full bg-blue-100 dark:bg-blue-900 flex items-center justify-center text-[10px] font-bold text-blue-700 dark:text-blue-300 shrink-0">
+                                      {r.user.name.split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase()}
+                                    </div>
+                                    <div>
+                                      <span className="text-sm font-medium">{r.user.name}</span>
+                                      <span className="text-xs text-muted-foreground ml-1.5 capitalize">
+                                        {r.user.role.replace(/_/g, ' ').toLowerCase()}
+                                      </span>
+                                    </div>
+                                  </div>
+                                  {r.subsystems.length > 0 && (
+                                    <div className="flex flex-wrap gap-1 mt-1">
+                                      <span className="text-xs text-muted-foreground mr-0.5">Teardown:</span>
+                                      {r.subsystems.map((s) => (
+                                        <span key={s} className="text-xs px-1.5 py-0.5 rounded bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800">{s}</span>
+                                      ))}
+                                    </div>
+                                  )}
+                                  {r.costingTypes.length > 0 && (
+                                    <div className="flex flex-wrap gap-1 mt-1">
+                                      <span className="text-xs text-muted-foreground mr-0.5">Costing:</span>
+                                      {r.costingTypes.map((c) => (
+                                        <span key={c} className="text-xs px-1.5 py-0.5 rounded bg-orange-50 dark:bg-orange-950/40 text-orange-700 dark:text-orange-300 border border-orange-200 dark:border-orange-800">{COSTING_LABELS[c] || c}</span>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                          {canManage && (
+                            <Button
+                              variant="outline" size="sm" className="h-7 text-xs mt-3 w-full"
+                              onClick={(e) => openEdit(p, e)}
+                            >
+                              <Pencil className="h-3 w-3 mr-1" /> Edit / Reassign Resources
+                            </Button>
+                          )}
+                        </>
+                      )}
+
+                      {/* History tab */}
+                      {tab === 'history' && (
+                        <ProductHistoryPanel productId={p.id} projectId={project.id} />
+                      )}
+                    </div>
                   </CardContent>
                 )}
               </Card>
@@ -338,13 +516,17 @@ export function ProductsPanel({
         </div>
       )}
 
-      {/* Add / Edit Dialog */}
+      {/* ── Add / Edit Dialog ── */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>{editingProduct ? 'Edit Product' : 'Add Product'}</DialogTitle>
+            <DialogTitle className="flex items-center gap-2">
+              <ClipboardList className="h-5 w-5" />
+              {editingProduct ? 'Edit Product' : 'Add Product'}
+            </DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
+            {/* Basic fields */}
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <Label>Brand *</Label>
@@ -352,10 +534,11 @@ export function ProductsPanel({
                   placeholder="e.g. Samsung"
                   value={form.brand}
                   onChange={(e) => setForm((f) => ({ ...f, brand: e.target.value }))}
+                  autoFocus
                 />
               </div>
               <div className="space-y-1.5">
-                <Label>Model No.</Label>
+                <Label>Model Number</Label>
                 <Input
                   placeholder="e.g. RS27T5200SR"
                   value={form.modelNo}
@@ -364,47 +547,62 @@ export function ProductsPanel({
               </div>
             </div>
 
-            <div className="space-y-1.5">
-              <Label>Product Lead</Label>
-              <Select
-                value={form.leadId || 'none'}
-                onValueChange={(v) => setForm((f) => ({ ...f, leadId: !v || v === 'none' ? '' : v }))}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select lead...">{selectedLeadName || null}</SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">No lead</SelectItem>
-                  {allocatedUsers.map((u) => (
-                    <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label>Product Lead</Label>
+                <Select
+                  value={form.leadId || 'none'}
+                  onValueChange={(v) => { const s = v as string | null; setForm((f) => ({ ...f, leadId: !s || s === 'none' ? '' : s })) }}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="No lead">
+                      {leadOptions.find((u) => u.id === form.leadId)?.name || null}
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">No lead</SelectItem>
+                    {leadOptions.map((u) => (
+                      <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label>Planned Resources</Label>
+                <Input
+                  type="number" min="0" placeholder="e.g. 3"
+                  value={form.resourceCount}
+                  onChange={(e) => setForm((f) => ({ ...f, resourceCount: e.target.value }))}
+                />
+              </div>
             </div>
 
             {/* Resources */}
             <div className="space-y-2">
               <div className="flex items-center justify-between">
-                <Label>Team Members on this Product</Label>
+                <Label>Assigned Resources</Label>
                 <Button type="button" variant="ghost" size="sm" className="h-6 text-xs" onClick={addResource}>
                   <Plus className="h-3 w-3 mr-1" /> Add Person
                 </Button>
               </div>
+
               {form.resources.length === 0 && (
-                <p className="text-xs text-muted-foreground">No team members assigned to this product.</p>
+                <p className="text-xs text-muted-foreground">No resources assigned yet.</p>
               )}
+
               {form.resources.map((r, i) => {
                 const personName = allocatedUsers.find((u) => u.id === r.userId)?.name
                 return (
-                  <div key={i} className="rounded-md border p-3 space-y-3">
+                  <div key={i} className="rounded-md border p-3 space-y-3 bg-muted/20">
+                    {/* Person selector */}
                     <div className="flex items-center gap-2">
                       <div className="flex-1">
                         <Select
                           value={r.userId || 'none'}
-                          onValueChange={(v) => setResourceUser(i, !v || v === 'none' ? '' : v)}
+                          onValueChange={(v) => { const s = v as string | null; setResourceUser(i, !s || s === 'none' ? '' : s) }}
                         >
                           <SelectTrigger className="h-8 text-sm">
-                            <SelectValue placeholder="Select person...">{personName || null}</SelectValue>
+                            <SelectValue placeholder="Select person…">{personName || null}</SelectValue>
                           </SelectTrigger>
                           <SelectContent>
                             <SelectItem value="none">Select person…</SelectItem>
@@ -414,22 +612,25 @@ export function ProductsPanel({
                           </SelectContent>
                         </Select>
                       </div>
-                      <Button type="button" variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-red-500" onClick={() => removeResource(i)}>
+                      <Button
+                        type="button" variant="ghost" size="icon"
+                        className="h-8 w-8 text-muted-foreground hover:text-red-500 shrink-0"
+                        onClick={() => removeResource(i)}
+                      >
                         <X className="h-3.5 w-3.5" />
                       </Button>
                     </div>
 
-                    {/* Subsystem assignment (for teardown) */}
+                    {/* Subsystem assignment */}
                     {subsystems.length > 0 && (
                       <div className="space-y-1.5">
                         <Label className="text-xs text-muted-foreground">Teardown Subsystems</Label>
                         <div className="flex flex-wrap gap-1.5">
                           {subsystems.map((sub) => (
                             <button
-                              key={sub}
-                              type="button"
+                              key={sub} type="button"
                               onClick={() => toggleSubsystem(i, sub)}
-                              className={`text-xs px-2 py-1 rounded border transition-colors ${
+                              className={`text-xs px-2 py-0.5 rounded border transition-colors ${
                                 r.subsystems.includes(sub)
                                   ? 'bg-blue-600 text-white border-blue-600'
                                   : 'border-border hover:border-blue-400 text-muted-foreground hover:text-foreground'
@@ -448,8 +649,7 @@ export function ProductsPanel({
                       <div className="flex gap-2">
                         {COSTING_TYPES.map((ct) => (
                           <button
-                            key={ct}
-                            type="button"
+                            key={ct} type="button"
                             onClick={() => toggleCostingType(i, ct)}
                             className={`text-xs px-2.5 py-1 rounded border transition-colors ${
                               r.costingTypes.includes(ct)
@@ -473,6 +673,28 @@ export function ProductsPanel({
                 {saving ? 'Saving…' : editingProduct ? 'Save Changes' : 'Add Product'}
               </Button>
             </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Delete Confirmation ── */}
+      <Dialog open={!!deleteConfirm} onOpenChange={(v) => { if (!v) setDeleteConfirm(null) }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="text-red-600">Remove Product</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            Remove <strong>{deleteConfirm?.brand} {deleteConfirm?.modelNo}</strong> and all its resource assignments? This cannot be undone.
+          </p>
+          <div className="flex justify-end gap-2 pt-2">
+            <Button variant="outline" onClick={() => setDeleteConfirm(null)}>Cancel</Button>
+            <Button
+              variant="destructive"
+              disabled={!!deletingId}
+              onClick={() => deleteConfirm && confirmDelete(deleteConfirm)}
+            >
+              {deletingId ? 'Removing…' : 'Remove Product'}
+            </Button>
           </div>
         </DialogContent>
       </Dialog>

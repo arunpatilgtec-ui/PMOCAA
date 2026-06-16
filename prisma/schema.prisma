@@ -131,11 +131,13 @@ model User {
   allocations           ResourceAllocation[]
   documents             Document[]         @relation("DocumentUploader")
   sessions              Session[]
-  ledProducts           Product[]          @relation("ProductLead")
-  productResources      ProductResource[]  @relation("ProductResourceUser")
-  taskOwnerChangesBy    TaskOwnerHistory[] @relation("TaskOwnerChangeBy")
-  taskOwnerChangesFrom  TaskOwnerHistory[] @relation("TaskOwnerChangeFrom")
-  taskOwnerChangesTo    TaskOwnerHistory[] @relation("TaskOwnerChangeTo")
+  ledProducts              Product[]          @relation("ProductLead")
+  productResources         ProductResource[]  @relation("ProductResourceUser")
+  taskOwnerChangesBy       TaskOwnerHistory[] @relation("TaskOwnerChangeBy")
+  taskOwnerChangesFrom     TaskOwnerHistory[] @relation("TaskOwnerChangeFrom")
+  taskOwnerChangesTo       TaskOwnerHistory[] @relation("TaskOwnerChangeTo")
+  productHistoryChanges    ProductHistory[]   @relation("ProductHistoryChanger")
+  productHistoryTargeted   ProductHistory[]   @relation("ProductHistoryTarget")
 
   @@map("users")
 }
@@ -407,20 +409,38 @@ model Document {
 }
 
 model Product {
-  id        String   @id @default(cuid())
-  projectId String
-  brand     String
-  modelNo   String
-  leadId    String?
-  order     Int      @default(0)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id            String   @id @default(cuid())
+  projectId     String
+  brand         String
+  modelNo       String
+  leadId        String?
+  resourceCount Int?
+  order         Int      @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 
   project   Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
   lead      User?            @relation("ProductLead", fields: [leadId], references: [id], onDelete: SetNull)
   resources ProductResource[]
+  history   ProductHistory[]
 
   @@map("products")
+}
+
+model ProductHistory {
+  id           String   @id @default(cuid())
+  productId    String
+  action       String
+  targetUserId String?
+  data         Json     @default("{}")
+  changedById  String
+  changedAt    DateTime @default(now())
+
+  product    Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  changedBy  User    @relation("ProductHistoryChanger", fields: [changedById], references: [id], onDelete: Cascade)
+  targetUser User?   @relation("ProductHistoryTarget", fields: [targetUserId], references: [id], onDelete: SetNull)
+
+  @@map("product_history")
 }
 
 model ProductResource {
