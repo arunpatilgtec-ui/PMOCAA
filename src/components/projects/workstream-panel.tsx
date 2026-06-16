@@ -14,7 +14,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select'
 import {
-  Plus, ChevronDown, ChevronRight, ChevronUp, History,
+  Plus, ChevronDown, ChevronRight, ChevronUp, History, Lock,
 } from 'lucide-react'
 import { format } from 'date-fns'
 import { CreateTaskDialog } from './create-task-dialog'
@@ -51,14 +51,14 @@ interface Project {
   workstreams: Workstream[]
 }
 
-const TASK_STATUS_COLORS: Record<string, string> = {
-  BACKLOG: 'bg-slate-100 text-slate-600',
-  PLANNED: 'bg-blue-100 text-blue-700',
-  IN_PROGRESS: 'bg-yellow-100 text-yellow-700',
-  REVIEW: 'bg-purple-100 text-purple-700',
-  REWORK: 'bg-orange-100 text-orange-700',
-  COMPLETED: 'bg-green-100 text-green-700',
-  CANCELLED: 'bg-red-100 text-red-700',
+const STATUS_COLORS: Record<string, string> = {
+  BACKLOG: 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400',
+  PLANNED: 'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300',
+  IN_PROGRESS: 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900 dark:text-yellow-300',
+  REVIEW: 'bg-purple-100 text-purple-700 dark:bg-purple-900 dark:text-purple-300',
+  REWORK: 'bg-orange-100 text-orange-700 dark:bg-orange-900 dark:text-orange-300',
+  COMPLETED: 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300',
+  CANCELLED: 'bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300',
 }
 
 const PRIORITY_DOT: Record<string, string> = {
@@ -70,6 +70,16 @@ const PRIORITY_DOT: Record<string, string> = {
 
 const TASK_STATUSES = ['BACKLOG', 'PLANNED', 'IN_PROGRESS', 'REVIEW', 'REWORK', 'COMPLETED', 'CANCELLED']
 
+function DateRange({ start, end, muted }: { start?: string; end?: string; muted?: boolean }) {
+  if (!start && !end) return null
+  const fmt = (d: string) => format(new Date(d), 'MMM d')
+  return (
+    <span className={`text-xs font-medium tabular-nums ${muted ? 'text-muted-foreground' : 'text-foreground'}`}>
+      {start ? fmt(start) : '?'} – {end ? fmt(end) : '?'}
+    </span>
+  )
+}
+
 export function WorkstreamPanel({ project, onRefresh }: { project: Project; onRefresh: () => void }) {
   const { user } = useAuthStore()
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
@@ -79,8 +89,6 @@ export function WorkstreamPanel({ project, onRefresh }: { project: Project; onRe
   const [createTaskWsId, setCreateTaskWsId] = useState<string | null>(null)
   const [ownerHistory, setOwnerHistory] = useState<Record<string, OwnerHistoryEntry[]>>({})
   const [showHistory, setShowHistory] = useState<Record<string, boolean>>({})
-
-  // Per-task editing state
   const [taskEdits, setTaskEdits] = useState<Record<string, Partial<Task>>>({})
   const [savingTask, setSavingTask] = useState<string | null>(null)
 
@@ -109,7 +117,6 @@ export function WorkstreamPanel({ project, onRefresh }: { project: Project; onRe
   const canEdit =
     (user && canManageProjects(user.role)) ||
     (user?.role === 'PROJECT_LEAD' && user.id === project.leadId && project.planStatus !== 'APPROVED')
-
   const canEditDates = user && ['ADMIN', 'MANAGER', 'PLANNER'].includes(user.role)
   const isProjectLead = user?.role === 'PROJECT_LEAD' && user.id === project.leadId
   const canAssignTasks = canEdit || (isProjectLead && project.planStatus !== 'APPROVED')
@@ -128,21 +135,17 @@ export function WorkstreamPanel({ project, onRefresh }: { project: Project; onRe
     if (!edits || Object.keys(edits).length === 0) return
     setSavingTask(task.id)
     try {
-      const body: Record<string, unknown> = {}
-      for (const [k, v] of Object.entries(edits)) {
-        body[k] = v
-      }
       const res = await fetch(`/api/tasks/${task.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
+        body: JSON.stringify(edits),
       })
       if (!res.ok) throw new Error()
-      toast.success('Task updated')
+      toast.success('Task saved')
       setTaskEdits((p) => ({ ...p, [task.id]: {} }))
       onRefresh()
     } catch {
-      toast.error('Failed to update task')
+      toast.error('Failed to save task')
     } finally { setSavingTask(null) }
   }
 
@@ -193,14 +196,15 @@ export function WorkstreamPanel({ project, onRefresh }: { project: Project; onRe
               onClick={() => toggle(ws.id)}
             >
               <div className="flex items-center gap-2">
-                {isOpen ? <ChevronDown className="h-4 w-4 text-muted-foreground" /> : <ChevronRight className="h-4 w-4 text-muted-foreground" />}
+                {isOpen
+                  ? <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                  : <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                }
                 <CardTitle className="text-sm font-semibold flex-1">{ws.name}</CardTitle>
                 {ws.lead && (
                   <span className="text-xs text-muted-foreground hidden sm:block">Lead: {ws.lead.name}</span>
                 )}
-                <Badge variant="secondary" className="text-xs">
-                  {done}/{ws.tasks.length}
-                </Badge>
+                <Badge variant="secondary" className="text-xs">{done}/{ws.tasks.length}</Badge>
                 <div className="w-20">
                   <Progress value={progress} className="h-1.5" />
                 </div>
@@ -220,39 +224,43 @@ export function WorkstreamPanel({ project, onRefresh }: { project: Project; onRe
                         !['COMPLETED', 'CANCELLED'].includes(task.status)
                       const isTaskExpanded = expandedTask === task.id
                       const pct = task.pctComplete ?? 0
+                      const hasEdits = Object.keys(taskEdits[task.id] ?? {}).length > 0
 
                       return (
-                        <div key={task.id} className="border-b border-border last:border-0">
-                          {/* Task row */}
+                        <div key={task.id}>
+                          {/* ── Task row ── */}
                           <div
                             className="flex items-center gap-3 px-4 py-2.5 hover:bg-muted/30 transition-colors cursor-pointer"
                             onClick={() => toggleTask(task.id)}
                           >
                             <div className={`h-2 w-2 rounded-full shrink-0 ${PRIORITY_DOT[task.priority]}`} />
+
                             <div className="flex-1 min-w-0">
-                              <div className="flex items-center gap-2 flex-wrap">
-                                <span className="text-sm font-medium truncate">{task.name}</span>
-                                <span className={`text-xs px-1.5 py-0.5 rounded shrink-0 ${TASK_STATUS_COLORS[task.status]}`}>
-                                  {task.status.replace(/_/g, ' ')}
-                                </span>
-                                {isOverdue && (
-                                  <span className="text-xs px-1.5 py-0.5 rounded shrink-0 bg-red-100 text-red-700 font-medium">
-                                    Delayed
-                                  </span>
-                                )}
-                                {pct > 0 && pct < 100 && (
-                                  <span className="text-xs text-muted-foreground">{pct}%</span>
-                                )}
-                              </div>
-                              {(task.startDate || task.endDate) && (
-                                <p className="text-xs text-muted-foreground mt-0.5">
-                                  {task.startDate && format(new Date(task.startDate), 'MMM d')}
-                                  {task.endDate && ` – ${format(new Date(task.endDate), 'MMM d')}`}
-                                  {task.estimatedHours ? ` · ${task.estimatedHours}h est.` : ''}
-                                </p>
+                              <span className="text-sm font-medium truncate block">{task.name}</span>
+                            </div>
+
+                            {/* Date range — prominent */}
+                            <div className="hidden sm:flex items-center shrink-0">
+                              {task.startDate || task.endDate
+                                ? <DateRange start={task.startDate} end={task.endDate} />
+                                : <span className="text-xs text-muted-foreground/50">No dates</span>
+                              }
+                            </div>
+
+                            {/* Status + overdue */}
+                            <div className="flex items-center gap-1 shrink-0">
+                              <span className={`text-xs px-1.5 py-0.5 rounded ${STATUS_COLORS[task.status]}`}>
+                                {task.status.replace(/_/g, ' ')}
+                              </span>
+                              {isOverdue && (
+                                <span className="text-xs px-1.5 py-0.5 rounded bg-red-100 text-red-700 font-medium">Late</span>
+                              )}
+                              {pct > 0 && pct < 100 && (
+                                <span className="text-xs text-muted-foreground">{pct}%</span>
                               )}
                             </div>
-                            {/* Avatar (not clickable in expanded row opener area) */}
+
+                            {/* Avatar / assign */}
                             <div onClick={(e) => e.stopPropagation()}>
                               {canAssignTasks ? (
                                 <Select
@@ -283,16 +291,18 @@ export function WorkstreamPanel({ project, onRefresh }: { project: Project; onRe
                                 </Avatar>
                               ) : null}
                             </div>
+
                             {isTaskExpanded
                               ? <ChevronUp className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
                               : <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
                             }
                           </div>
 
-                          {/* Expanded task detail */}
+                          {/* ── Expanded task edit ── */}
                           {isTaskExpanded && (
-                            <div className="bg-muted/20 px-4 pb-3 pt-2 space-y-2.5 border-t border-border/50">
-                              {/* Row 1: Status + % Complete */}
+                            <div className="bg-muted/20 px-4 pb-3 pt-3 space-y-3 border-t border-border/50">
+
+                              {/* Status row */}
                               <div className="grid grid-cols-3 gap-2">
                                 <div className="col-span-2 space-y-1">
                                   <Label className="text-xs text-muted-foreground">Status</Label>
@@ -311,8 +321,7 @@ export function WorkstreamPanel({ project, onRefresh }: { project: Project; onRe
                                 <div className="space-y-1">
                                   <Label className="text-xs text-muted-foreground">% Done</Label>
                                   <Input
-                                    type="number"
-                                    min={0} max={100}
+                                    type="number" min={0} max={100}
                                     value={getEdit(task, 'pctComplete') as number ?? 0}
                                     onChange={(e) => setEdit(task.id, 'pctComplete', Number(e.target.value))}
                                     className="h-7 text-xs"
@@ -320,86 +329,91 @@ export function WorkstreamPanel({ project, onRefresh }: { project: Project; onRe
                                 </div>
                               </div>
 
-                              {/* Row 2: Scheduled dates (2 cols) + Actual dates (2 cols) */}
-                              <div className="grid grid-cols-4 gap-2">
-                                <div className="space-y-1">
-                                  <Label className="text-xs text-muted-foreground">
-                                    Sched. Start{!canEditDates && <span className="text-muted-foreground/60"> 🔒</span>}
-                                  </Label>
-                                  <Input
-                                    type="date"
-                                    value={(getEdit(task, 'startDate') as string)?.slice(0, 10) ?? ''}
-                                    onChange={(e) => setEdit(task.id, 'startDate', e.target.value)}
-                                    disabled={!canEditDates}
-                                    className="h-7 text-xs px-2"
-                                  />
+                              {/* Scheduled dates */}
+                              <div className="space-y-1.5">
+                                <div className="flex items-center gap-1.5">
+                                  <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Scheduled</span>
+                                  {!canEditDates && <Lock className="h-3 w-3 text-muted-foreground/50" />}
                                 </div>
-                                <div className="space-y-1">
-                                  <Label className="text-xs text-muted-foreground">
-                                    Sched. End{!canEditDates && <span className="text-muted-foreground/60"> 🔒</span>}
-                                  </Label>
-                                  <Input
-                                    type="date"
-                                    value={(getEdit(task, 'endDate') as string)?.slice(0, 10) ?? ''}
-                                    onChange={(e) => setEdit(task.id, 'endDate', e.target.value)}
-                                    disabled={!canEditDates}
-                                    className="h-7 text-xs px-2"
-                                  />
-                                </div>
-                                <div className="space-y-1">
-                                  <Label className="text-xs text-muted-foreground">Actual Start</Label>
-                                  <Input
-                                    type="date"
-                                    value={(getEdit(task, 'actualStartDate') as string)?.slice(0, 10) ?? ''}
-                                    onChange={(e) => setEdit(task.id, 'actualStartDate', e.target.value)}
-                                    className="h-7 text-xs px-2"
-                                  />
-                                </div>
-                                <div className="space-y-1">
-                                  <Label className="text-xs text-muted-foreground">Actual End</Label>
-                                  <Input
-                                    type="date"
-                                    value={(getEdit(task, 'actualEndDate') as string)?.slice(0, 10) ?? ''}
-                                    onChange={(e) => setEdit(task.id, 'actualEndDate', e.target.value)}
-                                    className="h-7 text-xs px-2"
-                                  />
+                                <div className="grid grid-cols-2 gap-2">
+                                  <div className="space-y-1">
+                                    <Label className="text-xs text-muted-foreground">Start</Label>
+                                    <Input
+                                      type="date"
+                                      value={(getEdit(task, 'startDate') as string)?.slice(0, 10) ?? ''}
+                                      onChange={(e) => setEdit(task.id, 'startDate', e.target.value)}
+                                      disabled={!canEditDates}
+                                      className="h-7 text-xs px-2"
+                                    />
+                                  </div>
+                                  <div className="space-y-1">
+                                    <Label className="text-xs text-muted-foreground">End</Label>
+                                    <Input
+                                      type="date"
+                                      value={(getEdit(task, 'endDate') as string)?.slice(0, 10) ?? ''}
+                                      onChange={(e) => setEdit(task.id, 'endDate', e.target.value)}
+                                      disabled={!canEditDates}
+                                      className="h-7 text-xs px-2"
+                                    />
+                                  </div>
                                 </div>
                               </div>
 
-                              <div className="flex items-center justify-between">
+                              {/* Actual dates */}
+                              <div className="space-y-1.5">
+                                <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Actual</span>
+                                <div className="grid grid-cols-2 gap-2">
+                                  <div className="space-y-1">
+                                    <Label className="text-xs text-muted-foreground">Start</Label>
+                                    <Input
+                                      type="date"
+                                      value={(getEdit(task, 'actualStartDate') as string)?.slice(0, 10) ?? ''}
+                                      onChange={(e) => setEdit(task.id, 'actualStartDate', e.target.value)}
+                                      className="h-7 text-xs px-2"
+                                    />
+                                  </div>
+                                  <div className="space-y-1">
+                                    <Label className="text-xs text-muted-foreground">End</Label>
+                                    <Input
+                                      type="date"
+                                      value={(getEdit(task, 'actualEndDate') as string)?.slice(0, 10) ?? ''}
+                                      onChange={(e) => setEdit(task.id, 'actualEndDate', e.target.value)}
+                                      className="h-7 text-xs px-2"
+                                    />
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div className="flex items-center justify-between pt-0.5">
                                 <Button
-                                  type="button"
-                                  variant="ghost"
-                                  size="sm"
+                                  type="button" variant="ghost" size="sm"
                                   className="h-7 text-xs text-muted-foreground"
                                   onClick={() => fetchOwnerHistory(task.id)}
                                 >
                                   <History className="mr-1 h-3.5 w-3.5" />
-                                  {showHistory[task.id] ? 'Hide' : 'Assignment'} History
+                                  {showHistory[task.id] ? 'Hide' : 'Show'} History
                                 </Button>
                                 <Button
-                                  size="sm"
-                                  className="h-7 text-xs"
+                                  size="sm" className="h-7 text-xs"
+                                  disabled={!hasEdits || savingTask === task.id}
                                   onClick={() => saveTask(task)}
-                                  disabled={savingTask === task.id}
                                 >
                                   {savingTask === task.id ? 'Saving…' : 'Save'}
                                 </Button>
                               </div>
 
-                              {/* Owner change history */}
                               {showHistory[task.id] && (
                                 <div className="rounded border border-border/60 bg-background p-2 space-y-1">
                                   {(ownerHistory[task.id] || []).length === 0 ? (
                                     <p className="text-xs text-muted-foreground text-center py-1">No assignment changes yet</p>
                                   ) : (
                                     (ownerHistory[task.id] || []).map((h) => (
-                                      <div key={h.id} className="flex items-center gap-2 text-xs">
+                                      <div key={h.id} className="flex items-center gap-2 text-xs flex-wrap">
                                         <span className="text-muted-foreground shrink-0">
                                           {format(new Date(h.changedAt), 'MMM d, HH:mm')}
                                         </span>
                                         <span className="font-medium">{h.changedBy.name}</span>
-                                        <span className="text-muted-foreground">changed from</span>
+                                        <span className="text-muted-foreground">changed:</span>
                                         <span className="font-medium">{h.fromOwner?.name || 'Unassigned'}</span>
                                         <span className="text-muted-foreground">→</span>
                                         <span className="font-medium">{h.toOwner?.name || 'Unassigned'}</span>
@@ -415,12 +429,11 @@ export function WorkstreamPanel({ project, onRefresh }: { project: Project; onRe
                     })
                   )}
                 </div>
+
                 {canEdit && (
                   <div className="p-3 border-t border-border">
                     <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-7 text-xs"
+                      variant="ghost" size="sm" className="h-7 text-xs"
                       onClick={() => setCreateTaskWsId(ws.id)}
                     >
                       <Plus className="mr-1 h-3.5 w-3.5" /> Add Task
@@ -433,7 +446,6 @@ export function WorkstreamPanel({ project, onRefresh }: { project: Project; onRe
         )
       })}
 
-      {/* Add phase */}
       {canEdit && (
         <div>
           {addingWs ? (

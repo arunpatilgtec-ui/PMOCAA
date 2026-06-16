@@ -33,6 +33,7 @@ import { WorkstreamPanel } from '@/components/projects/workstream-panel'
 import { ResourceAllocationDialog } from '@/components/projects/resource-allocation-dialog'
 import { ProductsPanel } from '@/components/projects/products-panel'
 import { ProjectGanttView } from '@/components/projects/project-gantt-view'
+import { ProjectSetupWizard } from '@/components/projects/project-setup-wizard'
 
 interface Task {
   id: string; name: string; status: string; priority: string; startDate?: string; endDate?: string
@@ -79,6 +80,7 @@ export default function ProjectDetailPage() {
   const { user } = useAuthStore()
   const [project, setProject] = useState<Project | null>(null)
   const [loading, setLoading] = useState(true)
+  const [wizardOpen, setWizardOpen] = useState(false)
 
   // Edit project dialog
   const [editProjectOpen, setEditProjectOpen] = useState(false)
@@ -128,7 +130,13 @@ export default function ProjectDetailPage() {
     try {
       const res = await fetch(`/api/projects/${id}`)
       if (!res.ok) { router.push('/projects'); return }
-      setProject(await res.json())
+      const data = await res.json()
+      setProject(data)
+      // Auto-open wizard for new projects with no workstreams (unless dismissed)
+      const dismissKey = `wizard-dismissed-${id}`
+      if (data.workstreams?.length === 0 && !localStorage.getItem(dismissKey)) {
+        setWizardOpen(true)
+      }
     } finally {
       setLoading(false)
     }
@@ -942,6 +950,25 @@ export default function ProjectDetailPage() {
         projectId={project.id}
         onAllocated={load}
       />
+
+      {/* ── Project Setup Wizard ── */}
+      {wizardOpen && (
+        <ProjectSetupWizard
+          projectId={project.id}
+          projectType={project.type}
+          projectClassification={project.projectClassification}
+          startDate={project.startDate.slice(0, 10)}
+          onComplete={() => {
+            setWizardOpen(false)
+            localStorage.setItem(`wizard-dismissed-${project.id}`, '1')
+            load()
+          }}
+          onDismiss={() => {
+            setWizardOpen(false)
+            localStorage.setItem(`wizard-dismissed-${project.id}`, '1')
+          }}
+        />
+      )}
     </div>
   )
 }

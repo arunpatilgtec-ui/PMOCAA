@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { useAuthStore, canCreateProject } from '@/store/auth'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -44,6 +45,7 @@ const PRIORITY_COLORS: Record<string, string> = {
 
 export default function ProjectsPage() {
   const { user } = useAuthStore()
+  const router = useRouter()
   const [projects, setProjects] = useState<Project[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
@@ -253,7 +255,14 @@ export default function ProjectsPage() {
         </div>
       )}
 
-      <CreateProjectDialog open={createOpen} onOpenChange={setCreateOpen} onCreated={load} />
+      <CreateProjectDialog
+        open={createOpen}
+        onOpenChange={setCreateOpen}
+        onCreated={(projectId) => {
+          load()
+          if (projectId) router.push(`/projects/${projectId}`)
+        }}
+      />
     </div>
   )
 }
