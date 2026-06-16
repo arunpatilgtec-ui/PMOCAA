@@ -61,7 +61,6 @@ export async function GET(req: NextRequest) {
             lead: { select: { id: true, name: true } },
           },
         },
-        milestones: true,
         allocations: {
           include: { user: { select: { id: true, name: true, avatarUrl: true } } },
         },

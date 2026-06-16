@@ -11,7 +11,6 @@ import {
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Textarea } from '@/components/ui/textarea'
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select'
@@ -19,7 +18,6 @@ import { Loader2 } from 'lucide-react'
 
 const schema = z.object({
   name: z.string().min(1, 'Name required'),
-  description: z.string().optional(),
   priority: z.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']),
   status: z.enum(['BACKLOG', 'PLANNED', 'IN_PROGRESS', 'REVIEW', 'COMPLETED']),
   startDate: z.string().optional(),
@@ -88,11 +86,6 @@ export function CreateTaskDialog({
             <Label>Task Name</Label>
             <Input placeholder="Task name..." {...register('name')} />
             {errors.name && <p className="text-red-500 text-xs">{errors.name.message}</p>}
-          </div>
-
-          <div className="space-y-1.5">
-            <Label>Description</Label>
-            <Textarea placeholder="Optional details..." {...register('description')} rows={2} />
           </div>
 
           <div className="grid grid-cols-2 gap-3">

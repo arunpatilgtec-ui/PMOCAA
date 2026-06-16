@@ -9,7 +9,6 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Progress } from '@/components/ui/progress'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
-import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
@@ -365,18 +364,6 @@ export function WorkstreamPanel({ project, onRefresh }: { project: Project; onRe
                                     className="h-7 text-xs px-2"
                                   />
                                 </div>
-                              </div>
-
-                              {/* Description */}
-                              <div className="space-y-1">
-                                <Label className="text-xs text-muted-foreground">Description</Label>
-                                <Textarea
-                                  rows={2}
-                                  value={(getEdit(task, 'description') as string) ?? ''}
-                                  onChange={(e) => setEdit(task.id, 'description', e.target.value)}
-                                  placeholder="Task description..."
-                                  className="text-xs resize-none"
-                                />
                               </div>
 
                               <div className="flex items-center justify-between">

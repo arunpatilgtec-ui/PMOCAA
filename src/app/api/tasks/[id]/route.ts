@@ -14,7 +14,6 @@ export async function GET(_req: NextRequest, ctx: RouteContext<'/api/tasks/[id]'
         assignedBy: { select: { id: true, name: true, avatarUrl: true, role: true } },
         approvedBy: { select: { id: true, name: true, avatarUrl: true, role: true } },
         workstream: { include: { project: true, lead: { select: { id: true, name: true } } } },
-        documents: { include: { uploader: { select: { id: true, name: true } } } },
         history: {
           orderBy: { changedAt: 'desc' },
           take: 20,

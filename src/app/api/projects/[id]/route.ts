@@ -21,13 +21,8 @@ export async function GET(_req: NextRequest, ctx: RouteContext<'/api/projects/[i
             },
           },
         },
-        milestones: { orderBy: { dueDate: 'asc' } },
         allocations: {
           include: { user: { select: { id: true, name: true, avatarUrl: true, role: true } } },
-        },
-        documents: {
-          orderBy: { createdAt: 'desc' },
-          include: { uploader: { select: { id: true, name: true } } },
         },
         scheduleChanges: {
           where: { status: 'PENDING' },

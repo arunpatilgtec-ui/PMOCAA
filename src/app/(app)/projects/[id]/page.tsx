@@ -21,7 +21,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select'
 import {
-  ArrowLeft, Calendar, Users, Layers, GitBranch, CheckSquare, FileText,
+  ArrowLeft, Users, Layers, GitBranch,
   MoreHorizontal, Edit2, Trash2, ShieldCheck, ShieldOff, CalendarRange,
   UserPlus, MessageSquarePlus, AlertTriangle, Siren, Send, CheckCheck,
   Link as LinkIcon, Plus, X,
@@ -30,7 +30,6 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { WorkstreamPanel } from '@/components/projects/workstream-panel'
-import { MilestonePanel } from '@/components/projects/milestone-panel'
 import { ResourceAllocationDialog } from '@/components/projects/resource-allocation-dialog'
 import { ProductsPanel } from '@/components/projects/products-panel'
 import { ProjectGanttView } from '@/components/projects/project-gantt-view'
@@ -44,10 +43,6 @@ interface Workstream {
   id: string; name: string; status: string; order: number
   lead?: { id: string; name: string }
   tasks: Task[]
-}
-
-interface Milestone {
-  id: string; name: string; dueDate: string; completed: boolean; description?: string
 }
 
 interface Allocation {
@@ -69,7 +64,6 @@ interface Project {
   lead?: { id: string; name: string; email: string }
   planner?: { id: string; name: string; email: string }
   workstreams: Workstream[]
-  milestones: Milestone[]
   allocations: Allocation[]
 }
 
@@ -89,7 +83,6 @@ export default function ProjectDetailPage() {
   // Edit project dialog
   const [editProjectOpen, setEditProjectOpen] = useState(false)
   const [editName, setEditName] = useState('')
-  const [editDesc, setEditDesc] = useState('')
   const [editStatus, setEditStatus] = useState('')
   const [editPriority, setEditPriority] = useState('')
   const [editLeadId, setEditLeadId] = useState<string>('')
@@ -182,7 +175,6 @@ export default function ProjectDetailPage() {
   function openEditProject() {
     if (!project) return
     setEditName(project.name)
-    setEditDesc(project.description || '')
     setEditStatus(project.status)
     setEditPriority(project.priority)
     setEditLeadId(project.leadId || '')
@@ -198,7 +190,7 @@ export default function ProjectDetailPage() {
   async function saveEditProject() {
     setEditSaving(true)
     try {
-      const body: Record<string, unknown> = { name: editName, description: editDesc, status: editStatus, priority: editPriority }
+      const body: Record<string, unknown> = { name: editName, status: editStatus, priority: editPriority }
       // Only PLANNER can change the lead
       if (user && isPlanner(user.role)) {
         body.leadId = editLeadId || null
@@ -596,9 +588,6 @@ export default function ProjectDetailPage() {
           <TabsTrigger value="workstreams">
             <Layers className="mr-1.5 h-3.5 w-3.5" /> Timeline
           </TabsTrigger>
-          <TabsTrigger value="milestones">
-            <CheckSquare className="mr-1.5 h-3.5 w-3.5" /> Milestones
-          </TabsTrigger>
           <TabsTrigger value="team">
             <Users className="mr-1.5 h-3.5 w-3.5" /> Team
           </TabsTrigger>
@@ -608,19 +597,10 @@ export default function ProjectDetailPage() {
           <TabsTrigger value="products">
             <Layers className="mr-1.5 h-3.5 w-3.5" /> Products
           </TabsTrigger>
-          {user?.role !== 'RESOURCE' && (
-            <TabsTrigger value="docs">
-              <FileText className="mr-1.5 h-3.5 w-3.5" /> Docs
-            </TabsTrigger>
-          )}
         </TabsList>
 
         <TabsContent value="workstreams" className="mt-4">
           <WorkstreamPanel project={project} onRefresh={load} />
-        </TabsContent>
-
-        <TabsContent value="milestones" className="mt-4">
-          <MilestonePanel projectId={project.id} milestones={project.milestones} onRefresh={load} />
         </TabsContent>
 
         <TabsContent value="team" className="mt-4">
@@ -686,16 +666,6 @@ export default function ProjectDetailPage() {
         <TabsContent value="products" className="mt-4">
           <ProductsPanel project={project} onRefresh={load} />
         </TabsContent>
-
-        {user?.role !== 'RESOURCE' && (
-          <TabsContent value="docs" className="mt-4">
-            <Card>
-              <CardContent className="p-6 text-center text-muted-foreground text-sm">
-                Document management coming soon. Upload PDFs, Excel files, and presentations.
-              </CardContent>
-            </Card>
-          </TabsContent>
-        )}
       </Tabs>
 
       {/* ── Edit Project Dialog ── */}
@@ -710,10 +680,6 @@ export default function ProjectDetailPage() {
             <div className="space-y-1.5">
               <Label>Name</Label>
               <Input value={editName} onChange={(e) => setEditName(e.target.value)} />
-            </div>
-            <div className="space-y-1.5">
-              <Label>Description</Label>
-              <Textarea rows={2} value={editDesc} onChange={(e) => setEditDesc(e.target.value)} />
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">

@@ -8,7 +8,6 @@ import {
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Textarea } from '@/components/ui/textarea'
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select'
@@ -51,7 +50,6 @@ export function CreateProjectDialog({
 
   // Basic fields
   const [name, setName] = useState('')
-  const [description, setDescription] = useState('')
   const [type, setType] = useState<'TEARDOWN' | 'OTHER'>('TEARDOWN')
   const [priority, setPriority] = useState('MEDIUM')
   const [startDate, setStartDate] = useState('')
@@ -84,7 +82,7 @@ export function CreateProjectDialog({
   }, [category, startDate, type])
 
   function resetForm() {
-    setName(''); setDescription(''); setType('TEARDOWN'); setPriority('MEDIUM')
+    setName(''); setType('TEARDOWN'); setPriority('MEDIUM')
     setStartDate(''); setEndDate(''); setLeadId('')
     setCategory(''); setProductType('')
     setClassification(''); setNumberOfProducts('')
@@ -116,7 +114,6 @@ export function CreateProjectDialog({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           name: name.trim(),
-          description: description.trim() || undefined,
           type,
           priority: effectivePriority,
           startDate,
@@ -156,22 +153,13 @@ export function CreateProjectDialog({
         </DialogHeader>
         <form onSubmit={onSubmit} className="space-y-4">
 
-          {/* Name + Description */}
+          {/* Name */}
           <div className="space-y-1.5">
             <Label>Project Name *</Label>
             <Input
               placeholder="e.g. Competitor Teardown Q3"
               value={name}
               onChange={(e) => setName(e.target.value)}
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label>Description</Label>
-            <Textarea
-              placeholder="Brief description..."
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              rows={2}
             />
           </div>
 
