@@ -1,5 +1,6 @@
 import { prisma } from './prisma'
 import type { ChangeType, Priority } from '@/generated/prisma'
+import { workingDaysDiff } from './date-utils'
 
 export interface ImpactedItem {
   id: string
@@ -50,8 +51,7 @@ export async function calculateScheduleImpact(
     if (task) {
       // Find dependent tasks
       if (task.endDate && payload.newEndDate) {
-        const delayMs = payload.newEndDate.getTime() - task.endDate.getTime()
-        const delayDays = Math.ceil(delayMs / (1000 * 60 * 60 * 24))
+        const delayDays = workingDaysDiff(task.endDate, payload.newEndDate)
 
         if (delayDays > 0) {
           affectedTasks.push({
@@ -61,15 +61,13 @@ export async function calculateScheduleImpact(
             currentEndDate: task.endDate,
             proposedEndDate: payload.newEndDate,
             delayDays,
-            reason: `Direct schedule change: +${delayDays} day(s)`,
+            reason: `Direct schedule change: +${delayDays} working day(s)`,
           })
 
           // Check project impact
           const project = task.workstream.project
           if (project.endDate && payload.newEndDate > project.endDate) {
-            const projectDelay = Math.ceil(
-              (payload.newEndDate.getTime() - project.endDate.getTime()) / (1000 * 60 * 60 * 24)
-            )
+            const projectDelay = workingDaysDiff(project.endDate, payload.newEndDate)
             affectedProjects.push({
               id: project.id,
               name: project.name,
@@ -77,7 +75,7 @@ export async function calculateScheduleImpact(
               currentEndDate: project.endDate,
               proposedEndDate: payload.newEndDate,
               delayDays: projectDelay,
-              reason: `Critical task delayed by ${delayDays} day(s)`,
+              reason: `Critical task delayed by ${delayDays} working day(s)`,
             })
           }
 

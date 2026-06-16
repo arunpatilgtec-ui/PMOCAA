@@ -41,14 +41,17 @@ export function calcDailyHours(
 ): Record<string, number> {
   const daily: Record<string, number> = {}
 
-  // Pre-populate Mon–Fri with 0
-  for (let d = 0; d < 7; d++) {
-    const day = new Date(weekStart)
-    day.setDate(weekStart.getDate() + d)
-    const dow = day.getDay()
+  // Pre-populate all Mon–Fri days in the range with 0
+  const populateDay = new Date(weekStart)
+  populateDay.setHours(0, 0, 0, 0)
+  const populateEnd = new Date(weekEnd)
+  populateEnd.setHours(23, 59, 59, 999)
+  while (populateDay <= populateEnd) {
+    const dow = populateDay.getDay()
     if (dow !== 0 && dow !== 6) {
-      daily[day.toISOString().slice(0, 10)] = 0
+      daily[populateDay.toISOString().slice(0, 10)] = 0
     }
+    populateDay.setDate(populateDay.getDate() + 1)
   }
 
   const workingKeys = Object.keys(daily)
@@ -94,8 +97,13 @@ export async function GET(req: NextRequest) {
     await requireAuth()
     const { searchParams } = new URL(req.url)
     const role = searchParams.get('role')
+    const fromParam = searchParams.get('from')
+    const toParam   = searchParams.get('to')
 
     const { weekStart, weekEnd } = getWeekBounds()
+    // For gantt requests, use the requested range; otherwise default to current week
+    const rangeStart = fromParam ? new Date(fromParam + 'T00:00:00') : weekStart
+    const rangeEnd   = toParam   ? new Date(toParam   + 'T23:59:59') : weekEnd
 
     const users = await prisma.user.findMany({
       where: {
@@ -145,8 +153,14 @@ export async function GET(req: NextRequest) {
       const weeklyCapacityHours = Math.round(HOURS_PER_WEEK * user.capacityPct / 100 * 10) / 10
       const dailyCapacityHours  = Math.round(HOURS_PER_DAY  * user.capacityPct / 100 * 10) / 10
 
-      const dailyHoursMap = calcDailyHours(user.ownedTasks, weekStart, weekEnd)
-      const dailyValues   = Object.values(dailyHoursMap)
+      // dailyHoursMap covers the requested range (gantt) or current week (default)
+      const dailyHoursMap = calcDailyHours(user.ownedTasks, rangeStart, rangeEnd)
+
+      // Weekly stats always reflect the current week regardless of gantt range
+      const currentWeekMap = (fromParam || toParam)
+        ? calcDailyHours(user.ownedTasks, weekStart, weekEnd)
+        : dailyHoursMap
+      const dailyValues   = Object.values(currentWeekMap)
 
       const thisWeekHours = Math.round(dailyValues.reduce((s, h) => s + h, 0) * 10) / 10
       const maxDailyHours = Math.round(Math.max(0, ...dailyValues) * 10) / 10
