@@ -1,6 +1,8 @@
 import { NextRequest } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { requireAuth } from '@/lib/auth'
+import { CATEGORY_TEMPLATES } from '@/lib/project-templates'
+import { addWorkingDays } from '@/lib/priority-shift'
 
 export async function GET(req: NextRequest) {
   try {
@@ -81,11 +83,27 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     const session = await requireAuth()
-    if (!['ADMIN', 'PLANNER'].includes(session.role)) {
+    if (!['ADMIN', 'PLANNER', 'PROJECT_LEAD'].includes(session.role)) {
       return Response.json({ error: 'Forbidden' }, { status: 403 })
     }
 
     const data = await req.json()
+
+    const startDate = new Date(data.startDate)
+    let endDate = new Date(data.endDate)
+
+    // For templated teardown categories: calculate endDate from start + template days
+    const wsTemplates = data.category && CATEGORY_TEMPLATES[data.category]
+    if (wsTemplates && data.startDate) {
+      let cursor = new Date(startDate)
+      for (const ws of wsTemplates) {
+        for (const task of ws.tasks) {
+          cursor = addWorkingDays(cursor, task.durationDays)
+        }
+      }
+      endDate = cursor
+    }
+
     const project = await prisma.project.create({
       data: {
         name: data.name,
@@ -93,16 +111,59 @@ export async function POST(req: NextRequest) {
         type: data.type,
         status: 'PLANNING',
         priority: data.priority || 'MEDIUM',
-        startDate: new Date(data.startDate),
-        endDate: new Date(data.endDate),
-        leadId: data.leadId || null,
-        plannerId: data.plannerId || session.id,
+        startDate,
+        endDate,
+        leadId: data.leadId || (session.role === 'PROJECT_LEAD' ? session.id : null),
+        plannerId: data.plannerId || (session.role !== 'PROJECT_LEAD' ? session.id : null),
+        category: data.category || null,
+        productType: data.productType || null,
+        projectLinks: data.projectLinks || [],
+        projectClassification: data.projectClassification || null,
+        numberOfProducts: data.numberOfProducts ? parseInt(String(data.numberOfProducts), 10) : null,
       },
       include: {
         lead: { select: { id: true, name: true } },
         planner: { select: { id: true, name: true } },
       },
     })
+
+    // Auto-generate workstreams + tasks from template
+    if (wsTemplates) {
+      let cursor = new Date(startDate)
+      cursor.setHours(0, 0, 0, 0)
+
+      let wsOrder = 0
+      for (const wsTemplate of wsTemplates) {
+        const ws = await prisma.workstream.create({
+          data: {
+            name: wsTemplate.name,
+            projectId: project.id,
+            order: wsOrder++,
+          },
+        })
+
+        let taskOrder = 0
+        for (const taskTemplate of wsTemplate.tasks) {
+          const taskStart = new Date(cursor)
+          const taskEnd = addWorkingDays(new Date(cursor), taskTemplate.durationDays - 1)
+
+          await prisma.task.create({
+            data: {
+              name: taskTemplate.name,
+              workstreamId: ws.id,
+              status: 'BACKLOG',
+              priority: 'MEDIUM',
+              startDate: taskStart,
+              endDate: taskEnd,
+              estimatedHours: taskTemplate.estimatedHours,
+              order: taskOrder++,
+            },
+          })
+
+          cursor = addWorkingDays(taskEnd, 1)
+        }
+      }
+    }
 
     return Response.json(project, { status: 201 })
   } catch (err: unknown) {

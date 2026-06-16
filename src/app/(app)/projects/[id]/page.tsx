@@ -24,6 +24,7 @@ import {
   ArrowLeft, Calendar, Users, Layers, GitBranch, CheckSquare, FileText,
   MoreHorizontal, Edit2, Trash2, ShieldCheck, ShieldOff, CalendarRange,
   UserPlus, MessageSquarePlus, AlertTriangle, Siren, Send, CheckCheck,
+  Link as LinkIcon, Plus, X,
 } from 'lucide-react'
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
@@ -31,6 +32,8 @@ import {
 import { WorkstreamPanel } from '@/components/projects/workstream-panel'
 import { MilestonePanel } from '@/components/projects/milestone-panel'
 import { ResourceAllocationDialog } from '@/components/projects/resource-allocation-dialog'
+import { ProductsPanel } from '@/components/projects/products-panel'
+import { ProjectGanttView } from '@/components/projects/project-gantt-view'
 
 interface Task {
   id: string; name: string; status: string; priority: string; startDate?: string; endDate?: string
@@ -58,6 +61,11 @@ interface Project {
   leadId?: string
   editAccessGranted: boolean
   planStatus: string  // 'DRAFT' | 'SUBMITTED' | 'APPROVED'
+  category?: string
+  productType?: string
+  projectLinks: string[]
+  projectClassification?: string
+  numberOfProducts?: number
   lead?: { id: string; name: string; email: string }
   planner?: { id: string; name: string; email: string }
   workstreams: Workstream[]
@@ -111,6 +119,11 @@ export default function ProjectDetailPage() {
   // Plan submission / approval
   const [submittingPlan, setSubmittingPlan] = useState(false)
   const [approvingPlan, setApprovingPlan] = useState(false)
+
+  // Links editing
+  const [editLinksOpen, setEditLinksOpen] = useState(false)
+  const [editLinks, setEditLinks] = useState<string[]>([])
+  const [linksSaving, setLinksSaving] = useState(false)
 
   // Andon dialog
   const [andonOpen, setAndonOpen] = useState(false)
@@ -257,6 +270,23 @@ export default function ProjectDetailPage() {
     }
   }
 
+  async function saveLinks() {
+    setLinksSaving(true)
+    try {
+      const res = await fetch(`/api/projects/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ projectLinks: editLinks.filter((l) => l.trim()) }),
+      })
+      if (!res.ok) throw new Error((await res.json()).error)
+      toast.success('Links saved')
+      setEditLinksOpen(false)
+      load()
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'Failed to save links')
+    } finally { setLinksSaving(false) }
+  }
+
   async function removeAllocation(userId: string) {
     setRemovingUserId(userId)
     try {
@@ -369,6 +399,16 @@ export default function ProjectDetailPage() {
               {project.status.replace('_', ' ')}
             </span>
             <Badge variant="outline" className="text-xs">{project.type}</Badge>
+            {project.category && (
+              <Badge variant="outline" className="text-xs text-blue-600 border-blue-300">
+                {project.category}{project.productType ? ` · ${project.productType}` : ''}
+              </Badge>
+            )}
+            {project.projectClassification && (
+              <Badge variant="outline" className="text-xs text-purple-600 border-purple-300">
+                {project.projectClassification}
+              </Badge>
+            )}
             <Badge variant="outline" className="text-xs">{project.priority}</Badge>
             {/* Plan status badge */}
             {project.planStatus === 'DRAFT' && isProjectLead && (
@@ -512,6 +552,44 @@ export default function ProjectDetailPage() {
         </Card>
       </div>
 
+      {/* Project Links section */}
+      {((project.projectLinks && project.projectLinks.length > 0) || canEditProject) && (
+        <div className="flex items-start gap-3 flex-wrap">
+          <div className="flex items-center gap-1.5 text-sm text-muted-foreground shrink-0">
+            <LinkIcon className="h-4 w-4" />
+            <span className="font-medium">Links:</span>
+          </div>
+          <div className="flex flex-wrap gap-2 flex-1">
+            {(project.projectLinks || []).map((link, i) => (
+              <a
+                key={i}
+                href={link}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 transition-colors"
+              >
+                <LinkIcon className="h-3 w-3" />
+                {link.length > 50 ? link.slice(0, 47) + '…' : link}
+              </a>
+            ))}
+            {canEditProject && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 text-xs"
+                onClick={() => {
+                  setEditLinks(project.projectLinks?.length ? [...project.projectLinks] : [''])
+                  setEditLinksOpen(true)
+                }}
+              >
+                <Plus className="h-3 w-3 mr-1" />
+                {project.projectLinks?.length ? 'Edit Links' : 'Add Link'}
+              </Button>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Tabs */}
       <Tabs defaultValue="workstreams">
         <TabsList>
@@ -526,6 +604,9 @@ export default function ProjectDetailPage() {
           </TabsTrigger>
           <TabsTrigger value="gantt">
             <GitBranch className="mr-1.5 h-3.5 w-3.5" /> Gantt
+          </TabsTrigger>
+          <TabsTrigger value="products">
+            <Layers className="mr-1.5 h-3.5 w-3.5" /> Products
           </TabsTrigger>
           {user?.role !== 'RESOURCE' && (
             <TabsTrigger value="docs">
@@ -554,8 +635,8 @@ export default function ProjectDetailPage() {
                       <MessageSquarePlus className="mr-1.5 h-4 w-4" /> Request Change
                     </Button>
                   )}
-                  {/* PLANNER can add resources */}
-                  {userCanAllocate && (
+                  {/* PLANNER or PROJECT_LEAD can add resources */}
+                  {(userCanAllocate || isProjectLead) && (
                     <Button size="sm" onClick={() => setAddResourceOpen(true)} className="bg-blue-600 hover:bg-blue-700">
                       <UserPlus className="mr-1.5 h-4 w-4" /> Add Resource
                     </Button>
@@ -580,7 +661,7 @@ export default function ProjectDetailPage() {
                         <p className="text-xs text-muted-foreground capitalize">{a.user.role.toLowerCase().replace('_', ' ')}</p>
                       </div>
                       <Badge variant="secondary">{a.allocationPct}%</Badge>
-                      {userCanAllocate && (
+                      {(userCanAllocate || isProjectLead) && (
                         <Button
                           size="sm" variant="ghost"
                           className="h-7 w-7 p-0 text-red-500 hover:text-red-600 hover:bg-red-50"
@@ -599,9 +680,11 @@ export default function ProjectDetailPage() {
         </TabsContent>
 
         <TabsContent value="gantt" className="mt-4">
-          <Link href={`/gantt?projectId=${project.id}`}>
-            <Button variant="outline" size="sm">Open Project Gantt View</Button>
-          </Link>
+          <ProjectGanttView project={project} onRefresh={load} />
+        </TabsContent>
+
+        <TabsContent value="products" className="mt-4">
+          <ProductsPanel project={project} onRefresh={load} />
         </TabsContent>
 
         {user?.role !== 'RESOURCE' && (
@@ -667,12 +750,16 @@ export default function ProjectDetailPage() {
                   value={editLeadId || 'none'}
                   onValueChange={(v) => { const s = v as string | null; setEditLeadId(!s || s === 'none' ? '' : s) }}
                 >
-                  <SelectTrigger className="w-full"><SelectValue placeholder="No lead assigned" /></SelectTrigger>
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="No lead assigned">
+                      {editUsers.find((u) => u.id === editLeadId)?.name || null}
+                    </SelectValue>
+                  </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="none">No lead</SelectItem>
                     {editUsers.map((u) => (
                       <SelectItem key={u.id} value={u.id}>
-                        {u.name} <span className="text-muted-foreground text-xs">· {u.role.replace('_', ' ')}</span>
+                        {u.name} ({u.role.replace('_', ' ')})
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -823,6 +910,59 @@ export default function ProjectDetailPage() {
                 disabled={andonSaving}
               >
                 {andonSaving ? 'Raising…' : 'Raise Andon'}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Edit Links Dialog ── */}
+      <Dialog open={editLinksOpen} onOpenChange={setEditLinksOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <LinkIcon className="h-5 w-5" /> Project Links
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <p className="text-xs text-muted-foreground">Add Google Drive folders, spreadsheets, or any relevant links.</p>
+            {editLinks.map((link, i) => (
+              <div key={i} className="flex gap-2 items-center">
+                <Input
+                  placeholder="https://drive.google.com/..."
+                  value={link}
+                  onChange={(e) => {
+                    const next = [...editLinks]
+                    next[i] = e.target.value
+                    setEditLinks(next)
+                  }}
+                  className="text-sm h-8"
+                />
+                {editLinks.length > 1 && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 shrink-0 text-muted-foreground hover:text-red-500"
+                    onClick={() => setEditLinks(editLinks.filter((_, j) => j !== i))}
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </Button>
+                )}
+              </div>
+            ))}
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-7 text-xs w-full"
+              onClick={() => setEditLinks([...editLinks, ''])}
+            >
+              <Plus className="h-3 w-3 mr-1" /> Add Another Link
+            </Button>
+            <div className="flex justify-end gap-2 pt-1">
+              <Button variant="outline" onClick={() => setEditLinksOpen(false)}>Cancel</Button>
+              <Button onClick={saveLinks} disabled={linksSaving}>
+                {linksSaving ? 'Saving…' : 'Save Links'}
               </Button>
             </div>
           </div>

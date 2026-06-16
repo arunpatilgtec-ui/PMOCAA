@@ -18,11 +18,28 @@ function SelectGroup({ className, ...props }: SelectPrimitive.Group.Props) {
   )
 }
 
-function SelectValue({ className, ...props }: SelectPrimitive.Value.Props) {
+function SelectValue({
+  className,
+  children,
+  placeholder,
+  ...props
+}: SelectPrimitive.Value.Props & { children?: React.ReactNode; placeholder?: string }) {
+  // If children are passed explicitly, render them as the display value.
+  // This prevents Base UI from falling back to showing raw value strings (IDs).
+  if (children !== undefined) {
+    return (
+      <span data-slot="select-value" className={cn("flex flex-1 text-left text-sm truncate", className)}>
+        {children !== null && children !== false && children !== ''
+          ? children
+          : <span className="text-muted-foreground">{placeholder ?? 'Select...'}</span>}
+      </span>
+    )
+  }
   return (
     <SelectPrimitive.Value
       data-slot="select-value"
       className={cn("flex flex-1 text-left", className)}
+      placeholder={placeholder}
       {...props}
     />
   )

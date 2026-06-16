@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useCallback } from 'react'
 import { useAuthStore, canManageProjects } from '@/store/auth'
 import { toast } from 'sonner'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -9,18 +9,31 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Progress } from '@/components/ui/progress'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
+import { Textarea } from '@/components/ui/textarea'
+import { Label } from '@/components/ui/label'
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select'
 import {
-  Plus, ChevronDown, ChevronRight,
+  Plus, ChevronDown, ChevronRight, ChevronUp, History,
 } from 'lucide-react'
 import { format } from 'date-fns'
 import { CreateTaskDialog } from './create-task-dialog'
 
+interface OwnerHistoryEntry {
+  id: string
+  changedAt: string
+  changedBy: { id: string; name: string }
+  fromOwner?: { id: string; name: string } | null
+  toOwner?: { id: string; name: string } | null
+}
+
 interface Task {
-  id: string; name: string; status: string; priority: string
-  startDate?: string; endDate?: string; effortHours: number; estimatedHours?: number
+  id: string; name: string; description?: string; status: string; priority: string
+  startDate?: string; endDate?: string
+  actualStartDate?: string; actualEndDate?: string
+  pctComplete?: number
+  effortHours: number; estimatedHours?: number
   owner?: { id: string; name: string; avatarUrl?: string }
 }
 
@@ -33,7 +46,7 @@ interface Workstream {
 interface Project {
   id: string; name: string
   leadId?: string
-  planStatus?: string  // 'DRAFT' | 'SUBMITTED' | 'APPROVED'
+  planStatus?: string
   editAccessGranted?: boolean
   allocations: Array<{ userId: string; user: { id: string; name: string; role: string } }>
   workstreams: Workstream[]
@@ -56,21 +69,83 @@ const PRIORITY_DOT: Record<string, string> = {
   CRITICAL: 'bg-red-500',
 }
 
+const TASK_STATUSES = ['BACKLOG', 'PLANNED', 'IN_PROGRESS', 'REVIEW', 'REWORK', 'COMPLETED', 'CANCELLED']
+
 export function WorkstreamPanel({ project, onRefresh }: { project: Project; onRefresh: () => void }) {
   const { user } = useAuthStore()
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
+  const [expandedTask, setExpandedTask] = useState<string | null>(null)
   const [addingWs, setAddingWs] = useState(false)
   const [newWsName, setNewWsName] = useState('')
   const [createTaskWsId, setCreateTaskWsId] = useState<string | null>(null)
+  const [ownerHistory, setOwnerHistory] = useState<Record<string, OwnerHistoryEntry[]>>({})
+  const [showHistory, setShowHistory] = useState<Record<string, boolean>>({})
+
+  // Per-task editing state
+  const [taskEdits, setTaskEdits] = useState<Record<string, Partial<Task>>>({})
+  const [savingTask, setSavingTask] = useState<string | null>(null)
 
   const toggle = (id: string) => setExpanded((p) => ({ ...p, [id]: !p[id] }))
+  const toggleTask = (id: string) => {
+    setExpandedTask((prev) => (prev === id ? null : id))
+    if (!taskEdits[id]) setTaskEdits((p) => ({ ...p, [id]: {} }))
+  }
+
+  const fetchOwnerHistory = useCallback(async (taskId: string) => {
+    if (ownerHistory[taskId]) {
+      setShowHistory((p) => ({ ...p, [taskId]: !p[taskId] }))
+      return
+    }
+    try {
+      const res = await fetch(`/api/tasks/${taskId}`)
+      if (!res.ok) return
+      const data = await res.json()
+      setOwnerHistory((p) => ({ ...p, [taskId]: data.ownerHistory || [] }))
+      setShowHistory((p) => ({ ...p, [taskId]: true }))
+    } catch {
+      toast.error('Failed to load history')
+    }
+  }, [ownerHistory])
 
   const canEdit =
     (user && canManageProjects(user.role)) ||
     (user?.role === 'PROJECT_LEAD' && user.id === project.leadId && project.planStatus !== 'APPROVED')
 
+  const canEditDates = user && ['ADMIN', 'MANAGER', 'PLANNER'].includes(user.role)
   const isProjectLead = user?.role === 'PROJECT_LEAD' && user.id === project.leadId
   const canAssignTasks = canEdit || (isProjectLead && project.planStatus !== 'APPROVED')
+
+  function getEdit<K extends keyof Task>(task: Task, key: K): Task[K] {
+    const edits = taskEdits[task.id]
+    return (edits && key in edits ? edits[key] : task[key]) as Task[K]
+  }
+
+  function setEdit(taskId: string, key: keyof Task, value: unknown) {
+    setTaskEdits((p) => ({ ...p, [taskId]: { ...p[taskId], [key]: value } }))
+  }
+
+  async function saveTask(task: Task) {
+    const edits = taskEdits[task.id]
+    if (!edits || Object.keys(edits).length === 0) return
+    setSavingTask(task.id)
+    try {
+      const body: Record<string, unknown> = {}
+      for (const [k, v] of Object.entries(edits)) {
+        body[k] = v
+      }
+      const res = await fetch(`/api/tasks/${task.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      if (!res.ok) throw new Error()
+      toast.success('Task updated')
+      setTaskEdits((p) => ({ ...p, [task.id]: {} }))
+      onRefresh()
+    } catch {
+      toast.error('Failed to update task')
+    } finally { setSavingTask(null) }
+  }
 
   async function addWorkstream() {
     if (!newWsName.trim()) return
@@ -144,58 +219,210 @@ export function WorkstreamPanel({ project, onRefresh }: { project: Project; onRe
                         task.endDate &&
                         new Date(task.endDate) < now &&
                         !['COMPLETED', 'CANCELLED'].includes(task.status)
+                      const isTaskExpanded = expandedTask === task.id
+                      const pct = task.pctComplete ?? 0
 
                       return (
-                        <div key={task.id} className="flex items-center gap-3 px-4 py-2.5 hover:bg-muted/30 transition-colors">
-                          <div className={`h-2 w-2 rounded-full shrink-0 ${PRIORITY_DOT[task.priority]}`} />
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <span className="text-sm font-medium truncate">{task.name}</span>
-                              <span className={`text-xs px-1.5 py-0.5 rounded shrink-0 ${TASK_STATUS_COLORS[task.status]}`}>
-                                {task.status.replace(/_/g, ' ')}
-                              </span>
-                              {isOverdue && (
-                                <span className="text-xs px-1.5 py-0.5 rounded shrink-0 bg-red-100 text-red-700 font-medium">
-                                  Delayed
+                        <div key={task.id} className="border-b border-border last:border-0">
+                          {/* Task row */}
+                          <div
+                            className="flex items-center gap-3 px-4 py-2.5 hover:bg-muted/30 transition-colors cursor-pointer"
+                            onClick={() => toggleTask(task.id)}
+                          >
+                            <div className={`h-2 w-2 rounded-full shrink-0 ${PRIORITY_DOT[task.priority]}`} />
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="text-sm font-medium truncate">{task.name}</span>
+                                <span className={`text-xs px-1.5 py-0.5 rounded shrink-0 ${TASK_STATUS_COLORS[task.status]}`}>
+                                  {task.status.replace(/_/g, ' ')}
                                 </span>
+                                {isOverdue && (
+                                  <span className="text-xs px-1.5 py-0.5 rounded shrink-0 bg-red-100 text-red-700 font-medium">
+                                    Delayed
+                                  </span>
+                                )}
+                                {pct > 0 && pct < 100 && (
+                                  <span className="text-xs text-muted-foreground">{pct}%</span>
+                                )}
+                              </div>
+                              {(task.startDate || task.endDate) && (
+                                <p className="text-xs text-muted-foreground mt-0.5">
+                                  {task.startDate && format(new Date(task.startDate), 'MMM d')}
+                                  {task.endDate && ` – ${format(new Date(task.endDate), 'MMM d')}`}
+                                  {task.estimatedHours ? ` · ${task.estimatedHours}h est.` : ''}
+                                </p>
                               )}
                             </div>
-                            {(task.startDate || task.endDate) && (
-                              <p className="text-xs text-muted-foreground mt-0.5">
-                                {task.startDate && format(new Date(task.startDate), 'MMM d')}
-                                {task.endDate && ` – ${format(new Date(task.endDate), 'MMM d')}`}
-                                {task.effortHours > 0 && ` · ${task.effortHours}h`}
-                              </p>
-                            )}
-                          </div>
-                          {canAssignTasks ? (
-                            <Select
-                              value={task.owner?.id || 'unassigned'}
-                              onValueChange={(v) => assignTask(task.id, v === 'unassigned' ? null : v)}
-                            >
-                              <SelectTrigger className="h-7 w-auto min-w-0 border-0 bg-transparent p-0 shadow-none focus:ring-0">
-                                <Avatar className="h-6 w-6 cursor-pointer">
+                            {/* Avatar (not clickable in expanded row opener area) */}
+                            <div onClick={(e) => e.stopPropagation()}>
+                              {canAssignTasks ? (
+                                <Select
+                                  value={task.owner?.id || 'unassigned'}
+                                  onValueChange={(v) => assignTask(task.id, v === 'unassigned' ? null : v)}
+                                >
+                                  <SelectTrigger className="h-7 w-auto min-w-0 border-0 bg-transparent p-0 shadow-none focus:ring-0">
+                                    <Avatar className="h-6 w-6 cursor-pointer">
+                                      <AvatarFallback className="text-xs">
+                                        {task.owner
+                                          ? task.owner.name.split(' ').map((n) => n[0]).join('').slice(0, 2)
+                                          : '?'}
+                                      </AvatarFallback>
+                                    </Avatar>
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="unassigned">Unassigned</SelectItem>
+                                    {project.allocations.map((a) => (
+                                      <SelectItem key={a.userId} value={a.userId}>{a.user.name}</SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              ) : task.owner ? (
+                                <Avatar className="h-6 w-6 shrink-0">
                                   <AvatarFallback className="text-xs">
-                                    {task.owner
-                                      ? task.owner.name.split(' ').map((n) => n[0]).join('').slice(0, 2)
-                                      : '?'}
+                                    {task.owner.name.split(' ').map((n) => n[0]).join('').slice(0, 2)}
                                   </AvatarFallback>
                                 </Avatar>
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="unassigned">Unassigned</SelectItem>
-                                {project.allocations.map((a) => (
-                                  <SelectItem key={a.userId} value={a.userId}>{a.user.name}</SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          ) : task.owner ? (
-                            <Avatar className="h-6 w-6 shrink-0">
-                              <AvatarFallback className="text-xs">
-                                {task.owner.name.split(' ').map((n) => n[0]).join('').slice(0, 2)}
-                              </AvatarFallback>
-                            </Avatar>
-                          ) : null}
+                              ) : null}
+                            </div>
+                            {isTaskExpanded
+                              ? <ChevronUp className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                              : <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                            }
+                          </div>
+
+                          {/* Expanded task detail */}
+                          {isTaskExpanded && (
+                            <div className="bg-muted/20 px-4 pb-3 pt-2 space-y-2.5 border-t border-border/50">
+                              {/* Row 1: Status + % Complete */}
+                              <div className="grid grid-cols-3 gap-2">
+                                <div className="col-span-2 space-y-1">
+                                  <Label className="text-xs text-muted-foreground">Status</Label>
+                                  <Select
+                                    value={getEdit(task, 'status') as string}
+                                    onValueChange={(v) => setEdit(task.id, 'status', v ?? task.status)}
+                                  >
+                                    <SelectTrigger className="h-7 text-xs"><SelectValue /></SelectTrigger>
+                                    <SelectContent>
+                                      {TASK_STATUSES.map((s) => (
+                                        <SelectItem key={s} value={s}>{s.replace(/_/g, ' ')}</SelectItem>
+                                      ))}
+                                    </SelectContent>
+                                  </Select>
+                                </div>
+                                <div className="space-y-1">
+                                  <Label className="text-xs text-muted-foreground">% Done</Label>
+                                  <Input
+                                    type="number"
+                                    min={0} max={100}
+                                    value={getEdit(task, 'pctComplete') as number ?? 0}
+                                    onChange={(e) => setEdit(task.id, 'pctComplete', Number(e.target.value))}
+                                    className="h-7 text-xs"
+                                  />
+                                </div>
+                              </div>
+
+                              {/* Row 2: Scheduled dates (2 cols) + Actual dates (2 cols) */}
+                              <div className="grid grid-cols-4 gap-2">
+                                <div className="space-y-1">
+                                  <Label className="text-xs text-muted-foreground">
+                                    Sched. Start{!canEditDates && <span className="text-muted-foreground/60"> 🔒</span>}
+                                  </Label>
+                                  <Input
+                                    type="date"
+                                    value={(getEdit(task, 'startDate') as string)?.slice(0, 10) ?? ''}
+                                    onChange={(e) => setEdit(task.id, 'startDate', e.target.value)}
+                                    disabled={!canEditDates}
+                                    className="h-7 text-xs px-2"
+                                  />
+                                </div>
+                                <div className="space-y-1">
+                                  <Label className="text-xs text-muted-foreground">
+                                    Sched. End{!canEditDates && <span className="text-muted-foreground/60"> 🔒</span>}
+                                  </Label>
+                                  <Input
+                                    type="date"
+                                    value={(getEdit(task, 'endDate') as string)?.slice(0, 10) ?? ''}
+                                    onChange={(e) => setEdit(task.id, 'endDate', e.target.value)}
+                                    disabled={!canEditDates}
+                                    className="h-7 text-xs px-2"
+                                  />
+                                </div>
+                                <div className="space-y-1">
+                                  <Label className="text-xs text-muted-foreground">Actual Start</Label>
+                                  <Input
+                                    type="date"
+                                    value={(getEdit(task, 'actualStartDate') as string)?.slice(0, 10) ?? ''}
+                                    onChange={(e) => setEdit(task.id, 'actualStartDate', e.target.value)}
+                                    className="h-7 text-xs px-2"
+                                  />
+                                </div>
+                                <div className="space-y-1">
+                                  <Label className="text-xs text-muted-foreground">Actual End</Label>
+                                  <Input
+                                    type="date"
+                                    value={(getEdit(task, 'actualEndDate') as string)?.slice(0, 10) ?? ''}
+                                    onChange={(e) => setEdit(task.id, 'actualEndDate', e.target.value)}
+                                    className="h-7 text-xs px-2"
+                                  />
+                                </div>
+                              </div>
+
+                              {/* Description */}
+                              <div className="space-y-1">
+                                <Label className="text-xs text-muted-foreground">Description</Label>
+                                <Textarea
+                                  rows={2}
+                                  value={(getEdit(task, 'description') as string) ?? ''}
+                                  onChange={(e) => setEdit(task.id, 'description', e.target.value)}
+                                  placeholder="Task description..."
+                                  className="text-xs resize-none"
+                                />
+                              </div>
+
+                              <div className="flex items-center justify-between">
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-7 text-xs text-muted-foreground"
+                                  onClick={() => fetchOwnerHistory(task.id)}
+                                >
+                                  <History className="mr-1 h-3.5 w-3.5" />
+                                  {showHistory[task.id] ? 'Hide' : 'Assignment'} History
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  className="h-7 text-xs"
+                                  onClick={() => saveTask(task)}
+                                  disabled={savingTask === task.id}
+                                >
+                                  {savingTask === task.id ? 'Saving…' : 'Save'}
+                                </Button>
+                              </div>
+
+                              {/* Owner change history */}
+                              {showHistory[task.id] && (
+                                <div className="rounded border border-border/60 bg-background p-2 space-y-1">
+                                  {(ownerHistory[task.id] || []).length === 0 ? (
+                                    <p className="text-xs text-muted-foreground text-center py-1">No assignment changes yet</p>
+                                  ) : (
+                                    (ownerHistory[task.id] || []).map((h) => (
+                                      <div key={h.id} className="flex items-center gap-2 text-xs">
+                                        <span className="text-muted-foreground shrink-0">
+                                          {format(new Date(h.changedAt), 'MMM d, HH:mm')}
+                                        </span>
+                                        <span className="font-medium">{h.changedBy.name}</span>
+                                        <span className="text-muted-foreground">changed from</span>
+                                        <span className="font-medium">{h.fromOwner?.name || 'Unassigned'}</span>
+                                        <span className="text-muted-foreground">→</span>
+                                        <span className="font-medium">{h.toOwner?.name || 'Unassigned'}</span>
+                                      </div>
+                                    ))
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          )}
                         </div>
                       )
                     })

@@ -20,6 +20,15 @@ export async function GET(_req: NextRequest, ctx: RouteContext<'/api/tasks/[id]'
           take: 20,
           include: { changedBy: { select: { id: true, name: true } } },
         },
+        ownerHistory: {
+          orderBy: { changedAt: 'desc' },
+          take: 20,
+          include: {
+            changedBy: { select: { id: true, name: true } },
+            fromOwner: { select: { id: true, name: true } },
+            toOwner: { select: { id: true, name: true } },
+          },
+        },
       },
     })
     if (!task) return Response.json({ error: 'Not found' }, { status: 404 })
@@ -39,7 +48,7 @@ export async function PATCH(req: NextRequest, ctx: RouteContext<'/api/tasks/[id]
     const data = await req.json()
 
     const existing = await prisma.task.findUniqueOrThrow({ where: { id } })
-    const ownerChanged = data.ownerId && data.ownerId !== existing.ownerId
+    const ownerChanged = data.ownerId !== undefined && data.ownerId !== existing.ownerId
     const statusChanged = data.status !== undefined && data.status !== existing.status
 
     // Create history entry and update statusChangedAt when status changes
@@ -60,6 +69,20 @@ export async function PATCH(req: NextRequest, ctx: RouteContext<'/api/tasks/[id]
       })
     }
 
+    // Log owner change history
+    if (ownerChanged) {
+      await prisma.taskOwnerHistory.create({
+        data: {
+          taskId: id,
+          fromOwnerId: existing.ownerId || null,
+          toOwnerId: data.ownerId || null,
+          changedById: session.id,
+        },
+      })
+    }
+
+    const canEditDates = ['ADMIN', 'MANAGER', 'PLANNER'].includes(session.role)
+
     const task = await prisma.task.update({
       where: { id },
       data: {
@@ -69,12 +92,21 @@ export async function PATCH(req: NextRequest, ctx: RouteContext<'/api/tasks/[id]
         ...(statusChanged && { statusChangedAt: new Date() }),
         ...(statusChanged && data.status === 'REWORK' && { reworkCount: { increment: 1 } }),
         ...(data.priority !== undefined && { priority: data.priority }),
-        ...(data.startDate !== undefined && {
+        // Scheduled dates restricted to ADMIN/MANAGER/PLANNER
+        ...(data.startDate !== undefined && canEditDates && {
           startDate: data.startDate ? new Date(data.startDate) : null,
         }),
-        ...(data.endDate !== undefined && {
+        ...(data.endDate !== undefined && canEditDates && {
           endDate: data.endDate ? new Date(data.endDate) : null,
         }),
+        // Actual dates editable by anyone
+        ...(data.actualStartDate !== undefined && {
+          actualStartDate: data.actualStartDate ? new Date(data.actualStartDate) : null,
+        }),
+        ...(data.actualEndDate !== undefined && {
+          actualEndDate: data.actualEndDate ? new Date(data.actualEndDate) : null,
+        }),
+        ...(data.pctComplete !== undefined && { pctComplete: Math.min(100, Math.max(0, Number(data.pctComplete))) }),
         ...(data.effortHours !== undefined && { effortHours: data.effortHours }),
         ...(data.estimatedHours !== undefined && { estimatedHours: data.estimatedHours }),
         ...(data.ownerId !== undefined && { ownerId: data.ownerId }),

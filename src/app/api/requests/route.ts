@@ -4,12 +4,17 @@ import { requireAuth } from '@/lib/auth'
 
 export async function GET(req: NextRequest) {
   try {
-    await requireAuth()
+    const session = await requireAuth()
     const { searchParams } = new URL(req.url)
     const status = searchParams.get('status')
 
+    // Role-based visibility: ADMIN/MANAGER/PLANNER see all; everyone else sees only their own submitted requests
+    const roleFilter = ['ADMIN', 'MANAGER', 'PLANNER'].includes(session.role)
+      ? {}
+      : { submitterId: session.id }
+
     const requests = await prisma.request.findMany({
-      where: { ...(status ? { status: status as never } : {}) },
+      where: { ...roleFilter, ...(status ? { status: status as never } : {}) },
       include: {
         submitter:  { select: { id: true, name: true, avatarUrl: true } },
         assignee:   { select: { id: true, name: true, role: true } },
@@ -32,6 +37,11 @@ export async function POST(req: NextRequest) {
     const session = await requireAuth()
     const data = await req.json()
 
+    // RESOURCE can only submit requests for themselves — ignore any passed assigneeId
+    const effectiveAssigneeId = session.role === 'RESOURCE'
+      ? session.id
+      : (data.assigneeId || null)
+
     const request = await prisma.request.create({
       data: {
         title: data.title,
@@ -39,7 +49,7 @@ export async function POST(req: NextRequest) {
         priority: data.priority || 'MEDIUM',
         type: data.type,
         submitterId: session.id,
-        assigneeId: data.assigneeId || null,
+        assigneeId: effectiveAssigneeId,
         notes: data.notes,
         startDate:    data.startDate   ? new Date(data.startDate)   : null,
         endDate:      data.endDate     ? new Date(data.endDate)     : null,

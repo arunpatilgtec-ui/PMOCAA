@@ -131,6 +131,11 @@ model User {
   allocations           ResourceAllocation[]
   documents             Document[]         @relation("DocumentUploader")
   sessions              Session[]
+  ledProducts           Product[]          @relation("ProductLead")
+  productResources      ProductResource[]  @relation("ProductResourceUser")
+  taskOwnerChangesBy    TaskOwnerHistory[] @relation("TaskOwnerChangeBy")
+  taskOwnerChangesFrom  TaskOwnerHistory[] @relation("TaskOwnerChangeFrom")
+  taskOwnerChangesTo    TaskOwnerHistory[] @relation("TaskOwnerChangeTo")
 
   @@map("users")
 }
@@ -184,12 +189,17 @@ model Project {
   priority    Priority      @default(MEDIUM)
   startDate   DateTime
   endDate     DateTime
-  leadId            String?
-  plannerId         String?
-  editAccessGranted Boolean            @default(false)
-  planStatus        PlanStatus         @default(DRAFT)
-  createdAt         DateTime           @default(now())
-  updatedAt         DateTime           @updatedAt
+  leadId                String?
+  plannerId             String?
+  editAccessGranted     Boolean            @default(false)
+  planStatus            PlanStatus         @default(DRAFT)
+  category              String?
+  productType           String?
+  projectLinks          String[]
+  projectClassification String?
+  numberOfProducts      Int?
+  createdAt             DateTime           @default(now())
+  updatedAt             DateTime           @updatedAt
 
   lead            User?                @relation("ProjectLead", fields: [leadId], references: [id], onDelete: SetNull)
   planner         User?                @relation("ProjectPlanner", fields: [plannerId], references: [id], onDelete: SetNull)
@@ -200,6 +210,7 @@ model Project {
   notifications   Notification[]
   scheduleChanges ScheduleChange[]
   allocations     ResourceAllocation[]
+  products        Product[]
 
   @@map("projects")
 }
@@ -236,6 +247,9 @@ model Task {
   endDate         DateTime?
   effortHours     Float      @default(0)
   estimatedHours  Float      @default(0)
+  pctComplete     Int        @default(0)
+  actualStartDate DateTime?
+  actualEndDate   DateTime?
   order           Int        @default(0)
   dependsOn       String[]
   tags            String[]
@@ -252,6 +266,7 @@ model Task {
   scheduleChanges ScheduleChange[] @relation("AffectedTask")
   notifications   Notification[]
   history         TaskHistory[]
+  ownerHistory    TaskOwnerHistory[]
 
   @@map("tasks")
 }
@@ -389,4 +404,54 @@ model Document {
   task       Task?       @relation(fields: [taskId], references: [id])
 
   @@map("documents")
+}
+
+model Product {
+  id        String   @id @default(cuid())
+  projectId String
+  brand     String
+  modelNo   String
+  leadId    String?
+  order     Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  project   Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  lead      User?            @relation("ProductLead", fields: [leadId], references: [id], onDelete: SetNull)
+  resources ProductResource[]
+
+  @@map("products")
+}
+
+model ProductResource {
+  id           String   @id @default(cuid())
+  productId    String
+  userId       String
+  subsystems   String[]
+  costingTypes String[]
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  user    User    @relation("ProductResourceUser", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([productId, userId])
+  @@map("product_resources")
+}
+
+model TaskOwnerHistory {
+  id          String   @id @default(cuid())
+  taskId      String
+  fromOwnerId String?
+  toOwnerId   String?
+  changedById String
+  changedAt   DateTime @default(now())
+  note        String?
+
+  task      Task  @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  fromOwner User? @relation("TaskOwnerChangeFrom", fields: [fromOwnerId], references: [id], onDelete: SetNull)
+  toOwner   User? @relation("TaskOwnerChangeTo", fields: [toOwnerId], references: [id], onDelete: SetNull)
+  changedBy User  @relation("TaskOwnerChangeBy", fields: [changedById], references: [id], onDelete: Cascade)
+
+  @@map("task_owner_history")
 }

@@ -2,14 +2,24 @@ import { NextRequest } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { requireAuth } from '@/lib/auth'
 
+async function canAllocate(session: { id: string; role: string }, projectId: string) {
+  if (['ADMIN', 'PLANNER'].includes(session.role)) return true
+  if (session.role === 'PROJECT_LEAD') {
+    const proj = await prisma.project.findUnique({ where: { id: projectId }, select: { leadId: true } })
+    return proj?.leadId === session.id
+  }
+  return false
+}
+
 export async function POST(req: NextRequest) {
   try {
     const session = await requireAuth()
-    if (!['ADMIN', 'PLANNER'].includes(session.role)) {
+    const data = await req.json()
+
+    if (!(await canAllocate(session, data.projectId))) {
       return Response.json({ error: 'Forbidden' }, { status: 403 })
     }
 
-    const data = await req.json()
     const allocation = await prisma.resourceAllocation.upsert({
       where: { userId_projectId: { userId: data.userId, projectId: data.projectId } },
       update: {
@@ -29,7 +39,6 @@ export async function POST(req: NextRequest) {
         project: { select: { id: true, name: true } },
       },
     })
-    // Notify the allocated user (if it's not the planner allocating themselves)
     if (data.userId !== session.id) {
       const project = await prisma.project.findUnique({
         where: { id: data.projectId },
@@ -59,11 +68,12 @@ export async function POST(req: NextRequest) {
 export async function DELETE(req: NextRequest) {
   try {
     const session = await requireAuth()
-    if (!['ADMIN', 'PLANNER'].includes(session.role)) {
+    const { userId, projectId } = await req.json()
+
+    if (!(await canAllocate(session, projectId))) {
       return Response.json({ error: 'Forbidden' }, { status: 403 })
     }
 
-    const { userId, projectId } = await req.json()
     await prisma.resourceAllocation.delete({
       where: { userId_projectId: { userId, projectId } },
     })

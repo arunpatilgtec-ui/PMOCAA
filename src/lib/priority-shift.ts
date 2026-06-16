@@ -1,17 +1,8 @@
 import { prisma } from './prisma'
+import { addWorkingDays } from './date-utils'
 
+export { addWorkingDays }
 export const PRIORITY_RANK: Record<string, number> = { LOW: 0, MEDIUM: 1, HIGH: 2, CRITICAL: 3 }
-
-export function addWorkingDays(date: Date, days: number): Date {
-  const result = new Date(date)
-  let added = 0
-  while (added < days) {
-    result.setDate(result.getDate() + 1)
-    const dow = result.getDay()
-    if (dow !== 0 && dow !== 6) added++
-  }
-  return result
-}
 
 interface IncomingTask {
   id: string

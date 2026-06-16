@@ -1,13 +1,15 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { format } from 'date-fns'
+import { format, isWithinInterval, startOfDay, endOfDay, parseISO } from 'date-fns'
 import { toast } from 'sonner'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { Skeleton } from '@/components/ui/skeleton'
-import { Bell, BellOff, CheckCheck } from 'lucide-react'
+import { Bell, BellOff, CheckCheck, X } from 'lucide-react'
 import { useAuthStore } from '@/store/auth'
 import Link from 'next/link'
 
@@ -43,6 +45,10 @@ export default function NotificationsPage() {
   const [unreadCount, setUnreadCount] = useState(0)
   const [loading, setLoading] = useState(true)
 
+  // Date range filter
+  const [fromDate, setFromDate] = useState('')
+  const [toDate, setToDate] = useState('')
+
   const load = async () => {
     try {
       const res = await fetch('/api/notifications')
@@ -74,11 +80,34 @@ export default function NotificationsPage() {
     setUnreadCount((c) => Math.max(0, c - 1))
   }
 
+  function clearDateFilter() {
+    setFromDate('')
+    setToDate('')
+  }
+
   const RESOURCE_TYPES = ['TASK_ASSIGNED', 'APPROVAL_COMPLETED']
-  const displayed = user?.role === 'RESOURCE'
+  let displayed = user?.role === 'RESOURCE'
     ? notifications.filter((n) => RESOURCE_TYPES.includes(n.type))
     : notifications
+
+  // Apply date range filter
+  if (fromDate || toDate) {
+    displayed = displayed.filter((n) => {
+      const date = parseISO(n.createdAt)
+      if (fromDate && toDate) {
+        return isWithinInterval(date, {
+          start: startOfDay(parseISO(fromDate)),
+          end: endOfDay(parseISO(toDate)),
+        })
+      }
+      if (fromDate) return date >= startOfDay(parseISO(fromDate))
+      if (toDate) return date <= endOfDay(parseISO(toDate))
+      return true
+    })
+  }
+
   const displayedUnread = displayed.filter((n) => !n.isRead).length
+  const hasDateFilter = fromDate || toDate
 
   return (
     <div className="p-6 space-y-5">
@@ -90,11 +119,45 @@ export default function NotificationsPage() {
               <Badge variant="destructive" className="text-xs">{displayedUnread}</Badge>
             )}
           </h1>
-          <p className="text-muted-foreground text-sm">{displayed.length} total</p>
+          <p className="text-muted-foreground text-sm">
+            {displayed.length} {hasDateFilter ? 'filtered' : 'total'}
+          </p>
         </div>
         {displayedUnread > 0 && (
           <Button variant="outline" size="sm" onClick={markAllRead}>
             <CheckCheck className="mr-1.5 h-4 w-4" /> Mark all read
+          </Button>
+        )}
+      </div>
+
+      {/* Date range filter */}
+      <div className="flex items-end gap-3 flex-wrap p-3 rounded-lg border bg-muted/30">
+        <div className="space-y-1">
+          <Label className="text-xs text-muted-foreground">From</Label>
+          <Input
+            type="date"
+            value={fromDate}
+            onChange={(e) => setFromDate(e.target.value)}
+            className="h-8 text-sm w-36"
+          />
+        </div>
+        <div className="space-y-1">
+          <Label className="text-xs text-muted-foreground">To</Label>
+          <Input
+            type="date"
+            value={toDate}
+            onChange={(e) => setToDate(e.target.value)}
+            className="h-8 text-sm w-36"
+          />
+        </div>
+        {hasDateFilter && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-8 text-xs text-muted-foreground"
+            onClick={clearDateFilter}
+          >
+            <X className="h-3.5 w-3.5 mr-1" /> Clear
           </Button>
         )}
       </div>
@@ -110,8 +173,15 @@ export default function NotificationsPage() {
       ) : displayed.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-20">
           <BellOff className="h-12 w-12 text-muted-foreground/40 mb-3" />
-          <p className="text-muted-foreground">No notifications</p>
-          {user?.role === 'RESOURCE' && (
+          <p className="text-muted-foreground">
+            {hasDateFilter ? 'No notifications in this date range' : 'No notifications'}
+          </p>
+          {hasDateFilter && (
+            <Button variant="outline" size="sm" className="mt-3" onClick={clearDateFilter}>
+              Clear filter
+            </Button>
+          )}
+          {!hasDateFilter && user?.role === 'RESOURCE' && (
             <p className="text-xs text-muted-foreground mt-1 text-center max-w-xs">
               You will be notified here when a request is approved or when you are added to a project.
             </p>

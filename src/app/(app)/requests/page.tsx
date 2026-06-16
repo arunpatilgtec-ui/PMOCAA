@@ -584,21 +584,23 @@ export default function RequestsPage() {
               </div>
             </div>
 
-            {/* Assign to picker */}
-            <div className="space-y-1.5">
-              <Label>Assign to (who will do the work)</Label>
-              <Select value={assigneeId || user?.id || ''} onValueChange={(v) => setAssigneeId(v ?? '')}>
-                <SelectTrigger className="w-full"><SelectValue placeholder="Select assignee" /></SelectTrigger>
-                <SelectContent>
-                  {user?.id && <SelectItem value={user.id}>Me ({user.name})</SelectItem>}
-                  {formUsers.filter(u => u.id !== user?.id).map((u) => (
-                    <SelectItem key={u.id} value={u.id}>
-                      {u.name} <span className="text-muted-foreground text-xs">· {u.role.replace('_', ' ')}</span>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+            {/* Assign to picker — RESOURCE can only submit for themselves */}
+            {user?.role !== 'RESOURCE' && (
+              <div className="space-y-1.5">
+                <Label>Assign to (who will do the work)</Label>
+                <Select value={assigneeId || user?.id || ''} onValueChange={(v) => setAssigneeId(v ?? '')}>
+                  <SelectTrigger className="w-full"><SelectValue placeholder="Select assignee" /></SelectTrigger>
+                  <SelectContent>
+                    {user?.id && <SelectItem value={user.id}>Me ({user.name})</SelectItem>}
+                    {formUsers.filter(u => u.id !== user?.id).map((u) => (
+                      <SelectItem key={u.id} value={u.id}>
+                        {u.name} <span className="text-muted-foreground text-xs">· {u.role.replace('_', ' ')}</span>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
 
             {/* Assigned by picker */}
             <div className="space-y-1.5">
