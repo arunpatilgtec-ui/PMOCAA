@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { useAuthStore, isPlanner, canAllocateResources } from '@/store/auth'
 import { toast } from 'sonner'
@@ -124,7 +124,7 @@ export default function ProjectDetailPage() {
   const [andonSeverity, setAndonSeverity] = useState<string>('HIGH')
   const [andonSaving, setAndonSaving] = useState(false)
 
-  const load = async () => {
+  const load = useCallback(async () => {
     try {
       const res = await fetch(`/api/projects/${id}`)
       if (!res.ok) { router.push('/projects'); return }
@@ -132,7 +132,7 @@ export default function ProjectDetailPage() {
     } finally {
       setLoading(false)
     }
-  }
+  }, [id, router])
 
   useEffect(() => {
     load()
@@ -143,7 +143,7 @@ export default function ProjectDetailPage() {
       clearInterval(interval)
       document.removeEventListener('visibilitychange', onVisible)
     }
-  }, [id])
+  }, [load])
 
   if (loading) {
     return (

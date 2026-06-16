@@ -40,7 +40,8 @@ export function CreateTaskDialog({
   allowedUsers?: Array<{ id: string; name: string; role: string }>
 }) {
   const [loading, setLoading] = useState(false)
-  const [users, setUsers] = useState<User[]>([])
+  const [fetchedUsers, setFetchedUsers] = useState<User[]>([])
+  const users = allowedUsers ?? fetchedUsers
 
   const { register, handleSubmit, setValue, reset, formState: { errors } } = useForm<FormData>({
     resolver: zodResolver(schema),
@@ -48,12 +49,15 @@ export function CreateTaskDialog({
   })
 
   useEffect(() => {
-    if (open) {
-      if (allowedUsers) {
-        setUsers(allowedUsers)
-      } else {
-        fetch('/api/users').then((r) => r.json()).then(setUsers).catch(() => {})
+    if (open && !allowedUsers) {
+      const load = async () => {
+        try {
+          const r = await fetch('/api/users')
+          const data = await r.json()
+          setFetchedUsers(data)
+        } catch { /* silent */ }
       }
+      load()
     }
   }, [open, allowedUsers])
 

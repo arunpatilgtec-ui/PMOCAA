@@ -53,7 +53,7 @@ export function CreateProjectDialog({
   const [type, setType] = useState<'TEARDOWN' | 'OTHER'>('TEARDOWN')
   const [priority, setPriority] = useState('MEDIUM')
   const [startDate, setStartDate] = useState('')
-  const [endDate, setEndDate] = useState('')
+  const [endDateOverride, setEndDateOverride] = useState('')
   const [leadId, setLeadId] = useState('')
   const [classification, setClassification] = useState('')
   const [numberOfProducts, setNumberOfProducts] = useState('')
@@ -74,16 +74,14 @@ export function CreateProjectDialog({
     }
   }, [open])
 
-  useEffect(() => {
-    if (type === 'TEARDOWN' && category && category !== 'Other' && startDate) {
-      const auto = calcEndDate(startDate, category)
-      if (auto) setEndDate(auto)
-    }
-  }, [category, startDate, type])
+  const autoEndDate = (type === 'TEARDOWN' && category && category !== 'Other' && startDate)
+    ? calcEndDate(startDate, category)
+    : ''
+  const endDate = endDateOverride || autoEndDate
 
   function resetForm() {
     setName(''); setType('TEARDOWN'); setPriority('MEDIUM')
-    setStartDate(''); setEndDate(''); setLeadId('')
+    setStartDate(''); setEndDateOverride(''); setLeadId('')
     setCategory(''); setProductType('')
     setClassification(''); setNumberOfProducts('')
     setLinks([''])
@@ -301,7 +299,7 @@ export function CreateProjectDialog({
               <Input
                 type="date"
                 value={endDate}
-                onChange={(e) => setEndDate(e.target.value)}
+                onChange={(e) => setEndDateOverride(e.target.value)}
                 placeholder={templateWs ? 'Auto-calculated' : ''}
               />
             </div>

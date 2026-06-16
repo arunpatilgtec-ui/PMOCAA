@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useAuthStore } from '@/store/auth'
 import { toast } from 'sonner'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -92,7 +92,7 @@ export function ProductsPanel({
   const subsystems = getSubsystemsForCategory(project.category)
   const allocatedUsers = project.allocations.map((a) => a.user)
 
-  async function load() {
+  const load = useCallback(async () => {
     try {
       const res = await fetch(`/api/projects/${project.id}/products`)
       const data = await res.json()
@@ -100,9 +100,20 @@ export function ProductsPanel({
     } catch { /* silent */ } finally {
       setLoading(false)
     }
-  }
+  }, [project.id])
 
-  useEffect(() => { load() }, [project.id])
+  useEffect(() => {
+    const fetchProducts = async () => {
+      try {
+        const res = await fetch(`/api/projects/${project.id}/products`)
+        const data = await res.json()
+        setProducts(Array.isArray(data) ? data : [])
+      } catch { /* silent */ } finally {
+        setLoading(false)
+      }
+    }
+    fetchProducts()
+  }, [project.id])
 
   function openAdd() {
     setEditingProduct(null)
@@ -153,6 +164,7 @@ export function ProductsPanel({
       toast.success(editingProduct ? 'Product updated' : 'Product added')
       setDialogOpen(false)
       load()
+      onRefresh()
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : 'Failed to save')
     } finally { setSaving(false) }
@@ -165,6 +177,7 @@ export function ProductsPanel({
       if (!res.ok) throw new Error()
       toast.success('Product removed')
       load()
+      onRefresh()
     } catch {
       toast.error('Failed to remove product')
     } finally { setDeletingId(null) }

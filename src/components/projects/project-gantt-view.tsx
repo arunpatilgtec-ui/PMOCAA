@@ -1,6 +1,6 @@
 'use client'
 
-import { useRef, useState, useCallback, useEffect } from 'react'
+import { useRef, useState, useCallback } from 'react'
 import { useAuthStore } from '@/store/auth'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -284,7 +284,7 @@ export function ProjectGanttView({
           </div>
 
           {/* Rows */}
-          {allRows.map((row, rowIdx) => {
+          {allRows.map((row) => {
             if (row.type === 'ws') {
               return (
                 <div key={`ws-${row.ws.id}`} className="flex border-b bg-muted/20">
