@@ -43,6 +43,7 @@ enum TaskStatus {
   PLANNED
   IN_PROGRESS
   REVIEW
+  REWORK
   COMPLETED
   CANCELLED
 }
@@ -86,6 +87,15 @@ enum ChangeType {
   RESOURCE_UNAVAILABLE
   PROJECT_PRIORITY_CHANGED
   TASK_DATES_CHANGED
+  RESOURCE_REQUESTED
+  TIMELINE_CHANGE_REQUESTED
+  ANDON_RAISED
+}
+
+enum PlanStatus {
+  DRAFT
+  SUBMITTED
+  APPROVED
 }
 
 model User {
@@ -98,24 +108,29 @@ model User {
   capacityPct Int      @default(100)
   department  String?
   title       String?
-  isActive    Boolean  @default(true)
-  createdAt   DateTime @default(now())
+  isActive           Boolean  @default(true)
+  mustChangePassword Boolean  @default(false)
+  createdAt          DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  ledProjects        Project[]          @relation("ProjectLead")
-  plannedProjects    Project[]          @relation("ProjectPlanner")
-  ledWorkstreams     Workstream[]       @relation("WorkstreamLead")
-  ownedTasks         Task[]             @relation("TaskOwner")
-  notifications      Notification[]
-  approvals          ApprovalRequest[]  @relation("Approver")
-  requestedApprovals ApprovalRequest[]  @relation("Requester")
-  submittedRequests  Request[]          @relation("RequestSubmitter")
-  assignedRequests   Request[]          @relation("RequestAssignee")
-  sentNotifications  Notification[]     @relation("NotificationSender")
-  scheduledChanges   ScheduleChange[]   @relation("ChangeRequester")
-  allocations        ResourceAllocation[]
-  documents          Document[]         @relation("DocumentUploader")
-  sessions           Session[]
+  ledProjects           Project[]          @relation("ProjectLead")
+  plannedProjects       Project[]          @relation("ProjectPlanner")
+  ledWorkstreams        Workstream[]       @relation("WorkstreamLead")
+  ownedTasks            Task[]             @relation("TaskOwner")
+  assignedTasks         Task[]             @relation("TaskAssignedBy")
+  approvedTasks         Task[]             @relation("TaskApprovedBy")
+  taskHistoryChanges    TaskHistory[]      @relation("TaskHistoryChanger")
+  notifications         Notification[]
+  approvals             ApprovalRequest[]  @relation("Approver")
+  requestedApprovals    ApprovalRequest[]  @relation("Requester")
+  submittedRequests     Request[]          @relation("RequestSubmitter")
+  assignedRequests      Request[]          @relation("RequestAssignee")
+  requestsAssignedByMe  Request[]          @relation("RequestAssignedBy")
+  sentNotifications     Notification[]     @relation("NotificationSender")
+  scheduledChanges      ScheduleChange[]   @relation("ChangeRequester")
+  allocations           ResourceAllocation[]
+  documents             Document[]         @relation("DocumentUploader")
+  sessions              Session[]
 
   @@map("users")
 }
@@ -146,9 +161,16 @@ model Request {
   createdAt   DateTime      @default(now())
   updatedAt   DateTime      @updatedAt
 
-  submitter User     @relation("RequestSubmitter", fields: [submitterId], references: [id])
-  assignee  User?    @relation("RequestAssignee", fields: [assigneeId], references: [id])
-  project   Project? @relation(fields: [projectId], references: [id])
+  startDate    DateTime?
+  endDate      DateTime?
+  isRecurring  Boolean    @default(false)
+  hoursPerDay  Float?
+  assignedById String?
+
+  submitter  User     @relation("RequestSubmitter", fields: [submitterId], references: [id], onDelete: Cascade)
+  assignee   User?    @relation("RequestAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+  assignedBy User?    @relation("RequestAssignedBy", fields: [assignedById], references: [id], onDelete: SetNull)
+  project    Project? @relation(fields: [projectId], references: [id])
 
   @@map("requests")
 }
@@ -162,13 +184,15 @@ model Project {
   priority    Priority      @default(MEDIUM)
   startDate   DateTime
   endDate     DateTime
-  leadId      String?
-  plannerId   String?
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
+  leadId            String?
+  plannerId         String?
+  editAccessGranted Boolean            @default(false)
+  planStatus        PlanStatus         @default(DRAFT)
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
 
-  lead            User?                @relation("ProjectLead", fields: [leadId], references: [id])
-  planner         User?                @relation("ProjectPlanner", fields: [plannerId], references: [id])
+  lead            User?                @relation("ProjectLead", fields: [leadId], references: [id], onDelete: SetNull)
+  planner         User?                @relation("ProjectPlanner", fields: [plannerId], references: [id], onDelete: SetNull)
   request         Request?
   workstreams     Workstream[]
   milestones      Milestone[]
@@ -191,7 +215,7 @@ model Workstream {
   updatedAt DateTime         @updatedAt
 
   project   Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  lead      User?      @relation("WorkstreamLead", fields: [leadId], references: [id])
+  lead      User?      @relation("WorkstreamLead", fields: [leadId], references: [id], onDelete: SetNull)
   tasks     Task[]
   documents Document[]
 
@@ -199,30 +223,53 @@ model Workstream {
 }
 
 model Task {
-  id             String     @id @default(cuid())
-  name           String
-  description    String?
-  workstreamId   String
-  ownerId        String?
-  status         TaskStatus @default(BACKLOG)
-  priority       Priority   @default(MEDIUM)
-  startDate      DateTime?
-  endDate        DateTime?
-  effortHours    Float      @default(0)
-  estimatedHours Float      @default(0)
-  order          Int        @default(0)
-  dependsOn      String[]
-  tags           String[]
-  createdAt      DateTime   @default(now())
-  updatedAt      DateTime   @updatedAt
+  id              String     @id @default(cuid())
+  name            String
+  description     String?
+  workstreamId    String
+  ownerId         String?
+  assignedById    String?
+  approvedById    String?
+  status          TaskStatus @default(BACKLOG)
+  priority        Priority   @default(MEDIUM)
+  startDate       DateTime?
+  endDate         DateTime?
+  effortHours     Float      @default(0)
+  estimatedHours  Float      @default(0)
+  order           Int        @default(0)
+  dependsOn       String[]
+  tags            String[]
+  reworkCount     Int        @default(0)
+  statusChangedAt DateTime   @default(now())
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
 
   workstream      Workstream       @relation(fields: [workstreamId], references: [id], onDelete: Cascade)
-  owner           User?            @relation("TaskOwner", fields: [ownerId], references: [id])
+  owner           User?            @relation("TaskOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  assignedBy      User?            @relation("TaskAssignedBy", fields: [assignedById], references: [id], onDelete: SetNull)
+  approvedBy      User?            @relation("TaskApprovedBy", fields: [approvedById], references: [id], onDelete: SetNull)
   documents       Document[]
   scheduleChanges ScheduleChange[] @relation("AffectedTask")
   notifications   Notification[]
+  history         TaskHistory[]
 
   @@map("tasks")
+}
+
+model TaskHistory {
+  id              String      @id @default(cuid())
+  taskId          String
+  fromStatus      TaskStatus?
+  toStatus        TaskStatus
+  changedAt       DateTime    @default(now())
+  durationMinutes Int?
+  note            String?
+  changedById     String?
+
+  task      Task  @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  changedBy User? @relation("TaskHistoryChanger", fields: [changedById], references: [id], onDelete: SetNull)
+
+  @@map("task_history")
 }
 
 model Milestone {
@@ -274,7 +321,7 @@ model ScheduleChange {
   createdAt       DateTime       @default(now())
   updatedAt       DateTime       @updatedAt
 
-  requester     User             @relation("ChangeRequester", fields: [requesterId], references: [id])
+  requester     User             @relation("ChangeRequester", fields: [requesterId], references: [id], onDelete: Cascade)
   project       Project?         @relation(fields: [projectId], references: [id])
   approval      ApprovalRequest?
   affectedTasks Task[]           @relation("AffectedTask")
@@ -293,8 +340,8 @@ model ApprovalRequest {
   updatedAt        DateTime       @updatedAt
 
   scheduleChange ScheduleChange @relation(fields: [scheduleChangeId], references: [id], onDelete: Cascade)
-  requester      User           @relation("Requester", fields: [requesterId], references: [id])
-  approver       User?          @relation("Approver", fields: [approverId], references: [id])
+  requester      User           @relation("Requester", fields: [requesterId], references: [id], onDelete: Cascade)
+  approver       User?          @relation("Approver", fields: [approverId], references: [id], onDelete: SetNull)
 
   @@map("approval_requests")
 }
@@ -314,7 +361,7 @@ model Notification {
   createdAt DateTime         @default(now())
 
   user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  sender  User?    @relation("NotificationSender", fields: [senderId], references: [id])
+  sender  User?    @relation("NotificationSender", fields: [senderId], references: [id], onDelete: SetNull)
   project Project? @relation(fields: [projectId], references: [id])
   task    Task?    @relation(fields: [taskId], references: [id])
 
@@ -336,7 +383,7 @@ model Document {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  uploader   User        @relation("DocumentUploader", fields: [uploaderId], references: [id])
+  uploader   User        @relation("DocumentUploader", fields: [uploaderId], references: [id], onDelete: Cascade)
   project    Project?    @relation(fields: [projectId], references: [id])
   workstream Workstream? @relation(fields: [workstreamId], references: [id])
   task       Task?       @relation(fields: [taskId], references: [id])

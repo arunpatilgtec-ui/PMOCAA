@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import { useAuthStore, canManageProjects } from '@/store/auth'
+import { useAuthStore, canCreateProject } from '@/store/auth'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -12,7 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Skeleton } from '@/components/ui/skeleton'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import {
-  Plus, Search, FolderKanban, Calendar, Users, AlertCircle, Filter
+  Plus, Search, FolderKanban, Calendar, Users, AlertCircle
 } from 'lucide-react'
 import { format, isPast } from 'date-fns'
 import { CreateProjectDialog } from '@/components/projects/create-project-dialog'
@@ -51,10 +51,18 @@ export default function ProjectsPage() {
   const [typeFilter, setTypeFilter] = useState<string | null>('ALL')
   const [createOpen, setCreateOpen] = useState(false)
 
+  // Portfolio vs My Projects toggle (only PLANNER has choice; others are fixed)
+  const isPlanner = user?.role === 'PLANNER' || user?.role === 'ADMIN'
+  const isProjectLead = user?.role === 'PROJECT_LEAD'
+  const defaultView = isProjectLead ? 'mine' : 'portfolio'
+  const [viewMode, setViewMode] = useState<'portfolio' | 'mine'>(defaultView)
+
+  const pageTitle = isProjectLead ? 'My Projects' : viewMode === 'mine' ? 'My Projects' : 'All Projects'
+
   const load = async () => {
-    setLoading(true)
     try {
-      const res = await fetch('/api/projects')
+      const url = viewMode === 'mine' ? '/api/projects?view=mine' : '/api/projects'
+      const res = await fetch(url)
       const data = await res.json()
       setProjects(Array.isArray(data) ? data : [])
     } finally {
@@ -62,7 +70,18 @@ export default function ProjectsPage() {
     }
   }
 
-  useEffect(() => { load() }, [])
+  useEffect(() => {
+    setLoading(true)
+    load()
+    const interval = setInterval(load, 10000)
+    // Refresh immediately when switching back to this tab
+    const onVisible = () => { if (document.visibilityState === 'visible') load() }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => {
+      clearInterval(interval)
+      document.removeEventListener('visibilitychange', onVisible)
+    }
+  }, [viewMode])
 
   const filtered = projects.filter((p) => {
     const matchSearch = p.name.toLowerCase().includes(search.toLowerCase())
@@ -79,16 +98,37 @@ export default function ProjectsPage() {
 
   return (
     <div className="p-6 space-y-5">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
         <div>
-          <h1 className="text-2xl font-bold">Projects</h1>
+          <h1 className="text-2xl font-bold">{pageTitle}</h1>
           <p className="text-muted-foreground text-sm">{filtered.length} project{filtered.length !== 1 ? 's' : ''}</p>
         </div>
-        {user && canManageProjects(user.role) && (
-          <Button onClick={() => setCreateOpen(true)} size="sm">
-            <Plus className="mr-1 h-4 w-4" /> New Project
-          </Button>
-        )}
+
+        <div className="flex items-center gap-2">
+          {/* View toggle for PLANNER/ADMIN only */}
+          {isPlanner && (
+            <div className="flex rounded-md border overflow-hidden">
+              <button
+                onClick={() => setViewMode('portfolio')}
+                className={`px-3 py-1.5 text-xs font-medium transition-colors ${viewMode === 'portfolio' ? 'bg-primary text-primary-foreground' : 'bg-background text-muted-foreground hover:bg-muted'}`}
+              >
+                All Projects
+              </button>
+              <button
+                onClick={() => setViewMode('mine')}
+                className={`px-3 py-1.5 text-xs font-medium transition-colors ${viewMode === 'mine' ? 'bg-primary text-primary-foreground' : 'bg-background text-muted-foreground hover:bg-muted'}`}
+              >
+                My Projects
+              </button>
+            </div>
+          )}
+
+          {user && canCreateProject(user.role) && (
+            <Button onClick={() => setCreateOpen(true)} size="sm">
+              <Plus className="mr-1 h-4 w-4" /> New Project
+            </Button>
+          )}
+        </div>
       </div>
 
       {/* Filters */}
@@ -130,6 +170,9 @@ export default function ProjectsPage() {
         <div className="flex flex-col items-center justify-center py-20 text-center">
           <FolderKanban className="h-12 w-12 text-muted-foreground/40 mb-3" />
           <p className="text-muted-foreground">No projects found</p>
+          {isProjectLead && (
+            <p className="text-muted-foreground text-xs mt-1">Projects will appear here when a Planner assigns you as lead</p>
+          )}
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
@@ -176,6 +219,29 @@ export default function ProjectsPage() {
                         <div className="flex items-center gap-1.5">
                           <Users className="h-3 w-3" />
                           <span>Lead: {p.lead.name}</span>
+                        </div>
+                      )}
+                      {user?.role === 'RESOURCE' && p.planner && (
+                        <div className="flex items-center gap-1.5">
+                          <Users className="h-3 w-3" />
+                          <span>Assigned by: {p.planner.name}</span>
+                        </div>
+                      )}
+                      {user?.role === 'RESOURCE' && p.allocations.length > 0 && (
+                        <div className="flex items-center gap-1.5">
+                          <span>Team:</span>
+                          <div className="flex -space-x-1">
+                            {p.allocations.slice(0, 4).map((a) => (
+                              <Avatar key={a.user.id} className="h-4 w-4 border border-background">
+                                <AvatarFallback className="text-[9px]">
+                                  {a.user.name.split(' ').map((n: string) => n[0]).join('').slice(0, 2)}
+                                </AvatarFallback>
+                              </Avatar>
+                            ))}
+                            {p.allocations.length > 4 && (
+                              <span className="ml-1.5 text-xs">+{p.allocations.length - 4}</span>
+                            )}
+                          </div>
                         </div>
                       )}
                     </div>

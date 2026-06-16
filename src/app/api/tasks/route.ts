@@ -10,18 +10,68 @@ export async function GET(req: NextRequest) {
     const workstreamId = searchParams.get('workstreamId')
     const ownerId = searchParams.get('ownerId')
     const projectId = searchParams.get('projectId')
+    const assignedByMe = searchParams.get('assignedByMe') === 'true'
+
+    // Build AND conditions so role filter + query params compose safely
+    const conditions: object[] = []
+
+    if (workstreamId) conditions.push({ workstreamId })
+    if (ownerId)      conditions.push({ ownerId })
+    if (projectId)    conditions.push({ workstream: { projectId } })
+
+    if (assignedByMe) {
+      // Return tasks the current user assigned or approved — skip role filter
+      conditions.push({
+        OR: [
+          { assignedById: session.id },
+          { approvedById: session.id },
+        ],
+      })
+    } else {
+      // Role-based access: determines which tasks a user may see at all
+      if (session.role === 'RESOURCE') {
+        // Only tasks explicitly assigned to this user
+        conditions.push({ ownerId: session.id })
+      } else if (session.role === 'PROJECT_LEAD') {
+        // Tasks in their projects OR directly assigned to them (e.g. via direct assignment)
+        conditions.push({
+          OR: [
+            { workstream: { project: { leadId: session.id } } },
+            { ownerId: session.id },
+          ],
+        })
+      } else if (session.role === 'WORKSTREAM_LEAD') {
+        // Tasks in their workstreams, or directly assigned to them
+        conditions.push({
+          OR: [
+            { workstream: { leadId: session.id } },
+            { ownerId: session.id },
+          ],
+        })
+      }
+      // ADMIN, MANAGER, PLANNER, LEADERSHIP: no restriction — see all tasks
+    }
 
     const tasks = await prisma.task.findMany({
-      where: {
-        ...(workstreamId ? { workstreamId } : {}),
-        ...(ownerId ? { ownerId } : {}),
-        ...(projectId
-          ? {
-              workstream: { projectId },
-            }
-          : {}),
-      },
-      include: {
+      where: conditions.length > 0 ? { AND: conditions } : {},
+      select: {
+        id: true,
+        name: true,
+        description: true,
+        status: true,
+        priority: true,
+        startDate: true,
+        endDate: true,
+        effortHours: true,
+        estimatedHours: true,
+        order: true,
+        tags: true,
+        ownerId: true,
+        assignedById: true,
+        approvedById: true,
+        reworkCount: true,
+        statusChangedAt: true,
+        workstreamId: true,
         owner: { select: { id: true, name: true, avatarUrl: true } },
         workstream: {
           select: { id: true, name: true, project: { select: { id: true, name: true } } },
@@ -44,12 +94,28 @@ export async function POST(req: NextRequest) {
     const session = await requireAuth()
     const data = await req.json()
 
+    // Role check: managers have broad access; PROJECT_LEAD restricted to their own projects (with editAccess)
+    if (!['ADMIN', 'MANAGER', 'PLANNER'].includes(session.role)) {
+      if (session.role === 'PROJECT_LEAD') {
+        const workstream = await prisma.workstream.findUnique({
+          where: { id: data.workstreamId },
+          include: { project: { select: { leadId: true, editAccessGranted: true } } },
+        })
+        if (!workstream || workstream.project.leadId !== session.id || !workstream.project.editAccessGranted) {
+          return Response.json({ error: 'Forbidden' }, { status: 403 })
+        }
+      } else {
+        return Response.json({ error: 'Forbidden' }, { status: 403 })
+      }
+    }
+
     const task = await prisma.task.create({
       data: {
         name: data.name,
         description: data.description,
         workstreamId: data.workstreamId,
         ownerId: data.ownerId || null,
+        assignedById: data.assignedById || null,
         status: data.status || 'BACKLOG',
         priority: data.priority || 'MEDIUM',
         startDate: data.startDate ? new Date(data.startDate) : null,

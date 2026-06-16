@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 import { useAuthStore } from '@/store/auth'
 import { SidebarNav } from '@/components/layout/sidebar-nav'
 
@@ -73,9 +74,20 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex h-screen overflow-hidden bg-background">
       <SidebarNav unreadCount={unreadCount} pendingRequestsCount={pendingRequestsCount} />
-      <main className="flex-1 overflow-auto">
-        {children}
-      </main>
+      <div className="flex-1 flex flex-col overflow-hidden">
+        {user?.mustChangePassword && (
+          <div className="shrink-0 bg-orange-50 dark:bg-orange-950 border-b border-orange-200 dark:border-orange-800 px-4 py-2 flex items-center gap-3 text-sm text-orange-700 dark:text-orange-300">
+            <span className="font-medium">Action required:</span>
+            <span>Your password has been reset by an administrator.</span>
+            <Link href="/settings" className="ml-auto underline underline-offset-2 font-medium hover:text-orange-900 dark:hover:text-orange-100 shrink-0">
+              Set a new password →
+            </Link>
+          </div>
+        )}
+        <main className="flex-1 overflow-auto">
+          {children}
+        </main>
+      </div>
     </div>
   )
 }

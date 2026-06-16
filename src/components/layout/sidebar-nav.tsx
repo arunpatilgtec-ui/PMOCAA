@@ -21,6 +21,9 @@ import {
   FileText,
   AlertTriangle,
   SquareKanban,
+  UserCog,
+  ListOrdered,
+  CalendarRange,
 } from 'lucide-react'
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
@@ -41,12 +44,15 @@ const navItems: NavItem[] = [
   { label: 'Requests', href: '/requests', icon: ClipboardList },
   { label: 'Kanban', href: '/kanban', icon: SquareKanban },
   { label: 'Gantt', href: '/gantt', icon: GitBranch },
-  { label: 'Resources', href: '/resources', icon: Users },
+  { label: 'Timeline', href: '/timeline', icon: CalendarRange },
+  { label: 'Queue', href: '/queue', icon: ListOrdered },
+  { label: 'Resources', href: '/resources', icon: Users, roles: ['ADMIN', 'MANAGER', 'PLANNER', 'PROJECT_LEAD', 'WORKSTREAM_LEAD', 'LEADERSHIP'] },
   { label: 'Approvals', href: '/approvals', icon: CheckSquare, roles: ['ADMIN', 'MANAGER', 'PLANNER'] },
   { label: 'Reports', href: '/reports', icon: BarChart3 },
-  { label: 'Documents', href: '/documents', icon: FileText },
+  { label: 'Documents', href: '/documents', icon: FileText, roles: ['ADMIN', 'MANAGER', 'PLANNER', 'PROJECT_LEAD', 'WORKSTREAM_LEAD', 'LEADERSHIP'] },
   { label: 'Notifications', href: '/notifications', icon: Bell },
-  { label: 'Users', href: '/users', icon: Settings, roles: ['ADMIN'] },
+  { label: 'Settings', href: '/settings', icon: Settings },
+  { label: 'Users', href: '/users', icon: UserCog, roles: ['ADMIN'] },
 ]
 
 export function SidebarNav({ unreadCount = 0, pendingRequestsCount = 0 }: { unreadCount?: number; pendingRequestsCount?: number }) {
@@ -114,7 +120,9 @@ export function SidebarNav({ unreadCount = 0, pendingRequestsCount = 0 }: { unre
               <Icon className="h-4 w-4 shrink-0" />
               {!collapsed && (
                 <>
-                  <span className="flex-1 truncate">{item.label}</span>
+                  <span className="flex-1 truncate">
+                    {item.href === '/projects' && user?.role === 'PROJECT_LEAD' ? 'My Projects' : item.label}
+                  </span>
                   {item.label === 'Notifications' && unreadCount > 0 && (
                     <Badge variant="destructive" className="text-xs px-1.5 py-0 h-5">
                       {unreadCount > 9 ? '9+' : unreadCount}

@@ -5,11 +5,19 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Progress } from '@/components/ui/progress'
 import { Skeleton } from '@/components/ui/skeleton'
-import { BarChart3, TrendingUp, Target, Users, FolderKanban } from 'lucide-react'
+import { BarChart3, Target, Users, FolderKanban, User } from 'lucide-react'
+import { useAuthStore } from '@/store/auth'
 
 interface Project {
   id: string; name: string; type: string; status: string; priority: string
+  planner?: { id: string; name: string }
   workstreams: Array<{ tasks: Array<{ id: string; status: string }> }>
+  allocations: Array<{ allocationPct: number; userId: string }>
+}
+
+interface Task {
+  id: string; name: string; status: string; priority: string
+  workstream: { project: { id: string; name: string } }
 }
 
 interface Resource {
@@ -17,23 +25,145 @@ interface Resource {
 }
 
 export default function ReportsPage() {
+  const { user } = useAuthStore()
+  const isResource = user?.role === 'RESOURCE'
+
   const [projects, setProjects] = useState<Project[]>([])
   const [resources, setResources] = useState<Resource[]>([])
+  const [myTasks, setMyTasks] = useState<Task[]>([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    Promise.all([
-      fetch('/api/projects').then((r) => r.json()),
-      fetch('/api/resources').then((r) => r.json()),
-    ]).then(([p, r]) => {
-      setProjects(Array.isArray(p) ? p : [])
-      setResources(Array.isArray(r) ? r : [])
-      setLoading(false)
-    })
-  }, [])
+    if (isResource && user) {
+      Promise.all([
+        fetch('/api/projects').then((r) => r.json()),
+        fetch(`/api/tasks?ownerId=${user.id}`).then((r) => r.json()),
+      ]).then(([p, t]) => {
+        setProjects(Array.isArray(p) ? p : [])
+        setMyTasks(Array.isArray(t) ? t : [])
+        setLoading(false)
+      })
+    } else {
+      Promise.all([
+        fetch('/api/projects').then((r) => r.json()),
+        fetch('/api/resources').then((r) => r.json()),
+      ]).then(([p, r]) => {
+        setProjects(Array.isArray(p) ? p : [])
+        setResources(Array.isArray(r) ? r : [])
+        setLoading(false)
+      })
+    }
+  }, [isResource, user])
 
   if (loading) return <div className="p-6"><Skeleton className="h-96 rounded-lg" /></div>
 
+  // ── RESOURCE: personal utilization view ──
+  if (isResource) {
+    const myTasksByStatus = {
+      BACKLOG:     myTasks.filter((t) => t.status === 'BACKLOG').length,
+      PLANNED:     myTasks.filter((t) => t.status === 'PLANNED').length,
+      IN_PROGRESS: myTasks.filter((t) => t.status === 'IN_PROGRESS').length,
+      REVIEW:      myTasks.filter((t) => t.status === 'REVIEW').length,
+      COMPLETED:   myTasks.filter((t) => t.status === 'COMPLETED').length,
+    }
+    const myCompletionRate = myTasks.length
+      ? Math.round((myTasksByStatus.COMPLETED / myTasks.length) * 100)
+      : 0
+    const activeProjects = projects.filter((p) => p.status === 'ACTIVE').length
+
+    return (
+      <div className="p-6 space-y-6">
+        <div>
+          <h1 className="text-2xl font-bold flex items-center gap-2">
+            <User className="h-6 w-6 text-blue-500" /> My Utilization
+          </h1>
+          <p className="text-muted-foreground text-sm">Personal work summary</p>
+        </div>
+
+        {/* Key metrics */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <Card><CardContent className="p-4">
+            <p className="text-xs text-muted-foreground">My Projects</p>
+            <p className="text-3xl font-bold mt-1">{projects.length}</p>
+            <p className="text-xs text-muted-foreground mt-1">{activeProjects} active</p>
+          </CardContent></Card>
+          <Card><CardContent className="p-4">
+            <p className="text-xs text-muted-foreground">My Tasks</p>
+            <p className="text-3xl font-bold mt-1">{myTasks.length}</p>
+            <p className="text-xs text-muted-foreground mt-1">{myTasksByStatus.IN_PROGRESS} in progress</p>
+          </CardContent></Card>
+          <Card><CardContent className="p-4">
+            <p className="text-xs text-muted-foreground">Completion</p>
+            <p className="text-3xl font-bold mt-1">{myCompletionRate}%</p>
+            <p className="text-xs text-muted-foreground mt-1">{myTasksByStatus.COMPLETED}/{myTasks.length} done</p>
+          </CardContent></Card>
+          <Card><CardContent className="p-4">
+            <p className="text-xs text-muted-foreground">Pending Review</p>
+            <p className="text-3xl font-bold mt-1">{myTasksByStatus.REVIEW}</p>
+            <p className="text-xs text-muted-foreground mt-1">tasks awaiting review</p>
+          </CardContent></Card>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          {/* My task breakdown */}
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base flex items-center gap-2">
+                <Target className="h-4 w-4 text-green-500" /> My Tasks by Status
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {Object.entries(myTasksByStatus).map(([status, count]) => (
+                <div key={status} className="space-y-1">
+                  <div className="flex justify-between text-sm">
+                    <span className="text-muted-foreground">{status.replace('_', ' ')}</span>
+                    <span className="font-medium">{count}</span>
+                  </div>
+                  <Progress value={myTasks.length ? (count / myTasks.length) * 100 : 0} className="h-1.5" />
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+
+          {/* My projects */}
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base flex items-center gap-2">
+                <FolderKanban className="h-4 w-4 text-blue-500" /> My Projects
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {projects.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No projects assigned</p>
+              ) : (
+                projects.map((p) => {
+                  const tasks = p.workstreams.flatMap((w) => w.tasks)
+                  const done = tasks.filter((t) => t.status === 'COMPLETED').length
+                  const pct = tasks.length ? Math.round((done / tasks.length) * 100) : 0
+                  const myAlloc = p.allocations.find((a) => a.userId === user?.id)
+                  return (
+                    <div key={p.id} className="space-y-1">
+                      <div className="flex justify-between text-sm">
+                        <span className="font-medium truncate max-w-[180px]">{p.name}</span>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          {myAlloc && <Badge variant="secondary" className="text-xs">{myAlloc.allocationPct}%</Badge>}
+                          <span className="text-muted-foreground">{pct}%</span>
+                        </div>
+                      </div>
+                      <Progress value={pct} className="h-1.5" />
+                      {p.planner && <p className="text-xs text-muted-foreground">Assigned by {p.planner.name}</p>}
+                    </div>
+                  )
+                })
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+    )
+  }
+
+  // ── Portfolio view (non-RESOURCE) ──
   const byStatus = {
     PLANNING: projects.filter((p) => p.status === 'PLANNING').length,
     ACTIVE: projects.filter((p) => p.status === 'ACTIVE').length,

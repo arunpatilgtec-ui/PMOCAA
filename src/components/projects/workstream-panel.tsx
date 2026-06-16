@@ -10,14 +10,17 @@ import { Input } from '@/components/ui/input'
 import { Progress } from '@/components/ui/progress'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import {
-  Plus, ChevronDown, ChevronRight, Users, Clock, CheckCircle2
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from '@/components/ui/select'
+import {
+  Plus, ChevronDown, ChevronRight,
 } from 'lucide-react'
 import { format } from 'date-fns'
 import { CreateTaskDialog } from './create-task-dialog'
 
 interface Task {
   id: string; name: string; status: string; priority: string
-  startDate?: string; endDate?: string; effortHours: number
+  startDate?: string; endDate?: string; effortHours: number; estimatedHours?: number
   owner?: { id: string; name: string; avatarUrl?: string }
 }
 
@@ -29,6 +32,10 @@ interface Workstream {
 
 interface Project {
   id: string; name: string
+  leadId?: string
+  planStatus?: string  // 'DRAFT' | 'SUBMITTED' | 'APPROVED'
+  editAccessGranted?: boolean
+  allocations: Array<{ userId: string; user: { id: string; name: string; role: string } }>
   workstreams: Workstream[]
 }
 
@@ -37,6 +44,7 @@ const TASK_STATUS_COLORS: Record<string, string> = {
   PLANNED: 'bg-blue-100 text-blue-700',
   IN_PROGRESS: 'bg-yellow-100 text-yellow-700',
   REVIEW: 'bg-purple-100 text-purple-700',
+  REWORK: 'bg-orange-100 text-orange-700',
   COMPLETED: 'bg-green-100 text-green-700',
   CANCELLED: 'bg-red-100 text-red-700',
 }
@@ -57,6 +65,13 @@ export function WorkstreamPanel({ project, onRefresh }: { project: Project; onRe
 
   const toggle = (id: string) => setExpanded((p) => ({ ...p, [id]: !p[id] }))
 
+  const canEdit =
+    (user && canManageProjects(user.role)) ||
+    (user?.role === 'PROJECT_LEAD' && user.id === project.leadId && project.planStatus !== 'APPROVED')
+
+  const isProjectLead = user?.role === 'PROJECT_LEAD' && user.id === project.leadId
+  const canAssignTasks = canEdit || (isProjectLead && project.planStatus !== 'APPROVED')
+
   async function addWorkstream() {
     if (!newWsName.trim()) return
     try {
@@ -66,14 +81,29 @@ export function WorkstreamPanel({ project, onRefresh }: { project: Project; onRe
         body: JSON.stringify({ name: newWsName.trim(), projectId: project.id }),
       })
       if (!res.ok) throw new Error()
-      toast.success('Workstream created')
+      toast.success('Phase created')
       setNewWsName('')
       setAddingWs(false)
       onRefresh()
     } catch {
-      toast.error('Failed to create workstream')
+      toast.error('Failed to create phase')
     }
   }
+
+  async function assignTask(taskId: string, ownerId: string | null) {
+    try {
+      await fetch(`/api/tasks/${taskId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ownerId: ownerId || null }),
+      })
+      onRefresh()
+    } catch {
+      toast.error('Failed to assign task')
+    }
+  }
+
+  const now = new Date()
 
   return (
     <div className="space-y-3">
@@ -109,36 +139,69 @@ export function WorkstreamPanel({ project, onRefresh }: { project: Project; onRe
                   {ws.tasks.length === 0 ? (
                     <p className="text-muted-foreground text-sm text-center py-4">No tasks</p>
                   ) : (
-                    ws.tasks.map((task) => (
-                      <div key={task.id} className="flex items-center gap-3 px-4 py-2.5 hover:bg-muted/30 transition-colors">
-                        <div className={`h-2 w-2 rounded-full shrink-0 ${PRIORITY_DOT[task.priority]}`} />
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2">
-                            <span className="text-sm font-medium truncate">{task.name}</span>
-                            <span className={`text-xs px-1.5 py-0.5 rounded shrink-0 ${TASK_STATUS_COLORS[task.status]}`}>
-                              {task.status.replace('_', ' ')}
-                            </span>
+                    ws.tasks.map((task) => {
+                      const isOverdue =
+                        task.endDate &&
+                        new Date(task.endDate) < now &&
+                        !['COMPLETED', 'CANCELLED'].includes(task.status)
+
+                      return (
+                        <div key={task.id} className="flex items-center gap-3 px-4 py-2.5 hover:bg-muted/30 transition-colors">
+                          <div className={`h-2 w-2 rounded-full shrink-0 ${PRIORITY_DOT[task.priority]}`} />
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="text-sm font-medium truncate">{task.name}</span>
+                              <span className={`text-xs px-1.5 py-0.5 rounded shrink-0 ${TASK_STATUS_COLORS[task.status]}`}>
+                                {task.status.replace(/_/g, ' ')}
+                              </span>
+                              {isOverdue && (
+                                <span className="text-xs px-1.5 py-0.5 rounded shrink-0 bg-red-100 text-red-700 font-medium">
+                                  Delayed
+                                </span>
+                              )}
+                            </div>
+                            {(task.startDate || task.endDate) && (
+                              <p className="text-xs text-muted-foreground mt-0.5">
+                                {task.startDate && format(new Date(task.startDate), 'MMM d')}
+                                {task.endDate && ` – ${format(new Date(task.endDate), 'MMM d')}`}
+                                {task.effortHours > 0 && ` · ${task.effortHours}h`}
+                              </p>
+                            )}
                           </div>
-                          {(task.startDate || task.endDate) && (
-                            <p className="text-xs text-muted-foreground mt-0.5">
-                              {task.startDate && format(new Date(task.startDate), 'MMM d')}
-                              {task.endDate && ` – ${format(new Date(task.endDate), 'MMM d')}`}
-                              {task.effortHours > 0 && ` · ${task.effortHours}h`}
-                            </p>
-                          )}
+                          {canAssignTasks ? (
+                            <Select
+                              value={task.owner?.id || 'unassigned'}
+                              onValueChange={(v) => assignTask(task.id, v === 'unassigned' ? null : v)}
+                            >
+                              <SelectTrigger className="h-7 w-auto min-w-0 border-0 bg-transparent p-0 shadow-none focus:ring-0">
+                                <Avatar className="h-6 w-6 cursor-pointer">
+                                  <AvatarFallback className="text-xs">
+                                    {task.owner
+                                      ? task.owner.name.split(' ').map((n) => n[0]).join('').slice(0, 2)
+                                      : '?'}
+                                  </AvatarFallback>
+                                </Avatar>
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="unassigned">Unassigned</SelectItem>
+                                {project.allocations.map((a) => (
+                                  <SelectItem key={a.userId} value={a.userId}>{a.user.name}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          ) : task.owner ? (
+                            <Avatar className="h-6 w-6 shrink-0">
+                              <AvatarFallback className="text-xs">
+                                {task.owner.name.split(' ').map((n) => n[0]).join('').slice(0, 2)}
+                              </AvatarFallback>
+                            </Avatar>
+                          ) : null}
                         </div>
-                        {task.owner && (
-                          <Avatar className="h-6 w-6 shrink-0">
-                            <AvatarFallback className="text-xs">
-                              {task.owner.name.split(' ').map((n) => n[0]).join('').slice(0, 2)}
-                            </AvatarFallback>
-                          </Avatar>
-                        )}
-                      </div>
-                    ))
+                      )
+                    })
                   )}
                 </div>
-                {user && canManageProjects(user.role) && (
+                {canEdit && (
                   <div className="p-3 border-t border-border">
                     <Button
                       variant="ghost"
@@ -156,13 +219,13 @@ export function WorkstreamPanel({ project, onRefresh }: { project: Project; onRe
         )
       })}
 
-      {/* Add workstream */}
-      {user && canManageProjects(user.role) && (
+      {/* Add phase */}
+      {canEdit && (
         <div>
           {addingWs ? (
             <div className="flex gap-2">
               <Input
-                placeholder="Workstream name..."
+                placeholder="Phase name..."
                 value={newWsName}
                 onChange={(e) => setNewWsName(e.target.value)}
                 onKeyDown={(e) => { if (e.key === 'Enter') addWorkstream(); if (e.key === 'Escape') setAddingWs(false) }}
@@ -174,7 +237,7 @@ export function WorkstreamPanel({ project, onRefresh }: { project: Project; onRe
             </div>
           ) : (
             <Button variant="outline" size="sm" className="h-8 text-xs" onClick={() => setAddingWs(true)}>
-              <Plus className="mr-1 h-3.5 w-3.5" /> Add Workstream
+              <Plus className="mr-1 h-3.5 w-3.5" /> Add Phase
             </Button>
           )}
         </div>
@@ -186,6 +249,7 @@ export function WorkstreamPanel({ project, onRefresh }: { project: Project; onRe
           onOpenChange={(v) => { if (!v) setCreateTaskWsId(null) }}
           workstreamId={createTaskWsId}
           onCreated={onRefresh}
+          allowedUsers={isProjectLead ? project.allocations.map((a) => a.user) : undefined}
         />
       )}
     </div>

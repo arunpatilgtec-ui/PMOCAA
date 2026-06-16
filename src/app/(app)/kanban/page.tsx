@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { DragDropContext, Droppable, Draggable, DropResult } from '@hello-pangea/dnd'
 import { toast } from 'sonner'
 import { Card, CardContent } from '@/components/ui/card'
@@ -9,13 +9,71 @@ import { Button } from '@/components/ui/button'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
-import { Calendar, Clock, GripVertical, AlertCircle } from 'lucide-react'
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from '@/components/ui/dialog'
+import { Textarea } from '@/components/ui/textarea'
+import { Calendar, Clock, GripVertical, User2, Briefcase, RotateCcw, History } from 'lucide-react'
 import { format } from 'date-fns'
 import { useAuthStore } from '@/store/auth'
 
+interface HistoryEntry {
+  id: string
+  fromStatus?: string
+  toStatus: string
+  changedAt: string
+  durationMinutes?: number
+  note?: string
+  changedBy?: { id: string; name: string }
+}
+
+interface FullTask {
+  id: string
+  name: string
+  description?: string
+  status: string
+  priority: string
+  startDate?: string
+  endDate?: string
+  effortHours: number
+  estimatedHours: number
+  reworkCount: number
+  statusChangedAt: string
+  ownerId?: string
+  assignedById?: string
+  owner?: { id: string; name: string; avatarUrl?: string; email?: string; role?: string }
+  assignedBy?: { id: string; name: string; avatarUrl?: string; role?: string }
+  approvedBy?: { id: string; name: string; avatarUrl?: string; role?: string }
+  workstream: { id: string; name: string; project: { id: string; name: string } }
+  history: HistoryEntry[]
+}
+
+interface UserOption {
+  id: string
+  name: string
+  role: string
+  avatarUrl?: string
+  isActive?: boolean
+}
+
 interface Task {
-  id: string; name: string; status: string; priority: string
-  startDate?: string; endDate?: string; effortHours: number; order: number
+  id: string
+  name: string
+  status: string
+  priority: string
+  startDate?: string
+  endDate?: string
+  effortHours: number
+  estimatedHours: number
+  order: number
+  ownerId?: string
+  assignedById?: string
+  reworkCount: number
+  statusChangedAt: string
   owner?: { id: string; name: string; avatarUrl?: string }
   workstream: { id: string; name: string; project: { id: string; name: string } }
 }
@@ -23,11 +81,12 @@ interface Task {
 interface Project { id: string; name: string }
 
 const COLUMNS = [
-  { id: 'BACKLOG', label: 'Backlog', color: 'bg-slate-100 dark:bg-slate-800' },
-  { id: 'PLANNED', label: 'Planned', color: 'bg-blue-50 dark:bg-blue-950' },
-  { id: 'IN_PROGRESS', label: 'In Progress', color: 'bg-yellow-50 dark:bg-yellow-950' },
-  { id: 'REVIEW', label: 'Review', color: 'bg-purple-50 dark:bg-purple-950' },
-  { id: 'COMPLETED', label: 'Completed', color: 'bg-green-50 dark:bg-green-950' },
+  { id: 'BACKLOG',     label: 'Backlog',      color: 'bg-slate-100 dark:bg-slate-800' },
+  { id: 'PLANNED',    label: 'Planned',       color: 'bg-blue-50 dark:bg-blue-950' },
+  { id: 'IN_PROGRESS',label: 'In Progress',   color: 'bg-yellow-50 dark:bg-yellow-950' },
+  { id: 'REVIEW',     label: 'Review',        color: 'bg-purple-50 dark:bg-purple-950' },
+  { id: 'REWORK',     label: 'Rework',        color: 'bg-red-50 dark:bg-red-950' },
+  { id: 'COMPLETED',  label: 'Completed',     color: 'bg-green-50 dark:bg-green-950' },
 ]
 
 const PRIORITY_COLORS: Record<string, string> = {
@@ -40,6 +99,19 @@ const PRIORITY_BADGE: Record<string, string> = {
   HIGH: 'bg-orange-100 text-orange-700', CRITICAL: 'bg-red-100 text-red-700',
 }
 
+const REVIEWER_ROLES = new Set(['ADMIN', 'MANAGER', 'PLANNER', 'PROJECT_LEAD', 'WORKSTREAM_LEAD'])
+
+function timeInStatus(statusChangedAt: string): string {
+  const diffMs = Date.now() - new Date(statusChangedAt).getTime()
+  const diffMin = Math.floor(diffMs / 60000)
+  if (diffMin < 2) return 'just now'
+  if (diffMin < 60) return `${diffMin}m`
+  const diffHr = Math.floor(diffMin / 60)
+  if (diffHr < 24) return `${diffHr}h`
+  const diffDay = Math.floor(diffHr / 24)
+  return `${diffDay}d`
+}
+
 export default function KanbanPage() {
   const { user } = useAuthStore()
   const [tasks, setTasks] = useState<Task[]>([])
@@ -47,6 +119,25 @@ export default function KanbanPage() {
   const [loading, setLoading] = useState(true)
   const [projectFilter, setProjectFilter] = useState<string | null>('ALL')
   const [ownerFilter, setOwnerFilter] = useState<string | null>('ALL')
+
+  // Rework dialog state
+  const [reworkOpen, setReworkOpen] = useState(false)
+  const [reworkTarget, setReworkTarget] = useState<Task | null>(null)
+  const [reworkNote, setReworkNote] = useState('')
+  const [reworkLoading, setReworkLoading] = useState(false)
+
+  // Task detail dialog state
+  const [detailOpen, setDetailOpen] = useState(false)
+  const [detailFull, setDetailFull] = useState<FullTask | null>(null)
+  const [detailLoading, setDetailLoading] = useState(false)
+  const [userOptions, setUserOptions] = useState<UserOption[]>([])
+  const [editAssigneeId, setEditAssigneeId] = useState<string | null>(null)
+  const [savingAssignee, setSavingAssignee] = useState(false)
+
+  const canEditAssignee = user && ['ADMIN', 'MANAGER', 'PLANNER'].includes(user.role)
+
+  // Use a ref for load so the interval doesn't capture stale closures
+  const loadRef = useRef<(() => Promise<void>) | undefined>(undefined)
 
   const load = useCallback(async () => {
     try {
@@ -62,7 +153,23 @@ export default function KanbanPage() {
     }
   }, [])
 
-  useEffect(() => { load() }, [load])
+  loadRef.current = load
+
+  useEffect(() => {
+    load()
+    // Poll every 5 s so status changes appear within seconds
+    const interval = setInterval(() => loadRef.current?.(), 5000)
+    return () => clearInterval(interval)
+  }, [load])
+
+  // Immediately refresh when the user switches back to this tab
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') loadRef.current?.()
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => document.removeEventListener('visibilitychange', onVisible)
+  }, [])
 
   const filteredTasks = tasks.filter((t) => {
     if (projectFilter && projectFilter !== 'ALL' && t.workstream.project.id !== projectFilter) return false
@@ -73,6 +180,16 @@ export default function KanbanPage() {
 
   const getColumnTasks = (status: string) =>
     filteredTasks.filter((t) => t.status === status).sort((a, b) => a.order - b.order)
+
+  async function patchStatus(taskId: string, status: string, extra?: Record<string, unknown>) {
+    const res = await fetch(`/api/tasks/${taskId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status, ...extra }),
+    })
+    if (!res.ok) throw new Error('Failed to update task')
+    await load()
+  }
 
   async function onDragEnd(result: DropResult) {
     if (!result.destination) return
@@ -93,6 +210,7 @@ export default function KanbanPage() {
         body: JSON.stringify({ status: newStatus, order: destination.index }),
       })
       if (!res.ok) throw new Error()
+      await load()
     } catch {
       // Revert on error
       setTasks((prev) =>
@@ -101,6 +219,72 @@ export default function KanbanPage() {
       toast.error('Failed to update task status')
     }
   }
+
+  async function openDetail(task: Task) {
+    setDetailFull(null)
+    setDetailLoading(true)
+    setDetailOpen(true)
+    try {
+      const fetches: Promise<Response>[] = [fetch(`/api/tasks/${task.id}`)]
+      if (canEditAssignee) fetches.push(fetch('/api/users'))
+      const [taskRes, usersRes] = await Promise.all(fetches)
+      const full: FullTask = await taskRes.json()
+      setDetailFull(full)
+      setEditAssigneeId(full.ownerId ?? null)
+      if (usersRes) {
+        const ud = await usersRes.json()
+        setUserOptions(Array.isArray(ud) ? ud : [])
+      }
+    } finally {
+      setDetailLoading(false)
+    }
+  }
+
+  async function saveAssignee() {
+    if (!detailFull) return
+    setSavingAssignee(true)
+    try {
+      const res = await fetch(`/api/tasks/${detailFull.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ownerId: editAssigneeId }),
+      })
+      if (!res.ok) throw new Error()
+      toast.success('Assignee updated')
+      setDetailOpen(false)
+      await load()
+    } catch {
+      toast.error('Failed to update assignee')
+    } finally {
+      setSavingAssignee(false)
+    }
+  }
+
+  function openReworkDialog(task: Task) {
+    setReworkTarget(task)
+    setReworkNote('')
+    setReworkOpen(true)
+  }
+
+  async function submitRework() {
+    if (!reworkTarget) return
+    setReworkLoading(true)
+    try {
+      await patchStatus(reworkTarget.id, 'REWORK', { reworkNote: reworkNote || undefined })
+      setReworkOpen(false)
+      setReworkTarget(null)
+      toast.success('Task sent back for rework')
+    } catch {
+      toast.error('Failed to send task for rework')
+    } finally {
+      setReworkLoading(false)
+    }
+  }
+
+  const canReview = (task: Task) =>
+    user
+      ? task.assignedById === user.id || REVIEWER_ROLES.has(user.role)
+      : false
 
   return (
     <div className="p-6 h-full flex flex-col">
@@ -169,32 +353,50 @@ export default function KanbanPage() {
                               <div
                                 ref={drag.innerRef}
                                 {...drag.draggableProps}
-                                className={`bg-card rounded-lg border border-border border-l-4 ${PRIORITY_COLORS[task.priority]} p-3 shadow-sm hover:shadow-md transition-shadow ${dragSnapshot.isDragging ? 'shadow-lg rotate-1' : ''}`}
+                                className={`bg-card rounded-lg border border-border border-l-4 ${PRIORITY_COLORS[task.priority]} p-3 shadow-sm hover:shadow-md transition-shadow cursor-pointer ${dragSnapshot.isDragging ? 'shadow-lg rotate-1' : ''}`}
+                                onClick={() => openDetail(task)}
                               >
                                 <div className="flex items-start gap-2">
-                                  <div {...drag.dragHandleProps} className="mt-0.5 text-muted-foreground">
+                                  <div
+                                    {...drag.dragHandleProps}
+                                    className="mt-0.5 text-muted-foreground"
+                                    onClick={(e) => e.stopPropagation()}
+                                  >
                                     <GripVertical className="h-3.5 w-3.5" />
                                   </div>
                                   <div className="flex-1 min-w-0">
                                     <p className="text-sm font-medium leading-tight line-clamp-2">{task.name}</p>
                                     <p className="text-xs text-muted-foreground mt-0.5 truncate">
-                                      {task.workstream.project.name} · {task.workstream.name}
+                                      {task.workstream.project.name === '__direct_assignments__'
+                                        ? 'Direct Assignment'
+                                        : `${task.workstream.project.name} · ${task.workstream.name}`}
                                     </p>
+                                    <div className="flex items-center gap-1.5 mt-0.5">
+                                      <span className="text-[10px] text-muted-foreground/70">
+                                        · {timeInStatus(task.statusChangedAt)} in status
+                                      </span>
+                                      {task.reworkCount > 0 && (
+                                        <span className="text-[10px] bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400 px-1 rounded">
+                                          ↩ {task.reworkCount}
+                                        </span>
+                                      )}
+                                    </div>
                                   </div>
                                 </div>
+
                                 <div className="mt-2 flex items-center justify-between gap-2">
                                   <div className="flex items-center gap-1.5">
                                     <span className={`text-xs px-1.5 py-0.5 rounded ${PRIORITY_BADGE[task.priority]}`}>
                                       {task.priority}
                                     </span>
-                                    {task.effortHours > 0 && (
+                                    {task.estimatedHours > 0 && (
                                       <span className="text-xs text-muted-foreground flex items-center gap-0.5">
-                                        <Clock className="h-3 w-3" />{task.effortHours}h
+                                        <Clock className="h-3 w-3" />{task.estimatedHours}h
                                       </span>
                                     )}
                                   </div>
                                   {task.owner ? (
-                                    <Avatar className="h-5 w-5">
+                                    <Avatar className="h-5 w-5" title={task.owner.name}>
                                       <AvatarFallback className="text-[10px]">
                                         {task.owner.name.split(' ').map((n) => n[0]).join('').slice(0, 2)}
                                       </AvatarFallback>
@@ -203,10 +405,75 @@ export default function KanbanPage() {
                                     <span className="text-xs text-muted-foreground/50">Unassigned</span>
                                   )}
                                 </div>
+
                                 {task.endDate && (
                                   <div className="mt-1.5 flex items-center gap-1 text-xs text-muted-foreground">
                                     <Calendar className="h-3 w-3" />
                                     <span>{format(new Date(task.endDate), 'MMM d')}</span>
+                                  </div>
+                                )}
+
+                                {/* Action buttons — stopPropagation so they don't open the detail dialog */}
+                                {task.status === 'IN_PROGRESS' && task.ownerId === user?.id && (
+                                  <div className="mt-2" onClick={(e) => e.stopPropagation()}>
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      className="h-6 text-xs w-full text-green-700 border-green-400 hover:bg-green-50 dark:text-green-400 dark:border-green-700 dark:hover:bg-green-950"
+                                      onClick={(e) => {
+                                        e.stopPropagation()
+                                        patchStatus(task.id, 'REVIEW').catch(() =>
+                                          toast.error('Failed to submit for review')
+                                        )
+                                      }}
+                                    >
+                                      Submit for Review
+                                    </Button>
+                                  </div>
+                                )}
+
+                                {task.status === 'REVIEW' && canReview(task) && (
+                                  <div className="mt-2 flex gap-1" onClick={(e) => e.stopPropagation()}>
+                                    <Button
+                                      size="sm"
+                                      className="h-6 text-xs flex-1 bg-green-600 hover:bg-green-700 text-white"
+                                      onClick={(e) => {
+                                        e.stopPropagation()
+                                        patchStatus(task.id, 'COMPLETED').catch(() =>
+                                          toast.error('Failed to approve task')
+                                        )
+                                      }}
+                                    >
+                                      ✓ Approve
+                                    </Button>
+                                    <Button
+                                      size="sm"
+                                      className="h-6 text-xs flex-1 bg-orange-500 hover:bg-orange-600 text-white"
+                                      onClick={(e) => {
+                                        e.stopPropagation()
+                                        openReworkDialog(task)
+                                      }}
+                                    >
+                                      ↩ Rework
+                                    </Button>
+                                  </div>
+                                )}
+
+                                {task.status === 'REWORK' && task.ownerId === user?.id && (
+                                  <div className="mt-2" onClick={(e) => e.stopPropagation()}>
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      className="h-6 text-xs w-full text-orange-700 border-orange-400 hover:bg-orange-50 dark:text-orange-400 dark:border-orange-700 dark:hover:bg-orange-950"
+                                      onClick={(e) => {
+                                        e.stopPropagation()
+                                        patchStatus(task.id, 'IN_PROGRESS').catch(() =>
+                                          toast.error('Failed to move task back to work')
+                                        )
+                                      }}
+                                    >
+                                      ↩ Back to Work
+                                    </Button>
                                   </div>
                                 )}
                               </div>
@@ -226,6 +493,277 @@ export default function KanbanPage() {
           </div>
         </DragDropContext>
       )}
+
+      {/* ── Task Detail Dialog ─────────────────────────────────────── */}
+      <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
+        <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="pr-6 leading-snug">
+              {detailFull ? detailFull.name : 'Loading…'}
+            </DialogTitle>
+          </DialogHeader>
+
+          {detailLoading && (
+            <div className="space-y-3 py-4">
+              {[...Array(5)].map((_, i) => <Skeleton key={i} className="h-5 rounded" />)}
+            </div>
+          )}
+
+          {detailFull && !detailLoading && (() => {
+            const STATUS_COLORS_MAP: Record<string, string> = {
+              BACKLOG: 'bg-slate-100 text-slate-700', PLANNED: 'bg-blue-100 text-blue-700',
+              IN_PROGRESS: 'bg-yellow-100 text-yellow-800', REVIEW: 'bg-purple-100 text-purple-700',
+              REWORK: 'bg-red-100 text-red-700', COMPLETED: 'bg-green-100 text-green-700',
+              CANCELLED: 'bg-gray-100 text-gray-500',
+            }
+            const STATUS_LABELS: Record<string, string> = {
+              BACKLOG: 'Backlog', PLANNED: 'Planned', IN_PROGRESS: 'In Progress',
+              REVIEW: 'Review', REWORK: 'Rework', COMPLETED: 'Completed', CANCELLED: 'Cancelled',
+            }
+            const formatDur = (min?: number) => {
+              if (!min) return ''
+              if (min < 60) return `${min}m`
+              const h = Math.floor(min / 60)
+              return h < 24 ? `${h}h` : `${Math.floor(h / 24)}d`
+            }
+            const assigneeChanged = editAssigneeId !== (detailFull.ownerId ?? null)
+            return (
+              <div className="space-y-5 py-1">
+                {/* Status + Priority */}
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${STATUS_COLORS_MAP[detailFull.status]}`}>
+                    {STATUS_LABELS[detailFull.status]}
+                  </span>
+                  <span className={`text-xs px-2 py-0.5 rounded-full ${PRIORITY_BADGE[detailFull.priority]}`}>
+                    {detailFull.priority}
+                  </span>
+                  {detailFull.reworkCount > 0 && (
+                    <span className="text-xs bg-red-50 text-red-600 border border-red-200 px-2 py-0.5 rounded-full flex items-center gap-1">
+                      <RotateCcw className="h-3 w-3" /> Reworked {detailFull.reworkCount}×
+                    </span>
+                  )}
+                  <span className="text-xs text-muted-foreground ml-auto">
+                    {timeInStatus(detailFull.statusChangedAt)} in this status
+                  </span>
+                </div>
+
+                {/* Description */}
+                {detailFull.description && (
+                  <p className="text-sm text-muted-foreground leading-relaxed">{detailFull.description}</p>
+                )}
+
+                {/* Assignment */}
+                <div className="rounded-lg border bg-muted/30 p-3 space-y-3">
+                  <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Assignment</h3>
+
+                  {/* Assigned by (who requested/submitted the work) */}
+                  <div className="flex items-center gap-2">
+                    <User2 className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                    <span className="text-xs text-muted-foreground w-20 shrink-0">
+                      {detailFull.approvedBy ? 'Requested by' : 'Assigned by'}
+                    </span>
+                    {detailFull.assignedBy ? (
+                      <div className="flex items-center gap-1.5">
+                        <Avatar className="h-5 w-5">
+                          <AvatarFallback className="text-[10px]">
+                            {detailFull.assignedBy.name.split(' ').map((n) => n[0]).join('').slice(0, 2)}
+                          </AvatarFallback>
+                        </Avatar>
+                        <span className="text-sm font-medium">{detailFull.assignedBy.name}</span>
+                        {detailFull.assignedBy.role && (
+                          <span className="text-xs text-muted-foreground">({detailFull.assignedBy.role.replace(/_/g, ' ')})</span>
+                        )}
+                      </div>
+                    ) : (
+                      <span className="text-sm text-muted-foreground">—</span>
+                    )}
+                  </div>
+
+                  {/* Approved by — only shown for request-derived tasks */}
+                  {detailFull.approvedBy && (
+                    <div className="flex items-center gap-2">
+                      <User2 className="h-3.5 w-3.5 text-green-600 shrink-0" />
+                      <span className="text-xs text-muted-foreground w-20 shrink-0">Approved by</span>
+                      <div className="flex items-center gap-1.5">
+                        <Avatar className="h-5 w-5">
+                          <AvatarFallback className="text-[10px]">
+                            {detailFull.approvedBy.name.split(' ').map((n) => n[0]).join('').slice(0, 2)}
+                          </AvatarFallback>
+                        </Avatar>
+                        <span className="text-sm font-medium text-green-700">{detailFull.approvedBy.name}</span>
+                        {detailFull.approvedBy.role && (
+                          <span className="text-xs text-muted-foreground">({detailFull.approvedBy.role.replace(/_/g, ' ')})</span>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Assigned to — editable for admin/manager/planner */}
+                  <div className="flex items-start gap-2">
+                    <User2 className="h-3.5 w-3.5 text-muted-foreground shrink-0 mt-1" />
+                    <span className="text-xs text-muted-foreground w-20 shrink-0 mt-0.5">Assigned to</span>
+                    {canEditAssignee ? (
+                      <div className="flex-1 space-y-1.5">
+                        <Select
+                          value={editAssigneeId}
+                          onValueChange={(v) => setEditAssigneeId(v || null)}
+                        >
+                          <SelectTrigger className="h-8 text-sm">
+                            <SelectValue placeholder="Unassigned" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="">Unassigned</SelectItem>
+                            {userOptions.filter(u => u.isActive !== false).map((u) => (
+                              <SelectItem key={u.id} value={u.id}>
+                                {u.name} <span className="text-muted-foreground text-xs">({u.role.replace(/_/g, ' ')})</span>
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        {assigneeChanged && (
+                          <Button
+                            size="sm"
+                            className="h-7 text-xs"
+                            onClick={saveAssignee}
+                            disabled={savingAssignee}
+                          >
+                            {savingAssignee ? 'Saving…' : 'Save Assignee'}
+                          </Button>
+                        )}
+                      </div>
+                    ) : (
+                      detailFull.owner ? (
+                        <div className="flex items-center gap-1.5">
+                          <Avatar className="h-5 w-5">
+                            <AvatarFallback className="text-[10px]">
+                              {detailFull.owner.name.split(' ').map((n) => n[0]).join('').slice(0, 2)}
+                            </AvatarFallback>
+                          </Avatar>
+                          <span className="text-sm font-medium">{detailFull.owner.name}</span>
+                          {detailFull.owner.role && (
+                            <span className="text-xs text-muted-foreground">({detailFull.owner.role.replace(/_/g, ' ')})</span>
+                          )}
+                        </div>
+                      ) : (
+                        <span className="text-sm text-muted-foreground">Unassigned</span>
+                      )
+                    )}
+                  </div>
+
+                  {/* Project / Workstream */}
+                  <div className="flex items-center gap-2">
+                    <Briefcase className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                    <span className="text-xs text-muted-foreground w-20 shrink-0">Project</span>
+                    <span className="text-sm">
+                      {detailFull.workstream.project.name === '__direct_assignments__'
+                        ? 'Direct Assignment'
+                        : `${detailFull.workstream.project.name} · ${detailFull.workstream.name}`}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Schedule + Hours */}
+                <div className="rounded-lg border bg-muted/30 p-3 space-y-2">
+                  <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Schedule & Hours</h3>
+                  <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-sm">
+                    {detailFull.startDate && (
+                      <>
+                        <span className="text-muted-foreground text-xs">Start</span>
+                        <span>{format(new Date(detailFull.startDate), 'MMM d, yyyy')}</span>
+                      </>
+                    )}
+                    {detailFull.endDate && (
+                      <>
+                        <span className="text-muted-foreground text-xs">Due</span>
+                        <span>{format(new Date(detailFull.endDate), 'MMM d, yyyy')}</span>
+                      </>
+                    )}
+                    {detailFull.estimatedHours > 0 && (
+                      <>
+                        <span className="text-muted-foreground text-xs">Estimated</span>
+                        <span>{detailFull.estimatedHours}h</span>
+                      </>
+                    )}
+                    {detailFull.effortHours > 0 && (
+                      <>
+                        <span className="text-muted-foreground text-xs">Logged</span>
+                        <span>{detailFull.effortHours}h</span>
+                      </>
+                    )}
+                  </div>
+                </div>
+
+                {/* History */}
+                {detailFull.history.length > 0 && (
+                  <div className="rounded-lg border bg-muted/30 p-3 space-y-2">
+                    <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide flex items-center gap-1.5">
+                      <History className="h-3.5 w-3.5" /> Stage History
+                    </h3>
+                    <div className="space-y-1.5">
+                      {detailFull.history.map((h) => (
+                        <div key={h.id} className="flex items-start gap-2 text-xs">
+                          <span className="text-muted-foreground shrink-0 w-20">
+                            {format(new Date(h.changedAt), 'MMM d, HH:mm')}
+                          </span>
+                          <div className="flex-1 min-w-0">
+                            <span className="text-muted-foreground">
+                              {h.fromStatus ? `${STATUS_LABELS[h.fromStatus] ?? h.fromStatus} → ` : ''}
+                            </span>
+                            <span className="font-medium">{STATUS_LABELS[h.toStatus] ?? h.toStatus}</span>
+                            {h.durationMinutes ? (
+                              <span className="text-muted-foreground"> ({formatDur(h.durationMinutes)} in prev. stage)</span>
+                            ) : null}
+                            {h.changedBy && (
+                              <span className="text-muted-foreground"> · {h.changedBy.name}</span>
+                            )}
+                            {h.note && (
+                              <p className="text-muted-foreground italic mt-0.5">"{h.note}"</p>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )
+          })()}
+        </DialogContent>
+      </Dialog>
+
+      {/* Rework dialog */}
+      <Dialog open={reworkOpen} onOpenChange={setReworkOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Send Back for Rework</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            {reworkTarget && (
+              <p className="text-sm text-muted-foreground">
+                Task: <span className="font-medium text-foreground">{reworkTarget.name}</span>
+              </p>
+            )}
+            <Textarea
+              placeholder="Optional note for the assignee..."
+              value={reworkNote}
+              onChange={(e) => setReworkNote(e.target.value)}
+              className="min-h-[80px] resize-none"
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setReworkOpen(false)} disabled={reworkLoading}>
+              Cancel
+            </Button>
+            <Button
+              className="bg-orange-500 hover:bg-orange-600 text-white"
+              onClick={submitRework}
+              disabled={reworkLoading}
+            >
+              {reworkLoading ? 'Sending…' : 'Send for Rework'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

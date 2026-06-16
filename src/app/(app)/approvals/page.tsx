@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import { useAuthStore, canApproveChanges } from '@/store/auth'
 import { toast } from 'sonner'
-import { format } from 'date-fns'
+import { format, isPast } from 'date-fns'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -17,7 +17,7 @@ import {
 } from '@/components/ui/dialog'
 import {
   CheckCircle2, XCircle, Clock, AlertTriangle, ChevronDown, ChevronUp,
-  ClipboardList, FolderPlus, ArrowRight, UserPlus,
+  ClipboardList, UserPlus,
 } from 'lucide-react'
 import { AssignWorkDialog } from '@/components/assign-work-dialog'
 
@@ -46,6 +46,12 @@ interface WorkRequest {
   project?: { id: string; name: string }
 }
 interface TeamMember { id: string; name: string; role: string; capacityPct: number; department?: string }
+interface AssigneeTask {
+  id: string; name: string; status: string; priority: string
+  startDate?: string; endDate?: string
+  effortHours: number; estimatedHours: number
+  workstream: { name: string; project: { name: string } }
+}
 
 const SEVERITY_COLORS: Record<string, string> = {
   LOW: 'text-green-600 bg-green-50', MEDIUM: 'text-blue-600 bg-blue-50',
@@ -55,7 +61,7 @@ const CHANGE_TYPE_LABELS: Record<string, string> = {
   TASK_ADDED: 'Task Added', TASK_PRIORITY_CHANGED: 'Priority Changed',
   TASK_DURATION_CHANGED: 'Duration Changed', RESOURCE_OVERLOAD: 'Resource Overload',
   RESOURCE_UNAVAILABLE: 'Resource Unavailable', PROJECT_PRIORITY_CHANGED: 'Project Priority Changed',
-  TASK_DATES_CHANGED: 'Task Dates Changed',
+  TASK_DATES_CHANGED: 'Task Dates Changed', ANDON_RAISED: 'Andon Alert',
 }
 const REQ_STATUS_COLORS: Record<string, string> = {
   SUBMITTED: 'bg-slate-100 text-slate-700', REVIEW: 'bg-yellow-100 text-yellow-700',
@@ -71,21 +77,22 @@ export default function ApprovalsPage() {
   const [changesLoad,  setChangesLoad]  = useState(true)
   const [selected,     setSelected]     = useState<ScheduleChange | null>(null)
   const [comments,     setComments]     = useState('')
-  const [processing,   setProcessing]   = useState(false)
-  const [expanded,     setExpanded]     = useState<Record<string, boolean>>({})
-  const [scFilter,     setScFilter]     = useState('PENDING')
+  const [processing,      setProcessing]      = useState(false)
+  const [expanded,        setExpanded]        = useState<Record<string, boolean>>({})
+  const [scFilter,        setScFilter]        = useState('PENDING')
+  const [andonDelayDays,  setAndonDelayDays]  = useState<string>('')
 
   // Work requests state
   const [wRequests,    setWRequests]    = useState<WorkRequest[]>([])
   const [wLoad,        setWLoad]        = useState(true)
   const [wFilter,      setWFilter]      = useState('ALL_OPEN')
   const [actionLoad,   setActionLoad]   = useState<string | null>(null)
-  const [convertTarget,setConvertTarget]= useState<WorkRequest | null>(null)
-  const [converting,   setConverting]   = useState(false)
-  const [convName,     setConvName]     = useState('')
-  const [convStart,    setConvStart]    = useState('')
-  const [convEnd,      setConvEnd]      = useState('')
-  const [convPriority, setConvPriority] = useState('MEDIUM')
+
+  // Approval impact dialog
+  const [approveTarget,        setApproveTarget]        = useState<WorkRequest | null>(null)
+  const [assigneeTasks,        setAssigneeTasks]        = useState<AssigneeTask[]>([])
+  const [assigneeTasksLoading, setAssigneeTasksLoading] = useState(false)
+  const [approving,            setApproving]            = useState(false)
 
   // Assignment state
   const [teamMembers,   setTeamMembers]   = useState<TeamMember[]>([])
@@ -160,13 +167,17 @@ export default function ApprovalsPage() {
     if (!selected) return
     setProcessing(true)
     try {
+      const body: Record<string, unknown> = { approved, comments }
+      if (selected.changeType === 'ANDON_RAISED' && andonDelayDays !== '') {
+        body.delayDays = Number(andonDelayDays)
+      }
       const res = await fetch(`/api/schedule-changes/${selected.id}/approve`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ approved, comments }),
+        body: JSON.stringify(body),
       })
       if (!res.ok) throw new Error()
       toast.success(approved ? 'Change approved and applied' : 'Change rejected')
-      setSelected(null); setComments(''); loadChanges()
+      setSelected(null); setComments(''); setAndonDelayDays(''); loadChanges()
     } catch { toast.error('Failed to process approval') }
     finally { setProcessing(false) }
   }
@@ -186,32 +197,52 @@ export default function ApprovalsPage() {
     finally { setActionLoad(null) }
   }
 
-  async function onConvert() {
-    if (!convertTarget || !convName || !convStart || !convEnd) {
-      toast.error('Please fill all required fields'); return
+  async function openApproveDialog(req: WorkRequest) {
+    setApproveTarget(req)
+    setAssigneeTasks([])
+
+    if (req.assignee?.id) {
+      setAssigneeTasksLoading(true)
+      try {
+        const res = await fetch(`/api/tasks?ownerId=${req.assignee.id}`)
+        const data = await res.json()
+        setAssigneeTasks(Array.isArray(data) ? data : [])
+      } finally {
+        setAssigneeTasksLoading(false)
+      }
     }
-    setConverting(true)
+  }
+
+  async function handleApprove() {
+    if (!approveTarget) return
+    setApproving(true)
     try {
-      const res = await fetch(`/api/requests/${convertTarget.id}`, {
+      const res = await fetch(`/api/requests/${approveTarget.id}`, {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          status: 'CONVERTED',
-          convertToProject: {
-            name: convName,
-            description: convertTarget.description,
-            type: convertTarget.type,
-            priority: convPriority,
-            startDate: convStart,
-            endDate: convEnd,
-          },
-        }),
+        body: JSON.stringify({ status: 'APPROVED' }),
       })
       if (!res.ok) throw new Error((await res.json()).error)
-      toast.success('Request converted to project!')
-      setConvertTarget(null); setConvName(''); setConvStart(''); setConvEnd('')
+      toast.success('Request approved')
+      setApproveTarget(null)
       loadRequests()
     } catch (e: unknown) { toast.error(e instanceof Error ? e.message : 'Failed') }
-    finally { setConverting(false) }
+    finally { setApproving(false) }
+  }
+
+  async function handleRejectFromDialog() {
+    if (!approveTarget) return
+    setApproving(true)
+    try {
+      const res = await fetch(`/api/requests/${approveTarget.id}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'REJECTED' }),
+      })
+      if (!res.ok) throw new Error((await res.json()).error)
+      toast.success('Request rejected')
+      setApproveTarget(null)
+      loadRequests()
+    } catch (e: unknown) { toast.error(e instanceof Error ? e.message : 'Failed') }
+    finally { setApproving(false) }
   }
 
   const pendingCount    = wRequests.filter(r => r.status === 'SUBMITTED').length
@@ -317,37 +348,19 @@ export default function ApprovalsPage() {
                         </div>
                       </div>
 
-                      {canApprove && req.status !== 'CONVERTED' && req.status !== 'REJECTED' && (
+                      {canApprove && req.status !== 'CONVERTED' && req.status !== 'REJECTED' && req.status !== 'APPROVED' && (
                         <div className="flex gap-1.5 shrink-0 flex-wrap justify-end">
-                          {req.status === 'SUBMITTED' && (
-                            <Button size="sm" variant="outline" className="h-7 text-xs"
-                              disabled={actionLoad === req.id + 'REVIEW'}
-                              onClick={() => updateRequestStatus(req.id, 'REVIEW')}>
-                              <ArrowRight className="mr-1 h-3 w-3" /> Start Review
-                            </Button>
-                          )}
-                          {req.status === 'REVIEW' && (
-                            <>
-                              <Button size="sm" variant="outline"
-                                className="h-7 text-xs text-green-600 border-green-200 hover:bg-green-50"
-                                disabled={actionLoad === req.id + 'APPROVED'}
-                                onClick={() => updateRequestStatus(req.id, 'APPROVED')}>
-                                <CheckCircle2 className="mr-1 h-3 w-3" /> Approve
-                              </Button>
-                              <Button size="sm" variant="outline"
-                                className="h-7 text-xs text-red-600 border-red-200 hover:bg-red-50"
-                                disabled={actionLoad === req.id + 'REJECTED'}
-                                onClick={() => updateRequestStatus(req.id, 'REJECTED')}>
-                                <XCircle className="mr-1 h-3 w-3" /> Reject
-                              </Button>
-                            </>
-                          )}
-                          {req.status === 'APPROVED' && (
-                            <Button size="sm" className="h-7 text-xs bg-blue-600 hover:bg-blue-700"
-                              onClick={() => { setConvertTarget(req); setConvName(req.title); setConvPriority(req.priority) }}>
-                              <FolderPlus className="mr-1 h-3 w-3" /> Convert to Project
-                            </Button>
-                          )}
+                          <Button size="sm" variant="outline"
+                            className="h-7 text-xs text-green-600 border-green-200 hover:bg-green-50"
+                            onClick={() => openApproveDialog(req)}>
+                            <CheckCircle2 className="mr-1 h-3 w-3" /> Approve
+                          </Button>
+                          <Button size="sm" variant="outline"
+                            className="h-7 text-xs text-red-600 border-red-200 hover:bg-red-50"
+                            disabled={actionLoad === req.id + 'REJECTED'}
+                            onClick={() => updateRequestStatus(req.id, 'REJECTED')}>
+                            <XCircle className="mr-1 h-3 w-3" /> Reject
+                          </Button>
                         </div>
                       )}
                     </div>
@@ -508,7 +521,7 @@ export default function ApprovalsPage() {
       )}
 
       {/* ── Schedule Change Review Dialog ── */}
-      <Dialog open={!!selected} onOpenChange={(v) => { if (!v) setSelected(null) }}>
+      <Dialog open={!!selected} onOpenChange={(v) => { if (!v) { setSelected(null); setComments(''); setAndonDelayDays('') } }}>
         <DialogContent>
           <DialogHeader><DialogTitle>Review Schedule Change</DialogTitle></DialogHeader>
           {selected && (
@@ -526,6 +539,64 @@ export default function ApprovalsPage() {
                 </p>
                 <p className="text-xs mt-1">{selected.impactSummary?.summary}</p>
               </div>
+              {/* For RESOURCE_OVERLOAD: show which tasks will be delayed and by how much */}
+              {selected.changeType === 'RESOURCE_OVERLOAD' && (() => {
+                const proposed = selected.proposedData as Record<string, unknown>
+                const tasks = proposed?.tasks as Array<{
+                  taskId: string; name: string; priority: string
+                  currentStartDate?: string; currentEndDate?: string
+                  newStartDate?: string; newEndDate?: string
+                }> | undefined
+                if (!tasks?.length) return null
+                return (
+                  <div className="space-y-1.5">
+                    <p className="text-sm font-medium">Tasks that will be delayed</p>
+                    <div className="border rounded-md divide-y text-xs">
+                      {tasks.map(t => (
+                        <div key={t.taskId} className="px-3 py-2 space-y-0.5">
+                          <div className="flex items-center gap-2">
+                            <span className="font-medium flex-1 truncate">{t.name}</span>
+                            <Badge variant="outline" className="text-[10px]">{t.priority}</Badge>
+                          </div>
+                          <div className="text-muted-foreground flex gap-3">
+                            {t.currentEndDate && (
+                              <span>Current end: {format(new Date(t.currentEndDate), 'MMM d')}</span>
+                            )}
+                            {t.newEndDate && (
+                              <span className="text-orange-600 font-medium">
+                                → New end: {format(new Date(t.newEndDate), 'MMM d')}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Approving will shift these tasks by {String(proposed.delayDays ?? '?')} working day(s).
+                    </p>
+                  </div>
+                )
+              })()}
+
+              {/* For ANDON_RAISED: ask how many days delay before approving */}
+              {selected?.changeType === 'ANDON_RAISED' && (
+                <div className="space-y-1.5">
+                  <Label className="text-sm font-medium">How many days will this delay the project? *</Label>
+                  <div className="flex items-center gap-2">
+                    <Input
+                      type="number"
+                      min="0"
+                      step="1"
+                      placeholder="e.g. 3"
+                      value={andonDelayDays}
+                      onChange={(e) => setAndonDelayDays(e.target.value)}
+                      className="w-32"
+                    />
+                    <span className="text-sm text-muted-foreground">working days (enter 0 if no delay)</span>
+                  </div>
+                </div>
+              )}
+
               <div className="space-y-1.5">
                 <label className="text-sm font-medium">Comments (optional)</label>
                 <Textarea placeholder="Add a comment..." value={comments} onChange={(e) => setComments(e.target.value)} rows={3} />
@@ -537,7 +608,9 @@ export default function ApprovalsPage() {
               className="text-red-600 border-red-200 hover:bg-red-50">
               <XCircle className="mr-1.5 h-4 w-4" /> Reject
             </Button>
-            <Button onClick={() => handleDecision(true)} disabled={processing}
+            <Button
+              onClick={() => handleDecision(true)}
+              disabled={processing || (selected?.changeType === 'ANDON_RAISED' && andonDelayDays === '')}
               className="bg-green-600 hover:bg-green-700">
               <CheckCircle2 className="mr-1.5 h-4 w-4" /> Approve & Apply
             </Button>
@@ -545,54 +618,123 @@ export default function ApprovalsPage() {
         </DialogContent>
       </Dialog>
 
-      {/* ── Convert to Project Dialog ── */}
-      <Dialog open={!!convertTarget} onOpenChange={(o) => { if (!o) setConvertTarget(null) }}>
-        <DialogContent className="max-w-md">
+      {/* ── Approval Impact Dialog ── */}
+      <Dialog open={!!approveTarget} onOpenChange={(v) => { if (!v) setApproveTarget(null) }}>
+        <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <FolderPlus className="h-5 w-5 text-blue-600" /> Convert to Project
+              <CheckCircle2 className="h-5 w-5 text-green-600" /> Review Request
             </DialogTitle>
           </DialogHeader>
-          {convertTarget && (
-            <div className="mb-2 p-3 bg-muted rounded-lg text-sm text-muted-foreground">
-              From request: <span className="font-medium text-foreground">{convertTarget.title}</span>
+          {approveTarget && (
+            <div className="space-y-4 max-h-[65vh] overflow-y-auto pr-1">
+              {/* Request summary */}
+              <div className="p-3 bg-muted rounded-lg space-y-2">
+                <p className="font-semibold text-sm">{approveTarget.title}</p>
+                {approveTarget.description && (
+                  <p className="text-xs text-muted-foreground">{approveTarget.description}</p>
+                )}
+                <div className="flex items-center gap-2 flex-wrap">
+                  <Badge variant="outline" className="text-xs">{approveTarget.type}</Badge>
+                  <Badge variant="secondary" className="text-xs">{approveTarget.priority}</Badge>
+                  {approveTarget.estimatedHours && (
+                    <span className="text-xs text-blue-600 flex items-center gap-1">
+                      <Clock className="h-3 w-3" />{approveTarget.estimatedHours}h estimated
+                    </span>
+                  )}
+                  <span className="text-xs text-muted-foreground">by {approveTarget.submitter.name}</span>
+                </div>
+              </div>
+
+              {/* Assignee schedule */}
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">
+                  Assignee Schedule
+                </p>
+                {approveTarget.assignee ? (
+                  <div className="space-y-2">
+                    <p className="text-sm font-medium">{approveTarget.assignee.name}</p>
+                    {assigneeTasksLoading ? (
+                      <div className="space-y-1.5">
+                        <Skeleton className="h-5 rounded" />
+                        <Skeleton className="h-5 rounded" />
+                        <Skeleton className="h-5 rounded" />
+                      </div>
+                    ) : (() => {
+                      const activeTasks = assigneeTasks.filter(t => !['COMPLETED', 'CANCELLED'].includes(t.status))
+                      return activeTasks.length === 0 ? (
+                        <p className="text-xs text-green-600">Schedule is clear — no active tasks.</p>
+                      ) : (
+                        <>
+                          <div className="border rounded-md divide-y">
+                            {activeTasks.slice(0, 6).map(t => (
+                              <div key={t.id} className="flex items-center gap-2 text-xs px-3 py-2">
+                                <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                                  t.status === 'IN_PROGRESS' ? 'bg-yellow-500' :
+                                  t.status === 'REVIEW' ? 'bg-purple-500' : 'bg-blue-400'
+                                }`} />
+                                <span className="flex-1 truncate font-medium">{t.name}</span>
+                                <span className="text-muted-foreground shrink-0 truncate max-w-[100px]">
+                                  {t.workstream?.project?.name}
+                                </span>
+                                {t.endDate && (
+                                  <span className={`shrink-0 font-medium ${
+                                    isPast(new Date(t.endDate)) ? 'text-red-500' : 'text-muted-foreground'
+                                  }`}>
+                                    {isPast(new Date(t.endDate)) ? '⚠ ' : ''}due {format(new Date(t.endDate), 'MMM d')}
+                                  </span>
+                                )}
+                                {t.estimatedHours > 0 ? (
+                                  <span className="text-blue-600 shrink-0 font-medium">{t.estimatedHours}h</span>
+                                ) : t.effortHours > 0 ? (
+                                  <span className="text-muted-foreground shrink-0">{t.effortHours}h</span>
+                                ) : null}
+                              </div>
+                            ))}
+                          </div>
+                          {activeTasks.length > 6 && (
+                            <p className="text-xs text-muted-foreground">+{activeTasks.length - 6} more tasks</p>
+                          )}
+                          {approveTarget.estimatedHours && (
+                            <div className="flex items-start gap-1.5 text-xs text-orange-700 bg-orange-50 border border-orange-200 rounded p-2">
+                              <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                              <span>
+                                Adding <strong>{approveTarget.estimatedHours}h</strong> to {approveTarget.assignee.name}&apos;s workload
+                                may delay {activeTasks.filter(t => t.endDate).length} tasks with deadlines.
+                                Review their schedule above before approving.
+                              </span>
+                            </div>
+                          )}
+                        </>
+                      )
+                    })()}
+                  </div>
+                ) : (
+                  <p className="text-xs text-muted-foreground italic">
+                    No assignee set — use the "Assign to" field on the request card to assign someone first.
+                  </p>
+                )}
+              </div>
+
             </div>
           )}
-          <div className="space-y-3">
-            <div className="space-y-1.5">
-              <Label>Project Name *</Label>
-              <Input value={convName} onChange={e => setConvName(e.target.value)} placeholder="Project name…" />
-            </div>
-            <div className="space-y-1.5">
-              <Label>Priority</Label>
-              <Select value={convPriority} onValueChange={(v) => { const s = v as string | null; if (s) setConvPriority(s) }}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="LOW">Low</SelectItem>
-                  <SelectItem value="MEDIUM">Medium</SelectItem>
-                  <SelectItem value="HIGH">High</SelectItem>
-                  <SelectItem value="CRITICAL">Critical</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <Label>Start Date *</Label>
-                <Input type="date" value={convStart} onChange={e => setConvStart(e.target.value)} />
-              </div>
-              <div className="space-y-1.5">
-                <Label>End Date *</Label>
-                <Input type="date" value={convEnd} onChange={e => setConvEnd(e.target.value)} />
-              </div>
-            </div>
-            <div className="flex justify-end gap-2 pt-1">
-              <Button variant="outline" onClick={() => setConvertTarget(null)}>Cancel</Button>
-              <Button onClick={onConvert} disabled={converting} className="bg-blue-600 hover:bg-blue-700">
-                <FolderPlus className="mr-1.5 h-4 w-4" />
-                {converting ? 'Creating…' : 'Create Project'}
-              </Button>
-            </div>
-          </div>
+          <DialogFooter className="gap-2">
+            <Button variant="outline"
+              className="text-red-600 border-red-200 hover:bg-red-50"
+              onClick={handleRejectFromDialog}
+              disabled={approving}>
+              <XCircle className="mr-1.5 h-4 w-4" /> Reject
+            </Button>
+            <Button variant="outline" onClick={() => setApproveTarget(null)} disabled={approving}>
+              Cancel
+            </Button>
+            <Button
+              className="bg-green-600 hover:bg-green-700"
+              onClick={handleApprove}
+              disabled={approving}>
+              {approving ? 'Processing…' : <><CheckCircle2 className="mr-1.5 h-4 w-4" /> Approve</>}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 

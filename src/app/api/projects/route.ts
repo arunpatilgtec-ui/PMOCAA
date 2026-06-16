@@ -8,9 +8,45 @@ export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url)
     const status = searchParams.get('status')
     const type = searchParams.get('type')
+    const view = searchParams.get('view')
+
+    // Role-based project visibility
+    let roleFilter: Record<string, unknown> = {}
+    // Matches any project where this user has at least one task assigned to them
+    const hasMyTask = { workstreams: { some: { tasks: { some: { ownerId: session.id } } } } }
+
+    if (session.role === 'PROJECT_LEAD') {
+      roleFilter = {
+        OR: [
+          { leadId: session.id },
+          hasMyTask,
+        ],
+      }
+    } else if (session.role === 'RESOURCE') {
+      roleFilter = {
+        OR: [
+          { allocations: { some: { userId: session.id } } },
+          { request: { submitterId: session.id, status: 'APPROVED' } },
+          hasMyTask,
+        ],
+      }
+    } else if (session.role === 'WORKSTREAM_LEAD') {
+      roleFilter = {
+        OR: [
+          { allocations: { some: { userId: session.id } } },
+          { workstreams: { some: { leadId: session.id } } },
+          hasMyTask,
+        ],
+      }
+    } else if (['ADMIN', 'MANAGER', 'PLANNER'].includes(session.role) && view === 'mine') {
+      roleFilter = { plannerId: session.id }
+    }
+    // LEADERSHIP + default admin/manager/planner: no filter (see all)
 
     const projects = await prisma.project.findMany({
       where: {
+        NOT: { name: '__direct_assignments__' },
+        ...roleFilter,
         ...(status ? { status: status as never } : {}),
         ...(type ? { type: type as never } : {}),
       },
@@ -45,7 +81,7 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     const session = await requireAuth()
-    if (!['ADMIN', 'MANAGER', 'PLANNER'].includes(session.role)) {
+    if (!['ADMIN', 'PLANNER'].includes(session.role)) {
       return Response.json({ error: 'Forbidden' }, { status: 403 })
     }
 
@@ -55,7 +91,7 @@ export async function POST(req: NextRequest) {
         name: data.name,
         description: data.description,
         type: data.type,
-        status: data.status || 'PLANNING',
+        status: 'PLANNING',
         priority: data.priority || 'MEDIUM',
         startDate: new Date(data.startDate),
         endDate: new Date(data.endDate),

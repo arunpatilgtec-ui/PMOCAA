@@ -11,9 +11,10 @@ export async function GET(req: NextRequest) {
     const requests = await prisma.request.findMany({
       where: { ...(status ? { status: status as never } : {}) },
       include: {
-        submitter: { select: { id: true, name: true, avatarUrl: true } },
-        assignee:  { select: { id: true, name: true, role: true } },
-        project:   { select: { id: true, name: true, status: true } },
+        submitter:  { select: { id: true, name: true, avatarUrl: true } },
+        assignee:   { select: { id: true, name: true, role: true } },
+        assignedBy: { select: { id: true, name: true } },
+        project:    { select: { id: true, name: true, status: true } },
       },
       orderBy: [{ createdAt: 'desc' }],
     })
@@ -38,7 +39,14 @@ export async function POST(req: NextRequest) {
         priority: data.priority || 'MEDIUM',
         type: data.type,
         submitterId: session.id,
+        assigneeId: data.assigneeId || null,
         notes: data.notes,
+        startDate:    data.startDate   ? new Date(data.startDate)   : null,
+        endDate:      data.endDate     ? new Date(data.endDate)     : null,
+        isRecurring:  data.isRecurring ?? false,
+        hoursPerDay:  data.isRecurring && data.hoursPerDay ? parseFloat(String(data.hoursPerDay)) : null,
+        estimatedHours: !data.isRecurring && data.estimatedHours ? parseFloat(String(data.estimatedHours)) : null,
+        assignedById: data.assignedById || null,
       },
       include: {
         submitter: { select: { id: true, name: true } },

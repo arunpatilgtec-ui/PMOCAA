@@ -22,7 +22,6 @@ const schema = z.object({
   description: z.string().optional(),
   type: z.enum(['TEARDOWN', 'OTHER']),
   priority: z.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']),
-  status: z.enum(['PLANNING', 'ACTIVE', 'ON_HOLD', 'COMPLETED', 'CANCELLED']),
   startDate: z.string().min(1, 'Start date required'),
   endDate: z.string().min(1, 'End date required'),
   leadId: z.string().optional(),
@@ -46,7 +45,7 @@ export function CreateProjectDialog({
 
   const { register, handleSubmit, setValue, reset, formState: { errors } } = useForm<FormData>({
     resolver: zodResolver(schema),
-    defaultValues: { type: 'TEARDOWN', priority: 'MEDIUM', status: 'PLANNING' },
+    defaultValues: { type: 'TEARDOWN', priority: 'MEDIUM' },
   })
 
   useEffect(() => {

@@ -1,45 +1,8 @@
 import { NextRequest } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { requireAuth } from '@/lib/auth'
-
-const DIRECT_WORK_PROJECT_NAME = '__direct_assignments__'
-
-async function getOrCreateDirectWorkstream(assignerId: string) {
-  const existing = await prisma.project.findFirst({
-    where: { name: DIRECT_WORK_PROJECT_NAME },
-    include: { workstreams: { take: 1 } },
-  })
-
-  if (existing) {
-    if (existing.workstreams.length > 0) return existing.workstreams[0]
-    // Project exists but no workstream — create one
-    return prisma.workstream.create({
-      data: { projectId: existing.id, name: 'Direct Assignments', status: 'IN_PROGRESS' },
-    })
-  }
-
-  // Create project + workstream together, then fetch the workstream
-  const created = await prisma.project.create({
-    data: {
-      name: DIRECT_WORK_PROJECT_NAME,
-      description: 'System project for direct work assignments',
-      type: 'OTHER',
-      status: 'ACTIVE',
-      priority: 'MEDIUM',
-      startDate: new Date('2024-01-01'),
-      endDate: new Date('2099-12-31'),
-      plannerId: assignerId,
-      workstreams: {
-        create: {
-          name: 'Direct Assignments',
-          status: 'IN_PROGRESS',
-        },
-      },
-    },
-    include: { workstreams: { take: 1 } },
-  })
-  return created.workstreams[0]
-}
+import { getOrCreateDirectWorkstream } from '@/lib/direct-assignments'
+import { applyPriorityShift } from '@/lib/priority-shift'
 
 export async function GET(req: NextRequest) {
   try {
@@ -48,7 +11,7 @@ export async function GET(req: NextRequest) {
     const userId = searchParams.get('userId')
 
     const where: Record<string, unknown> = {
-      workstream: { project: { name: DIRECT_WORK_PROJECT_NAME } },
+      workstream: { project: { name: '__direct_assignments__' } },
     }
     if (userId) where.ownerId = userId
 
@@ -95,6 +58,7 @@ export async function POST(req: NextRequest) {
         description: description || null,
         workstreamId: workstream.id,
         ownerId,
+        assignedById: session.id,
         priority: priority || 'MEDIUM',
         status: 'PLANNED',
         estimatedHours: estimatedHours ? parseFloat(estimatedHours) : 0,
@@ -118,6 +82,18 @@ export async function POST(req: NextRequest) {
           actionUrl: '/kanban',
         },
       })
+    }
+
+    // Auto-shift lower-priority tasks when a HIGH/CRITICAL task is assigned
+    if (['CRITICAL', 'HIGH'].includes(task.priority) && task.ownerId) {
+      await applyPriorityShift(
+        {
+          id: task.id, name: task.name, priority: task.priority,
+          startDate: task.startDate, endDate: task.endDate,
+          estimatedHours: task.estimatedHours, ownerId: task.ownerId,
+        },
+        session.id
+      ).catch(e => console.error('[ASSIGNMENTS POST] priority shift failed:', e))
     }
 
     return Response.json(task, { status: 201 })

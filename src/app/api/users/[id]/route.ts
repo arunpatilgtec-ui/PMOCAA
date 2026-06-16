@@ -39,6 +39,7 @@ export async function PATCH(req: NextRequest, ctx: RouteContext<'/api/users/[id]
       if (data.role !== undefined) updateData.role = data.role
       if (data.capacityPct !== undefined) updateData.capacityPct = data.capacityPct
       if (data.isActive !== undefined) updateData.isActive = data.isActive
+      if (data.mustChangePassword !== undefined) updateData.mustChangePassword = data.mustChangePassword
     }
 
     if (data.password) {

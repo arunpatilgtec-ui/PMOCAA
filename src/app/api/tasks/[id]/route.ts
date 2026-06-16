@@ -10,9 +10,16 @@ export async function GET(_req: NextRequest, ctx: RouteContext<'/api/tasks/[id]'
     const task = await prisma.task.findUnique({
       where: { id },
       include: {
-        owner: { select: { id: true, name: true, avatarUrl: true, email: true } },
+        owner: { select: { id: true, name: true, avatarUrl: true, email: true, role: true } },
+        assignedBy: { select: { id: true, name: true, avatarUrl: true, role: true } },
+        approvedBy: { select: { id: true, name: true, avatarUrl: true, role: true } },
         workstream: { include: { project: true, lead: { select: { id: true, name: true } } } },
         documents: { include: { uploader: { select: { id: true, name: true } } } },
+        history: {
+          orderBy: { changedAt: 'desc' },
+          take: 20,
+          include: { changedBy: { select: { id: true, name: true } } },
+        },
       },
     })
     if (!task) return Response.json({ error: 'Not found' }, { status: 404 })
@@ -33,6 +40,25 @@ export async function PATCH(req: NextRequest, ctx: RouteContext<'/api/tasks/[id]
 
     const existing = await prisma.task.findUniqueOrThrow({ where: { id } })
     const ownerChanged = data.ownerId && data.ownerId !== existing.ownerId
+    const statusChanged = data.status !== undefined && data.status !== existing.status
+
+    // Create history entry and update statusChangedAt when status changes
+    if (statusChanged) {
+      const durationMinutes = Math.round(
+        (Date.now() - existing.statusChangedAt.getTime()) / 60000
+      )
+      await prisma.taskHistory.create({
+        data: {
+          taskId: id,
+          fromStatus: existing.status,
+          toStatus: data.status,
+          changedAt: new Date(),
+          durationMinutes,
+          note: data.reworkNote || null,
+          changedById: session.id,
+        },
+      })
+    }
 
     const task = await prisma.task.update({
       where: { id },
@@ -40,6 +66,8 @@ export async function PATCH(req: NextRequest, ctx: RouteContext<'/api/tasks/[id]
         ...(data.name !== undefined && { name: data.name }),
         ...(data.description !== undefined && { description: data.description }),
         ...(data.status !== undefined && { status: data.status }),
+        ...(statusChanged && { statusChangedAt: new Date() }),
+        ...(statusChanged && data.status === 'REWORK' && { reworkCount: { increment: 1 } }),
         ...(data.priority !== undefined && { priority: data.priority }),
         ...(data.startDate !== undefined && {
           startDate: data.startDate ? new Date(data.startDate) : null,
@@ -50,12 +78,19 @@ export async function PATCH(req: NextRequest, ctx: RouteContext<'/api/tasks/[id]
         ...(data.effortHours !== undefined && { effortHours: data.effortHours }),
         ...(data.estimatedHours !== undefined && { estimatedHours: data.estimatedHours }),
         ...(data.ownerId !== undefined && { ownerId: data.ownerId }),
+        // Track who reassigned the task
+        ...(ownerChanged && { assignedById: session.id }),
         ...(data.order !== undefined && { order: data.order }),
         ...(data.tags !== undefined && { tags: data.tags }),
       },
       include: {
         owner: { select: { id: true, name: true, avatarUrl: true } },
-        workstream: { include: { project: { select: { id: true, name: true } } } },
+        workstream: {
+          include: {
+            project: { select: { id: true, name: true, leadId: true } },
+            lead: { select: { id: true, name: true } },
+          },
+        },
       },
     })
 
@@ -68,11 +103,120 @@ export async function PATCH(req: NextRequest, ctx: RouteContext<'/api/tasks/[id]
       ).catch(console.error)
     }
 
+    // Status-change notifications
+    if (statusChanged) {
+      const newStatus = data.status as string
+
+      if (newStatus === 'REVIEW') {
+        // Determine who to notify — prefer assignedById, fall back to workstream lead, then project lead
+        const notifyId =
+          (task.assignedById && task.assignedById !== session.id ? task.assignedById : null) ??
+          (task.workstream.lead?.id && task.workstream.lead.id !== session.id ? task.workstream.lead.id : null) ??
+          (task.workstream.project.leadId && task.workstream.project.leadId !== session.id
+            ? task.workstream.project.leadId
+            : null)
+
+        if (notifyId) {
+          await prisma.notification.create({
+            data: {
+              type: 'TASK_UPDATED',
+              title: 'Task Ready for Review',
+              message: `${session.name} submitted "${task.name}" for review.`,
+              userId: notifyId,
+              senderId: session.id,
+              taskId: task.id,
+              actionUrl: '/kanban',
+            },
+          }).catch(console.error)
+        }
+      } else if (newStatus === 'COMPLETED' && existing.status === 'REVIEW') {
+        // Notify the task owner (the one who did the work)
+        if (task.ownerId && task.ownerId !== session.id) {
+          await prisma.notification.create({
+            data: {
+              type: 'TASK_UPDATED',
+              title: 'Task Approved',
+              message: `${session.name} approved your work on '${task.name}' — marked complete!`,
+              userId: task.ownerId,
+              senderId: session.id,
+              taskId: task.id,
+              actionUrl: '/kanban',
+            },
+          }).catch(console.error)
+        }
+      } else if (newStatus === 'REWORK') {
+        // Notify the task owner that it needs rework
+        if (task.ownerId && task.ownerId !== session.id) {
+          await prisma.notification.create({
+            data: {
+              type: 'TASK_UPDATED',
+              title: 'Task Sent Back for Rework',
+              message: `${session.name} sent '${task.name}' back for rework.${data.reworkNote ? ' Note: ' + data.reworkNote : ''}`,
+              userId: task.ownerId,
+              senderId: session.id,
+              taskId: task.id,
+              actionUrl: '/kanban',
+            },
+          }).catch(console.error)
+        }
+      } else {
+        // Any other status change — notify the task owner if someone else moved it
+        const STATUS_LABELS: Record<string, string> = {
+          BACKLOG: 'moved to Backlog',
+          PLANNED: 'planned',
+          IN_PROGRESS: 'started',
+          COMPLETED: 'marked complete',
+          CANCELLED: 'cancelled',
+        }
+        const label = STATUS_LABELS[newStatus] ?? `moved to ${newStatus}`
+        if (task.ownerId && task.ownerId !== session.id) {
+          await prisma.notification.create({
+            data: {
+              type: 'TASK_UPDATED',
+              title: 'Task Updated',
+              message: `${session.name} ${label} your task "${task.name}".`,
+              userId: task.ownerId,
+              senderId: session.id,
+              taskId: task.id,
+              actionUrl: '/kanban',
+            },
+          }).catch(console.error)
+        }
+      }
+    }
+
+    // Notify assigners/leads when any task reaches COMPLETED
+    if (statusChanged && (data.status as string) === 'COMPLETED') {
+      const notifySet = new Set<string>()
+      if (task.assignedById)                    notifySet.add(task.assignedById)
+      if (task.approvedById)                    notifySet.add(task.approvedById)
+      if (task.workstream.project.leadId)       notifySet.add(task.workstream.project.leadId)
+      if (task.workstream.lead?.id)             notifySet.add(task.workstream.lead.id)
+      notifySet.delete(session.id)              // don't notify whoever triggered this
+      if (task.ownerId) notifySet.delete(task.ownerId) // owner already notified above if from REVIEW
+
+      for (const userId of notifySet) {
+        await prisma.notification.create({
+          data: {
+            type: 'TASK_UPDATED',
+            title: 'Work Completed',
+            message: `${task.owner?.name ?? 'A team member'} completed "${task.name}" on ${task.workstream.project.name}.`,
+            userId,
+            senderId: session.id,
+            taskId: task.id,
+            projectId: task.workstream.project.id,
+            actionUrl: '/kanban',
+          },
+        }).catch(console.error)
+      }
+    }
+
     return Response.json(task)
   } catch (err: unknown) {
     if (err instanceof Error && err.message === 'Unauthorized') {
       return Response.json({ error: 'Unauthorized' }, { status: 401 })
     }
+    console.error('[TASKS PATCH]', err)
     return Response.json({ error: 'Internal server error' }, { status: 500 })
   }
 }

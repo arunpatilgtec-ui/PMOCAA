@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Bell, BellOff, CheckCheck } from 'lucide-react'
+import { useAuthStore } from '@/store/auth'
 import Link from 'next/link'
 
 interface Notification {
@@ -37,6 +38,7 @@ const TYPE_LABELS: Record<string, string> = {
 }
 
 export default function NotificationsPage() {
+  const { user } = useAuthStore()
   const [notifications, setNotifications] = useState<Notification[]>([])
   const [unreadCount, setUnreadCount] = useState(0)
   const [loading, setLoading] = useState(true)
@@ -72,35 +74,52 @@ export default function NotificationsPage() {
     setUnreadCount((c) => Math.max(0, c - 1))
   }
 
+  const RESOURCE_TYPES = ['TASK_ASSIGNED', 'APPROVAL_COMPLETED']
+  const displayed = user?.role === 'RESOURCE'
+    ? notifications.filter((n) => RESOURCE_TYPES.includes(n.type))
+    : notifications
+  const displayedUnread = displayed.filter((n) => !n.isRead).length
+
   return (
     <div className="p-6 space-y-5">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold flex items-center gap-2">
             Notifications
-            {unreadCount > 0 && (
-              <Badge variant="destructive" className="text-xs">{unreadCount}</Badge>
+            {displayedUnread > 0 && (
+              <Badge variant="destructive" className="text-xs">{displayedUnread}</Badge>
             )}
           </h1>
-          <p className="text-muted-foreground text-sm">{notifications.length} total</p>
+          <p className="text-muted-foreground text-sm">{displayed.length} total</p>
         </div>
-        {unreadCount > 0 && (
+        {displayedUnread > 0 && (
           <Button variant="outline" size="sm" onClick={markAllRead}>
             <CheckCheck className="mr-1.5 h-4 w-4" /> Mark all read
           </Button>
         )}
       </div>
 
+      {user?.role === 'RESOURCE' && (
+        <p className="text-xs text-muted-foreground bg-muted/50 rounded-md px-3 py-2">
+          Showing project assignments and approved requests only.
+        </p>
+      )}
+
       {loading ? (
         <div className="space-y-3">{[...Array(5)].map((_, i) => <Skeleton key={i} className="h-20 rounded-lg" />)}</div>
-      ) : notifications.length === 0 ? (
+      ) : displayed.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-20">
           <BellOff className="h-12 w-12 text-muted-foreground/40 mb-3" />
           <p className="text-muted-foreground">No notifications</p>
+          {user?.role === 'RESOURCE' && (
+            <p className="text-xs text-muted-foreground mt-1 text-center max-w-xs">
+              You will be notified here when a request is approved or when you are added to a project.
+            </p>
+          )}
         </div>
       ) : (
         <div className="space-y-2">
-          {notifications.map((n) => (
+          {displayed.map((n) => (
             <Card
               key={n.id}
               className={`transition-colors ${!n.isRead ? 'border-primary/30 bg-primary/5' : ''}`}

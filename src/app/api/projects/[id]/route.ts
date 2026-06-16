@@ -52,24 +52,40 @@ export async function PATCH(req: NextRequest, ctx: RouteContext<'/api/projects/[
   try {
     const session = await requireAuth()
     const { id } = await ctx.params
-    if (!['ADMIN', 'MANAGER', 'PLANNER'].includes(session.role)) {
+
+    const existing = await prisma.project.findUnique({ where: { id }, select: { leadId: true, editAccessGranted: true, planStatus: true } })
+    if (!existing) return Response.json({ error: 'Not found' }, { status: 404 })
+
+    const isFullAccess = ['ADMIN', 'PLANNER', 'MANAGER'].includes(session.role)
+    const isLeadWithAccess =
+      session.role === 'PROJECT_LEAD' &&
+      existing.leadId === session.id &&
+      existing.planStatus === 'DRAFT'
+
+    if (!isFullAccess && !isLeadWithAccess) {
       return Response.json({ error: 'Forbidden' }, { status: 403 })
     }
 
     const data = await req.json()
-    const project = await prisma.project.update({
-      where: { id },
-      data: {
-        ...(data.name !== undefined && { name: data.name }),
-        ...(data.description !== undefined && { description: data.description }),
-        ...(data.status !== undefined && { status: data.status }),
-        ...(data.priority !== undefined && { priority: data.priority }),
-        ...(data.startDate !== undefined && { startDate: new Date(data.startDate) }),
-        ...(data.endDate !== undefined && { endDate: new Date(data.endDate) }),
-        ...(data.leadId !== undefined && { leadId: data.leadId }),
-        ...(data.plannerId !== undefined && { plannerId: data.plannerId }),
-      },
-    })
+    const updateData: Record<string, unknown> = {}
+
+    // Fields editable by everyone with any access
+    if (data.name !== undefined) updateData.name = data.name
+    if (data.description !== undefined) updateData.description = data.description
+    if (data.status !== undefined) updateData.status = data.status
+    if (data.priority !== undefined) updateData.priority = data.priority
+
+    // Timeline + admin fields: PLANNER/ADMIN only
+    if (isFullAccess) {
+      if (data.startDate !== undefined) updateData.startDate = new Date(data.startDate)
+      if (data.endDate !== undefined) updateData.endDate = new Date(data.endDate)
+      if (data.leadId !== undefined) updateData.leadId = data.leadId
+      if (data.plannerId !== undefined) updateData.plannerId = data.plannerId
+      if (data.editAccessGranted !== undefined) updateData.editAccessGranted = data.editAccessGranted
+      if (data.planStatus !== undefined) updateData.planStatus = data.planStatus
+    }
+
+    const project = await prisma.project.update({ where: { id }, data: updateData })
     return Response.json(project)
   } catch (err: unknown) {
     if (err instanceof Error && err.message === 'Unauthorized') {
@@ -83,7 +99,7 @@ export async function DELETE(_req: NextRequest, ctx: RouteContext<'/api/projects
   try {
     const session = await requireAuth()
     const { id } = await ctx.params
-    if (!['ADMIN', 'MANAGER'].includes(session.role)) {
+    if (!['ADMIN', 'PLANNER'].includes(session.role)) {
       return Response.json({ error: 'Forbidden' }, { status: 403 })
     }
     await prisma.project.delete({ where: { id } })

@@ -1,6 +1,8 @@
 import type { NextRequest } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { requireAuth } from '@/lib/auth'
+import { getOrCreateDirectWorkstream } from '@/lib/direct-assignments'
+import { applyPriorityShift } from '@/lib/priority-shift'
 
 export async function PATCH(req: NextRequest, ctx: RouteContext<'/api/requests/[id]'>) {
   try {
@@ -12,10 +14,16 @@ export async function PATCH(req: NextRequest, ctx: RouteContext<'/api/requests/[
       return Response.json({ error: 'Forbidden' }, { status: 403 })
     }
 
-    // Fetch existing request to get submitter info for notifications
+    // Fetch existing request to get submitter info and fields for task creation
     const existing = await prisma.request.findUnique({
       where: { id },
-      select: { submitterId: true, title: true },
+      select: {
+        submitterId: true, title: true, description: true,
+        assigneeId: true, estimatedHours: true,
+        startDate: true, endDate: true,
+        status: true, priority: true,
+        submitter: { select: { name: true } },
+      },
     })
     if (!existing) {
       return Response.json({ error: 'Not found' }, { status: 404 })
@@ -65,11 +73,67 @@ export async function PATCH(req: NextRequest, ctx: RouteContext<'/api/requests/[
       data: {
         ...(data.status !== undefined && { status: data.status }),
         ...(data.priority !== undefined && { priority: data.priority }),
-        ...(data.assigneeId !== undefined && { assigneeId: data.assigneeId }),
+        ...(data.assigneeId !== undefined && { assigneeId: data.assigneeId || null }),
         ...(data.notes !== undefined && { notes: data.notes }),
         ...(data.estimatedHours !== undefined && { estimatedHours: data.estimatedHours ? parseFloat(data.estimatedHours) : null }),
       },
     })
+
+    // When a request transitions to APPROVED for the first time, create a Task for the assignee
+    if (data.status === 'APPROVED' && existing.status !== 'APPROVED') {
+      const effectiveAssigneeId: string | null = data.assigneeId || existing.assigneeId || null
+      if (effectiveAssigneeId) {
+        try {
+          const workstream = await getOrCreateDirectWorkstream(session.id)
+          const task = await prisma.task.create({
+            data: {
+              name: existing.title,
+              description: existing.description || null,
+              workstreamId: workstream.id,
+              ownerId: effectiveAssigneeId,
+              // assignedById = who submitted/requested the work; approvedById = who formally approved it
+              assignedById: existing.submitterId,
+              approvedById: session.id,
+              priority: request.priority,
+              status: 'PLANNED',
+              estimatedHours: existing.estimatedHours ?? 0,
+              startDate: existing.startDate ?? null,
+              endDate: existing.endDate ?? null,
+            },
+          })
+          // Auto-shift lower-priority tasks if this is HIGH/CRITICAL
+          await applyPriorityShift(
+            {
+              id: task.id, name: task.name, priority: request.priority,
+              startDate: existing.startDate ?? null, endDate: existing.endDate ?? null,
+              estimatedHours: existing.estimatedHours ?? 0, ownerId: effectiveAssigneeId,
+            },
+            session.id
+          ).catch(e => console.error('[REQUESTS APPROVE] priority shift failed:', e))
+
+          // Notify the assignee that they have been given work
+          if (effectiveAssigneeId !== session.id) {
+            const requestedBy = existing.submitterId !== session.id
+              ? ` · Requested by ${existing.submitter?.name ?? 'someone'}`
+              : ''
+            await prisma.notification.create({
+              data: {
+                userId: effectiveAssigneeId,
+                senderId: session.id,
+                type: 'TASK_ASSIGNED',
+                title: 'Work Assigned — Request Approved',
+                message: `${session.name} approved and assigned you: "${existing.title}"${existing.estimatedHours ? ` · ${existing.estimatedHours}h` : ''}${requestedBy}. Open Kanban to start.`,
+                taskId: task.id,
+                actionUrl: '/kanban',
+              },
+            })
+          }
+        } catch (e) {
+          console.error('[REQUESTS APPROVE] task creation failed:', e)
+          // Non-fatal — the approval still completes
+        }
+      }
+    }
 
     // Notify newly assigned person
     if (data.assigneeId && data.assigneeId !== session.id) {

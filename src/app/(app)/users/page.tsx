@@ -17,6 +17,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import {
   Plus, Search, Shield, Pencil, Trash2, KeyRound,
   UserCheck, UserX, MoreHorizontal, AlertTriangle,
+  Eye, EyeOff, Copy, Check,
 } from 'lucide-react'
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem,
@@ -77,6 +78,15 @@ export default function UsersPage() {
   const [submitting,  setSubmitting]  = useState(false)
   const [deleting,    setDeleting]    = useState(false)
 
+  // Reset Password dialog state
+  const [resetTarget, setResetTarget] = useState<User | null>(null)
+  const [resetPwd,    setResetPwd]    = useState('')
+  const [resetShow,   setResetShow]   = useState(false)
+  const [resetForce,  setResetForce]  = useState(true)
+  const [resetting,   setResetting]   = useState(false)
+  const [resetDone,   setResetDone]   = useState<string | null>(null)
+  const [copied,      setCopied]      = useState(false)
+
   const cForm = useForm<CreateForm>({ resolver: zodResolver(createSchema), defaultValues: { role: 'RESOURCE', capacityPct: 100 } })
   const eForm = useForm<EditForm>({ resolver: zodResolver(editSchema) })
 
@@ -135,6 +145,34 @@ export default function UsersPage() {
       setDeleteTarget(null); load()
     } catch (e: unknown) { toast.error(e instanceof Error ? e.message : 'Failed') }
     finally { setDeleting(false) }
+  }
+
+  function openReset(u: User) {
+    setResetTarget(u); setResetPwd(''); setResetShow(false)
+    setResetForce(true); setResetDone(null); setCopied(false)
+  }
+
+  async function onReset() {
+    if (!resetTarget || !resetPwd) return
+    setResetting(true)
+    try {
+      const res = await fetch(`/api/users/${resetTarget.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: resetPwd, mustChangePassword: resetForce }),
+      })
+      if (!res.ok) throw new Error((await res.json()).error)
+      setResetDone(resetPwd)
+      toast.success('Password reset successfully')
+    } catch (e: unknown) { toast.error(e instanceof Error ? e.message : 'Failed') }
+    finally { setResetting(false) }
+  }
+
+  async function copyPassword() {
+    if (!resetDone) return
+    await navigator.clipboard.writeText(resetDone)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
   }
 
   async function toggleActive(u: User) {
@@ -231,7 +269,7 @@ export default function UsersPage() {
                     <DropdownMenuItem onClick={() => openEdit(u)}>
                       <Pencil className="mr-2 h-4 w-4" /> Edit Details
                     </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => { openEdit(u) }}>
+                    <DropdownMenuItem onClick={() => openReset(u)}>
                       <KeyRound className="mr-2 h-4 w-4" /> Reset Password
                     </DropdownMenuItem>
                     <DropdownMenuItem onClick={() => toggleActive(u)}>
@@ -380,6 +418,68 @@ export default function UsersPage() {
               <Button type="submit" disabled={submitting}>Save Changes</Button>
             </div>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Reset Password Dialog ── */}
+      <Dialog open={!!resetTarget} onOpenChange={o => { if (!o) setResetTarget(null) }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <KeyRound className="h-4 w-4 text-blue-500" /> Reset Password — {resetTarget?.name}
+            </DialogTitle>
+          </DialogHeader>
+          {resetDone ? (
+            <div className="space-y-4">
+              <div className="bg-green-50 dark:bg-green-950 border border-green-200 dark:border-green-800 rounded-lg p-3 space-y-2">
+                <p className="text-xs font-medium text-green-700 dark:text-green-300">Password has been reset. Share this with the user:</p>
+                <div className="flex items-center gap-2">
+                  <code className="flex-1 bg-white dark:bg-black border rounded px-2 py-1.5 text-sm font-mono select-all">
+                    {resetDone}
+                  </code>
+                  <Button size="sm" variant="outline" onClick={copyPassword} className="shrink-0 h-8 w-8 p-0">
+                    {copied ? <Check className="h-4 w-4 text-green-600" /> : <Copy className="h-4 w-4" />}
+                  </Button>
+                </div>
+                {resetForce && <p className="text-xs text-green-600 dark:text-green-400">User will be required to change this on next login.</p>}
+              </div>
+              <Button className="w-full" onClick={() => setResetTarget(null)}>Done</Button>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <div className="space-y-1.5">
+                <Label>New Password *</Label>
+                <div className="relative">
+                  <Input
+                    type={resetShow ? 'text' : 'password'}
+                    placeholder="Min 6 characters"
+                    value={resetPwd}
+                    onChange={e => setResetPwd(e.target.value)}
+                    className="pr-9"
+                  />
+                  <button type="button" onClick={() => setResetShow(s => !s)}
+                    className="absolute right-2.5 top-2.5 text-muted-foreground hover:text-foreground">
+                    {resetShow ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
+              </div>
+              <label className="flex items-start gap-2 cursor-pointer select-none">
+                <input type="checkbox" checked={resetForce} onChange={e => setResetForce(e.target.checked)}
+                  className="mt-0.5 h-4 w-4 rounded border-border" />
+                <span className="text-sm">
+                  Force user to change password on next login
+                  <span className="block text-xs text-muted-foreground">Recommended when resetting a forgotten password</span>
+                </span>
+              </label>
+              <div className="flex gap-2 justify-end">
+                <Button variant="outline" onClick={() => setResetTarget(null)}>Cancel</Button>
+                <Button onClick={onReset} disabled={resetting || resetPwd.length < 6}>
+                  <KeyRound className="mr-1.5 h-4 w-4" />
+                  {resetting ? 'Resetting…' : 'Reset Password'}
+                </Button>
+              </div>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
 

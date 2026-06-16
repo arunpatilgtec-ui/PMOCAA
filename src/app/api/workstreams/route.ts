@@ -5,11 +5,22 @@ import { requireAuth } from '@/lib/auth'
 export async function POST(req: NextRequest) {
   try {
     const session = await requireAuth()
+    const data = await req.json()
+
     if (!['ADMIN', 'MANAGER', 'PLANNER'].includes(session.role)) {
-      return Response.json({ error: 'Forbidden' }, { status: 403 })
+      if (session.role === 'PROJECT_LEAD') {
+        const project = await prisma.project.findUnique({
+          where: { id: data.projectId },
+          select: { leadId: true, editAccessGranted: true },
+        })
+        if (!project || project.leadId !== session.id || !project.editAccessGranted) {
+          return Response.json({ error: 'Forbidden' }, { status: 403 })
+        }
+      } else {
+        return Response.json({ error: 'Forbidden' }, { status: 403 })
+      }
     }
 
-    const data = await req.json()
     const workstream = await prisma.workstream.create({
       data: {
         name: data.name,

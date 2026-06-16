@@ -17,6 +17,7 @@ export interface AuthUser {
   name: string
   role: UserRole
   avatarUrl: string | null
+  mustChangePassword?: boolean
 }
 
 interface AuthState {
@@ -49,4 +50,16 @@ export function canApproveChanges(role: UserRole): boolean {
 
 export function canManageUsers(role: UserRole): boolean {
   return role === 'ADMIN'
+}
+
+export function canCreateProject(role: UserRole): boolean {
+  return ['ADMIN', 'PLANNER'].includes(role)
+}
+
+export function isPlanner(role: UserRole): boolean {
+  return ['ADMIN', 'PLANNER'].includes(role)
+}
+
+export function canAllocateResources(role: UserRole): boolean {
+  return ['ADMIN', 'PLANNER'].includes(role)
 }

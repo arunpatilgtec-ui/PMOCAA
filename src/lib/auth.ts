@@ -13,6 +13,7 @@ export type SessionUser = {
   name: string
   role: User['role']
   avatarUrl: string | null
+  mustChangePassword: boolean
 }
 
 export async function hashPassword(password: string): Promise<string> {
@@ -57,6 +58,7 @@ export async function getSession(): Promise<SessionUser | null> {
     name: session.user.name,
     role: session.user.role,
     avatarUrl: session.user.avatarUrl,
+    mustChangePassword: session.user.mustChangePassword,
   }
 }
 

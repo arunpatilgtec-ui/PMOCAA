@@ -33,12 +33,13 @@ type FormData = z.infer<typeof schema>
 interface User { id: string; name: string; role: string }
 
 export function CreateTaskDialog({
-  open, onOpenChange, workstreamId, onCreated,
+  open, onOpenChange, workstreamId, onCreated, allowedUsers,
 }: {
   open: boolean
   onOpenChange: (v: boolean) => void
   workstreamId: string
   onCreated: () => void
+  allowedUsers?: Array<{ id: string; name: string; role: string }>
 }) {
   const [loading, setLoading] = useState(false)
   const [users, setUsers] = useState<User[]>([])
@@ -50,9 +51,13 @@ export function CreateTaskDialog({
 
   useEffect(() => {
     if (open) {
-      fetch('/api/users').then((r) => r.json()).then(setUsers).catch(() => {})
+      if (allowedUsers) {
+        setUsers(allowedUsers)
+      } else {
+        fetch('/api/users').then((r) => r.json()).then(setUsers).catch(() => {})
+      }
     }
-  }, [open])
+  }, [open, allowedUsers])
 
   async function onSubmit(data: FormData) {
     setLoading(true)

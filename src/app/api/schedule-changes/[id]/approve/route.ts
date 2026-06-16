@@ -12,7 +12,7 @@ export async function POST(req: NextRequest, ctx: RouteContext<'/api/schedule-ch
       return Response.json({ error: 'Forbidden' }, { status: 403 })
     }
 
-    const { approved, comments } = await req.json()
+    const { approved, comments, delayDays } = await req.json()
 
     const change = await prisma.scheduleChange.findUnique({
       where: { id },
@@ -27,22 +27,44 @@ export async function POST(req: NextRequest, ctx: RouteContext<'/api/schedule-ch
       // Apply the changes
       const proposedData = change.proposedData as Record<string, unknown>
 
-      // Apply task changes
-      for (const taskId of change.affectedTaskIds) {
-        await prisma.task.update({
-          where: { id: taskId },
-          data: {
-            ...(proposedData.startDate ? { startDate: new Date(proposedData.startDate as string) } : {}),
-            ...(proposedData.endDate ? { endDate: new Date(proposedData.endDate as string) } : {}),
-            ...(proposedData.priority ? { priority: proposedData.priority as never } : {}),
-            ...(proposedData.status ? { status: proposedData.status as never } : {}),
-          },
-        }).catch(() => {})
+      if (proposedData.action === 'delay_tasks' && Array.isArray(proposedData.tasks)) {
+        // Per-task date shift (auto-delay from resource overload)
+        const taskUpdates = proposedData.tasks as Array<{
+          taskId: string; newStartDate?: string; newEndDate?: string
+        }>
+        for (const tu of taskUpdates) {
+          await prisma.task.update({
+            where: { id: tu.taskId },
+            data: {
+              ...(tu.newStartDate ? { startDate: new Date(tu.newStartDate) } : {}),
+              ...(tu.newEndDate ? { endDate: new Date(tu.newEndDate) } : {}),
+            },
+          }).catch(() => {})
+        }
+      } else {
+        // Standard single-field update applied to all affectedTaskIds
+        for (const taskId of change.affectedTaskIds) {
+          await prisma.task.update({
+            where: { id: taskId },
+            data: {
+              ...(proposedData.startDate ? { startDate: new Date(proposedData.startDate as string) } : {}),
+              ...(proposedData.endDate ? { endDate: new Date(proposedData.endDate as string) } : {}),
+              ...(proposedData.priority ? { priority: proposedData.priority as never } : {}),
+              ...(proposedData.status ? { status: proposedData.status as never } : {}),
+            },
+          }).catch(() => {})
+        }
       }
 
       await prisma.scheduleChange.update({
         where: { id },
-        data: { status: 'APPROVED', appliedAt: new Date() },
+        data: {
+          status: 'APPROVED',
+          appliedAt: new Date(),
+          ...(change.changeType === 'ANDON_RAISED' && delayDays != null
+            ? { proposedData: { ...proposedData, confirmedDelayDays: delayDays } }
+            : {}),
+        },
       })
 
       if (change.approval) {

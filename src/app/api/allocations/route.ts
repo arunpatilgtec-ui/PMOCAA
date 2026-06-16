@@ -5,7 +5,7 @@ import { requireAuth } from '@/lib/auth'
 export async function POST(req: NextRequest) {
   try {
     const session = await requireAuth()
-    if (!['ADMIN', 'MANAGER', 'PLANNER'].includes(session.role)) {
+    if (!['ADMIN', 'PLANNER'].includes(session.role)) {
       return Response.json({ error: 'Forbidden' }, { status: 403 })
     }
 
@@ -29,6 +29,24 @@ export async function POST(req: NextRequest) {
         project: { select: { id: true, name: true } },
       },
     })
+    // Notify the allocated user (if it's not the planner allocating themselves)
+    if (data.userId !== session.id) {
+      const project = await prisma.project.findUnique({
+        where: { id: data.projectId },
+        select: { name: true },
+      })
+      await prisma.notification.create({
+        data: {
+          userId: data.userId,
+          senderId: session.id,
+          type: 'TASK_ASSIGNED',
+          title: 'Added to Project',
+          message: `${session.name} added you to project "${project?.name}"`,
+          actionUrl: `/projects/${data.projectId}`,
+        },
+      }).catch(() => {})
+    }
+
     return Response.json(allocation, { status: 201 })
   } catch (err: unknown) {
     if (err instanceof Error && err.message === 'Unauthorized') {
@@ -41,7 +59,7 @@ export async function POST(req: NextRequest) {
 export async function DELETE(req: NextRequest) {
   try {
     const session = await requireAuth()
-    if (!['ADMIN', 'MANAGER', 'PLANNER'].includes(session.role)) {
+    if (!['ADMIN', 'PLANNER'].includes(session.role)) {
       return Response.json({ error: 'Forbidden' }, { status: 403 })
     }
 
