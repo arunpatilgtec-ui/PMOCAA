@@ -183,6 +183,15 @@ export function WorkstreamPanel({ project, onRefresh, productId }: { project: Pr
         body: JSON.stringify({ ownerId: ownerId || null }),
       })
       onRefresh()
+      if (ownerId) {
+        const person = allUsers.find((u) => u.id === ownerId)
+        if (person) {
+          toast.success(`Assigned to ${person.name}`, {
+            description: 'Task is now visible in their Kanban & Gantt views.',
+            action: { label: 'View Kanban', onClick: () => window.open(`/kanban?owner=${ownerId}`, '_blank') },
+          })
+        }
+      }
     } catch {
       toast.error('Failed to assign task')
     }

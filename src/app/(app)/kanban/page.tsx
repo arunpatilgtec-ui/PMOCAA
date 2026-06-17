@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState, useCallback, useRef } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { DragDropContext, Droppable, Draggable, DropResult } from '@hello-pangea/dnd'
 import { toast } from 'sonner'
 import { Card, CardContent } from '@/components/ui/card'
@@ -116,11 +116,20 @@ function timeInStatus(statusChangedAt: string): string {
 export default function KanbanPage() {
   const { user } = useAuthStore()
   const router = useRouter()
+  const searchParams = useSearchParams()
   const [tasks, setTasks] = useState<Task[]>([])
   const [projects, setProjects] = useState<Project[]>([])
   const [loading, setLoading] = useState(true)
   const [projectFilter, setProjectFilter] = useState<string | null>('ALL')
-  const [ownerFilter, setOwnerFilter] = useState<string | null>('ALL')
+  const [ownerFilter, setOwnerFilter] = useState<string | null>(searchParams.get('owner') ?? 'ALL')
+  const [allUsers, setAllUsers] = useState<Array<{ id: string; name: string }>>([])
+
+  useEffect(() => {
+    fetch('/api/users')
+      .then((r) => r.json())
+      .then((d) => { if (Array.isArray(d)) setAllUsers(d) })
+      .catch(() => {})
+  }, [])
 
   // Project leads use the Gantt view instead
   useEffect(() => {
@@ -184,6 +193,7 @@ export default function KanbanPage() {
     if (projectFilter && projectFilter !== 'ALL' && t.workstream.project.id !== projectFilter) return false
     if (ownerFilter === 'ME' && t.owner?.id !== user?.id) return false
     if (ownerFilter === 'UNASSIGNED' && t.owner) return false
+    if (ownerFilter && !['ALL', 'ME', 'UNASSIGNED'].includes(ownerFilter) && t.owner?.id !== ownerFilter) return false
     return true
   })
 
@@ -317,14 +327,17 @@ export default function KanbanPage() {
               ))}
             </SelectContent>
           </Select>
-          <Select value={ownerFilter} onValueChange={setOwnerFilter}>
-            <SelectTrigger className="w-36 h-8 text-sm">
+          <Select value={ownerFilter ?? 'ALL'} onValueChange={setOwnerFilter}>
+            <SelectTrigger className="w-44 h-8 text-sm">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="ALL">All Assignees</SelectItem>
               <SelectItem value="ME">My Tasks</SelectItem>
               <SelectItem value="UNASSIGNED">Unassigned</SelectItem>
+              {allUsers.map((u) => (
+                <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>
+              ))}
             </SelectContent>
           </Select>
         </div>

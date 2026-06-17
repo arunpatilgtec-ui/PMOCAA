@@ -93,6 +93,7 @@ export default function GanttPage() {
   const [loading, setLoading] = useState(true)
   const [viewMode, setViewMode] = useState<ViewMode>('tasks')
   const [selectedProject, setSelectedProject] = useState<string>(projectId || 'ALL')
+  const [ownerFilter, setOwnerFilter] = useState<string>(searchParams.get('owner') ?? 'ALL')
   const [viewStart, setViewStart] = useState(() => { const d = new Date(); d.setDate(1); return d })
   const [zoom, setZoom] = useState(1)
   const [editForm, setEditForm] = useState<EditForm | null>(null)
@@ -310,8 +311,11 @@ export default function GanttPage() {
   const days = eachDayOfInterval({ start: viewStart, end: viewEnd })
   const today = new Date()
 
-  const tasksWithDates = localTasks.filter(t => t.startDate && t.endDate)
-  const tasksWithoutDates = localTasks.filter(t => !t.startDate || !t.endDate)
+  const ownerFilteredTasks = ownerFilter && ownerFilter !== 'ALL'
+    ? localTasks.filter(t => t.owner?.id === ownerFilter)
+    : localTasks
+  const tasksWithDates = ownerFilteredTasks.filter(t => t.startDate && t.endDate)
+  const tasksWithoutDates = ownerFilteredTasks.filter(t => !t.startDate || !t.endDate)
 
   const grouped = new Map<string, Map<string, Task[]>>()
   for (const task of tasksWithDates) {
@@ -499,6 +503,17 @@ export default function GanttPage() {
                 <SelectItem value="ALL">All Projects</SelectItem>
                 {projects.filter(p => p.name !== '__direct_assignments__').map(p => (
                   <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+          {viewMode === 'tasks' && (
+            <Select value={ownerFilter} onValueChange={(v) => setOwnerFilter(v ?? 'ALL')}>
+              <SelectTrigger className="w-44 h-8 text-sm"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="ALL">All Assignees</SelectItem>
+                {users.map((u) => (
+                  <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
