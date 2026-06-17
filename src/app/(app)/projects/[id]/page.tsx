@@ -84,7 +84,7 @@ export default function ProjectDetailPage() {
   const [project, setProject] = useState<Project | null>(null)
   const [loading, setLoading] = useState(true)
   const [wizardOpen, setWizardOpen] = useState(false)
-  const [activeTab, setActiveTab] = useState('workstreams')
+  const [activeTab, setActiveTab] = useState('products')
 
   // Edit project dialog
   const [editProjectOpen, setEditProjectOpen] = useState(false)
