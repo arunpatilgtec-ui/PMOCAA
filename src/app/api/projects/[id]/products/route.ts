@@ -122,6 +122,8 @@ export async function POST(req: NextRequest, ctx: Ctx) {
           assignedById: session.id,
           startDate: project?.startDate ?? null,
           endDate: project?.endDate ?? null,
+          effortHours: 8,
+          estimatedHours: 8,
         })),
       })
     }

@@ -146,6 +146,8 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
           assignedById: session.id,
           startDate: proj?.startDate ?? null,
           endDate: proj?.endDate ?? null,
+          effortHours: 8,
+          estimatedHours: 8,
         }))
       )
       if (taskRows.length > 0) {
