@@ -21,6 +21,7 @@ function t(name: string, durationDays: number): TaskTemplate {
 
 // Report deliverables for Refrigeration (project-level checklist, no scheduling)
 const REFRIGERATION_DELIVERABLES: TaskTemplate[] = [
+  t('Report', 17),
   t('Excel CG Files', 1),
   t('BOB Preparation', 1),
   t('BOB Verification', 2),
@@ -45,6 +46,7 @@ const REFRIGERATION_DELIVERABLES: TaskTemplate[] = [
 
 // Report deliverables for other categories (project-level checklist, no scheduling)
 const SIMPLE_DELIVERABLES: TaskTemplate[] = [
+  t('Report', 17),
   t('Excel CG Files', 1),
   t('BOB Preparation', 1),
   t('BOB Verification', 1),
@@ -112,10 +114,6 @@ const REFRIGERATION_TEMPLATE: WorkstreamTemplate[] = [
     ],
   },
   {
-    name: 'Report',
-    tasks: [t('Report', 17)],
-  },
-  {
     name: 'Deliverables',
     tasks: REFRIGERATION_DELIVERABLES,
   },
@@ -136,10 +134,6 @@ function simpleTemplate(tearDownTasks: string[]): WorkstreamTemplate[] {
     {
       name: 'Costing',
       tasks: tearDownTasks.map((name) => t(name, 1)),
-    },
-    {
-      name: 'Report',
-      tasks: [t('Report', 17)],
     },
     {
       name: 'Deliverables',

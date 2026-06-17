@@ -199,7 +199,7 @@ export function WorkstreamPanel({ project, onRefresh, productId, onlyDeliverable
 
   const now = new Date()
 
-  const CHECKLIST_WS = new Set(['Planning', 'Deliverables'])
+  const CHECKLIST_WS = new Set(['Planning', 'Deliverables', 'Report'])
   const visibleWorkstreams = onlyDeliverables
     ? project.workstreams.filter((ws) => CHECKLIST_WS.has(ws.name))
     : productId

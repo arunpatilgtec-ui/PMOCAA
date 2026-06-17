@@ -23,42 +23,23 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         : undefined
 
     const startDate = new Date(project.startDate)
-    // The lead who gets default ownership of Tear Down and Report tasks
     const leadId: string | null = data.leadId || project.leadId || null
 
-    // Pre-compute teardown midpoint offset (working days from teardown start)
-    const tdTemplate = wsTemplates?.find((w) => w.name === 'Tear Down')
-    const tdTotalDays = tdTemplate
-      ? tdTemplate.tasks.reduce((s, t) => s + t.durationDays, 0)
-      : 0
-    const tdMidOffset = Math.floor(tdTotalDays / 2)
+    const CHECKLIST_WS = new Set(['Planning', 'Deliverables', 'Report'])
 
-    // Compute end date: sequential except Report which starts at teardown midpoint
+    // Compute end date: sequential through scheduled workstreams (Planning/Deliverables/Report are checklists)
     let endDate: Date
     if (wsTemplates) {
       let cursor = new Date(startDate)
       cursor.setHours(0, 0, 0, 0)
-      let tdMidDate: Date | null = null
       let maxEnd = new Date(cursor)
 
       for (const ws of wsTemplates) {
-        if (ws.name === 'Deliverables' || ws.name === 'Planning') continue // No scheduling — created as checklist
-        if (ws.name === 'Report') {
-          let rc = tdMidDate ? new Date(tdMidDate) : new Date(cursor)
-          for (const task of ws.tasks) {
-            const end = addWorkingDays(new Date(rc), task.durationDays - 1)
-            if (end > maxEnd) maxEnd = new Date(end)
-            rc = addWorkingDays(end, 1)
-          }
-        } else {
-          if (ws.name === 'Tear Down') {
-            tdMidDate = addWorkingDays(new Date(cursor), tdMidOffset)
-          }
-          for (const task of ws.tasks) {
-            const end = addWorkingDays(new Date(cursor), task.durationDays - 1)
-            if (end > maxEnd) maxEnd = new Date(end)
-            cursor = addWorkingDays(end, 1)
-          }
+        if (CHECKLIST_WS.has(ws.name)) continue
+        for (const task of ws.tasks) {
+          const end = addWorkingDays(new Date(cursor), task.durationDays - 1)
+          if (end > maxEnd) maxEnd = new Date(end)
+          cursor = addWorkingDays(end, 1)
         }
       }
       endDate = maxEnd
@@ -86,7 +67,6 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       if (wsTemplates) {
         let cursor = new Date(startDate)
         cursor.setHours(0, 0, 0, 0)
-        let tdMidDate: Date | null = null
         let wsOrder = 0
 
         for (const wsTemplate of wsTemplates) {
@@ -94,9 +74,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
             data: { name: wsTemplate.name, projectId: id, order: wsOrder++ },
           })
 
-          if (wsTemplate.name === 'Deliverables' || wsTemplate.name === 'Planning') {
+          if (CHECKLIST_WS.has(wsTemplate.name)) {
             // Checklist tasks — no scheduling, no dates
-            // Deliverables default owner = project lead; Planning stays unassigned
+            // Deliverables default owner = project lead; others unassigned
             let taskOrder = 0
             for (const taskTemplate of wsTemplate.tasks) {
               await tx.task.create({
@@ -110,34 +90,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
                 },
               })
             }
-          } else if (wsTemplate.name === 'Report') {
-            // Report starts at teardown midpoint (parallel with second half of teardown)
-            let rc = tdMidDate ? new Date(tdMidDate) : new Date(cursor)
-            let taskOrder = 0
-            for (const taskTemplate of wsTemplate.tasks) {
-              const taskStart = new Date(rc)
-              const taskEnd = addWorkingDays(new Date(rc), taskTemplate.durationDays - 1)
-              await tx.task.create({
-                data: {
-                  name: taskTemplate.name,
-                  workstreamId: ws.id,
-                  status: 'BACKLOG',
-                  priority: 'MEDIUM',
-                  startDate: taskStart,
-                  endDate: taskEnd,
-                  estimatedHours: taskTemplate.estimatedHours,
-                  order: taskOrder++,
-                  // Report defaults to project lead
-                  ...(leadId ? { ownerId: leadId } : {}),
-                },
-              })
-              rc = addWorkingDays(taskEnd, 1)
-            }
           } else {
-            if (wsTemplate.name === 'Tear Down') {
-              tdMidDate = addWorkingDays(new Date(cursor), tdMidOffset)
-            }
-
             let taskOrder = 0
             for (const taskTemplate of wsTemplate.tasks) {
               const taskStart = new Date(cursor)
@@ -152,7 +105,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
                   endDate: taskEnd,
                   estimatedHours: taskTemplate.estimatedHours,
                   order: taskOrder++,
-                  // Tear Down defaults to project lead; Planning and Costing stay unassigned
+                  // Tear Down defaults to project lead; Costing stays unassigned
                   ...(wsTemplate.name === 'Tear Down' && leadId ? { ownerId: leadId } : {}),
                 },
               })
