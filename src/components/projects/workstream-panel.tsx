@@ -183,13 +183,11 @@ export function WorkstreamPanel({ project, onRefresh, productId }: { project: Pr
   const now = new Date()
 
   const visibleWorkstreams = productId
-    ? project.workstreams
-        .filter((ws) => ws.name === 'Product Costing')
-        .map((ws) => ({
-          ...ws,
-          tasks: ws.tasks.filter((t) => t.description?.includes(`__productTask:${productId}:`)),
-        }))
-        .filter((ws) => ws.tasks.length > 0)
+    ? project.workstreams.map((ws) =>
+        ws.name === 'Product Costing'
+          ? { ...ws, tasks: ws.tasks.filter((t) => t.description?.includes(`__productTask:${productId}:`)) }
+          : ws
+      )
     : project.workstreams
 
   return (
