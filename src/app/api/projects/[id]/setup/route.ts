@@ -42,7 +42,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       let maxEnd = new Date(cursor)
 
       for (const ws of wsTemplates) {
-        if (ws.name === 'Deliverables') continue // No scheduling — created as checklist
+        if (ws.name === 'Deliverables' || ws.name === 'Planning') continue // No scheduling — created as checklist
         if (ws.name === 'Report') {
           let rc = tdMidDate ? new Date(tdMidDate) : new Date(cursor)
           for (const task of ws.tasks) {
@@ -94,8 +94,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
             data: { name: wsTemplate.name, projectId: id, order: wsOrder++ },
           })
 
-          if (wsTemplate.name === 'Deliverables') {
-            // Deliverables are a checklist — no scheduling, no dates, owner = project lead
+          if (wsTemplate.name === 'Deliverables' || wsTemplate.name === 'Planning') {
+            // Checklist tasks — no scheduling, no dates
+            // Deliverables default owner = project lead; Planning stays unassigned
             let taskOrder = 0
             for (const taskTemplate of wsTemplate.tasks) {
               await tx.task.create({
@@ -105,7 +106,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
                   status: 'BACKLOG',
                   priority: 'MEDIUM',
                   order: taskOrder++,
-                  ...(leadId ? { ownerId: leadId } : {}),
+                  ...(wsTemplate.name === 'Deliverables' && leadId ? { ownerId: leadId } : {}),
                 },
               })
             }

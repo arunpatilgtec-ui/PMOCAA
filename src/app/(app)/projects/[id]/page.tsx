@@ -84,7 +84,7 @@ export default function ProjectDetailPage() {
   const [project, setProject] = useState<Project | null>(null)
   const [loading, setLoading] = useState(true)
   const [wizardOpen, setWizardOpen] = useState(false)
-  const [activeTab, setActiveTab] = useState('products')
+  const [activeTab, setActiveTab] = useState('report')
 
   // Edit project dialog
   const [editProjectOpen, setEditProjectOpen] = useState(false)
@@ -623,20 +623,20 @@ export default function ProjectDetailPage() {
       {/* Tabs */}
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList>
+          <TabsTrigger value="report">
+            <FileText className="mr-1.5 h-3.5 w-3.5" /> Report
+          </TabsTrigger>
           <TabsTrigger value="workstreams">
             <Layers className="mr-1.5 h-3.5 w-3.5" /> Timeline
+          </TabsTrigger>
+          <TabsTrigger value="products">
+            <Layers className="mr-1.5 h-3.5 w-3.5" /> Products
           </TabsTrigger>
           <TabsTrigger value="team">
             <Users className="mr-1.5 h-3.5 w-3.5" /> Team
           </TabsTrigger>
           <TabsTrigger value="gantt">
             <GitBranch className="mr-1.5 h-3.5 w-3.5" /> Gantt
-          </TabsTrigger>
-          <TabsTrigger value="products">
-            <Layers className="mr-1.5 h-3.5 w-3.5" /> Products
-          </TabsTrigger>
-          <TabsTrigger value="report">
-            <FileText className="mr-1.5 h-3.5 w-3.5" /> Report
           </TabsTrigger>
         </TabsList>
 

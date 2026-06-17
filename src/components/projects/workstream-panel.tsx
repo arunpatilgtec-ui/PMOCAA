@@ -199,17 +199,18 @@ export function WorkstreamPanel({ project, onRefresh, productId, onlyDeliverable
 
   const now = new Date()
 
+  const CHECKLIST_WS = new Set(['Planning', 'Deliverables'])
   const visibleWorkstreams = onlyDeliverables
-    ? project.workstreams.filter((ws) => ws.name === 'Deliverables')
+    ? project.workstreams.filter((ws) => CHECKLIST_WS.has(ws.name))
     : productId
     ? project.workstreams
-        .filter((ws) => ws.name !== 'Deliverables')
+        .filter((ws) => !CHECKLIST_WS.has(ws.name))
         .map((ws) =>
           ws.name === 'Product Costing'
             ? { ...ws, tasks: ws.tasks.filter((t) => t.description?.includes(`__productTask:${productId}:`)) }
             : ws
         )
-    : project.workstreams.filter((ws) => ws.name !== 'Deliverables')
+    : project.workstreams.filter((ws) => !CHECKLIST_WS.has(ws.name))
 
   return (
     <div className="space-y-3">
