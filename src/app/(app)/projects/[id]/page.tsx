@@ -107,6 +107,10 @@ export default function ProjectDetailPage() {
   const [deleteConfirm, setDeleteConfirm] = useState(false)
   const [deleting, setDeleting] = useState(false)
 
+  // Products for timeline tab strip
+  const [timelineProducts, setTimelineProducts] = useState<Array<{ id: string; brand: string; modelNo: string }>>([])
+  const [timelineProductId, setTimelineProductId] = useState<string | null>(null)
+
   // Resource allocation (Team tab, PLANNER only)
   const [addResourceOpen, setAddResourceOpen] = useState(false)
   const [removingUserId, setRemovingUserId] = useState<string | null>(null)
@@ -158,6 +162,19 @@ export default function ProjectDetailPage() {
       document.removeEventListener('visibilitychange', onVisible)
     }
   }, [load])
+
+  useEffect(() => {
+    if (!id) return
+    fetch(`/api/projects/${id}/products`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (Array.isArray(d) && d.length > 0) {
+          setTimelineProducts(d)
+          setTimelineProductId((prev) => prev ?? d[0].id)
+        }
+      })
+      .catch(() => {})
+  }, [id])
 
   if (loading) {
     return (
@@ -621,7 +638,28 @@ export default function ProjectDetailPage() {
         </TabsList>
 
         <TabsContent value="workstreams" className="mt-4">
-          <WorkstreamPanel project={project} onRefresh={load} />
+          {timelineProducts.length > 0 && (
+            <div className="flex items-center border-b border-border overflow-x-auto mb-4">
+              {timelineProducts.map((p) => (
+                <button
+                  key={p.id}
+                  onClick={() => setTimelineProductId(p.id)}
+                  className={`px-3 py-2 text-sm whitespace-nowrap border-b-2 -mb-px transition-colors ${
+                    timelineProductId === p.id
+                      ? 'border-blue-500 text-blue-600 dark:text-blue-400 font-medium'
+                      : 'border-transparent text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  {p.brand}{p.modelNo ? ` ${p.modelNo}` : ''}
+                </button>
+              ))}
+            </div>
+          )}
+          <WorkstreamPanel
+            project={project}
+            onRefresh={load}
+            productId={timelineProducts.length > 0 ? (timelineProductId ?? undefined) : undefined}
+          />
         </TabsContent>
 
         <TabsContent value="team" className="mt-4">

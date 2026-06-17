@@ -80,7 +80,7 @@ function DateRange({ start, end, muted }: { start?: string; end?: string; muted?
   )
 }
 
-export function WorkstreamPanel({ project, onRefresh }: { project: Project; onRefresh: () => void }) {
+export function WorkstreamPanel({ project, onRefresh, productId }: { project: Project; onRefresh: () => void; productId?: string }) {
   const { user } = useAuthStore()
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
   const [expandedTask, setExpandedTask] = useState<string | null>(null)
@@ -182,9 +182,19 @@ export function WorkstreamPanel({ project, onRefresh }: { project: Project; onRe
 
   const now = new Date()
 
+  const visibleWorkstreams = productId
+    ? project.workstreams
+        .filter((ws) => ws.name === 'Product Costing')
+        .map((ws) => ({
+          ...ws,
+          tasks: ws.tasks.filter((t) => t.description?.includes(`__productTask:${productId}:`)),
+        }))
+        .filter((ws) => ws.tasks.length > 0)
+    : project.workstreams
+
   return (
     <div className="space-y-3">
-      {project.workstreams.map((ws) => {
+      {visibleWorkstreams.map((ws) => {
         const isOpen = expanded[ws.id] !== false
         const done = ws.tasks.filter((t) => t.status === 'COMPLETED').length
         const progress = ws.tasks.length ? Math.round((done / ws.tasks.length) * 100) : 0
