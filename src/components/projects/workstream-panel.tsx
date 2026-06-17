@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { useAuthStore, canManageProjects } from '@/store/auth'
 import { toast } from 'sonner'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -91,6 +91,14 @@ export function WorkstreamPanel({ project, onRefresh, productId }: { project: Pr
   const [showHistory, setShowHistory] = useState<Record<string, boolean>>({})
   const [taskEdits, setTaskEdits] = useState<Record<string, Partial<Task>>>({})
   const [savingTask, setSavingTask] = useState<string | null>(null)
+  const [allUsers, setAllUsers] = useState<Array<{ id: string; name: string }>>([])
+
+  useEffect(() => {
+    fetch('/api/users')
+      .then((r) => r.json())
+      .then((d) => { if (Array.isArray(d)) setAllUsers(d) })
+      .catch(() => {})
+  }, [])
 
   const toggle = (id: string) => setExpanded((p) => ({ ...p, [id]: !p[id] }))
   const toggleTask = (id: string) => {
@@ -286,8 +294,8 @@ export function WorkstreamPanel({ project, onRefresh, productId }: { project: Pr
                                   </SelectTrigger>
                                   <SelectContent>
                                     <SelectItem value="unassigned">Unassigned</SelectItem>
-                                    {project.allocations.map((a) => (
-                                      <SelectItem key={a.userId} value={a.userId}>{a.user.name}</SelectItem>
+                                    {allUsers.map((u) => (
+                                      <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>
                                     ))}
                                   </SelectContent>
                                 </Select>
