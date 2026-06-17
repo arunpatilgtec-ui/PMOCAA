@@ -33,7 +33,10 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     const session = await requireAuth()
     const { id } = await ctx.params
 
-    const project = await prisma.project.findUnique({ where: { id }, select: { leadId: true } })
+    const project = await prisma.project.findUnique({
+      where: { id },
+      select: { leadId: true, startDate: true, endDate: true },
+    })
     const canManage =
       ['ADMIN', 'PLANNER', 'MANAGER'].includes(session.role) ||
       project?.leadId === session.id
@@ -97,6 +100,31 @@ export async function POST(req: NextRequest, ctx: Ctx) {
           : []),
       ],
     })
+
+    // Auto-create tasks in "Product Costing" workstream for each resource's subsystems
+    const subsystemTasks = product.resources.flatMap((r) =>
+      r.subsystems.map((sub) => ({ userId: r.userId, sub }))
+    )
+    if (subsystemTasks.length > 0) {
+      const existing = await prisma.workstream.findFirst({
+        where: { projectId: id, name: 'Product Costing' },
+      })
+      const wsCount = existing ? 0 : await prisma.workstream.count({ where: { projectId: id } })
+      const costing = existing ?? await prisma.workstream.create({
+        data: { projectId: id, name: 'Product Costing', order: wsCount },
+      })
+      await prisma.task.createMany({
+        data: subsystemTasks.map(({ userId, sub }) => ({
+          workstreamId: costing.id,
+          name: `${product.brand} — ${sub}`,
+          description: `__productTask:${product.id}:${userId}__`,
+          ownerId: userId,
+          assignedById: session.id,
+          startDate: project?.startDate ?? null,
+          endDate: project?.endDate ?? null,
+        })),
+      })
+    }
 
     return Response.json(product, { status: 201 })
   } catch (err: unknown) {

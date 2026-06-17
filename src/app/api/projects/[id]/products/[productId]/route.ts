@@ -116,6 +116,41 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
           })),
         })
       }
+
+      // Sync auto-generated tasks: delete old, recreate from current assignment
+      const proj = await prisma.project.findUnique({
+        where: { id },
+        select: { startDate: true, endDate: true },
+      })
+      const existingWs = await prisma.workstream.findFirst({
+        where: { projectId: id, name: 'Product Costing' },
+      })
+      const wsOrder = existingWs ? 0 : await prisma.workstream.count({ where: { projectId: id } })
+      const costingWs = existingWs ?? await prisma.workstream.create({
+        data: { projectId: id, name: 'Product Costing', order: wsOrder },
+      })
+      await prisma.task.deleteMany({
+        where: { workstreamId: costingWs.id, description: { contains: `__productTask:${productId}:` } },
+      })
+      const updatedResources = await prisma.productResource.findMany({
+        where: { productId },
+        select: { userId: true, subsystems: true },
+      })
+      const productRecord = await prisma.product.findUnique({ where: { id: productId }, select: { brand: true } })
+      const taskRows = updatedResources.flatMap((r) =>
+        r.subsystems.map((sub) => ({
+          workstreamId: costingWs.id,
+          name: `${productRecord?.brand ?? ''} — ${sub}`,
+          description: `__productTask:${productId}:${r.userId}__`,
+          ownerId: r.userId,
+          assignedById: session.id,
+          startDate: proj?.startDate ?? null,
+          endDate: proj?.endDate ?? null,
+        }))
+      )
+      if (taskRows.length > 0) {
+        await prisma.task.createMany({ data: taskRows })
+      }
     }
 
     // Diff lead
@@ -182,6 +217,15 @@ export async function DELETE(_req: NextRequest, ctx: Ctx) {
     const { id, productId } = await ctx.params
     if (!(await canManageProduct(session, id))) {
       return Response.json({ error: 'Forbidden' }, { status: 403 })
+    }
+    // Clean up auto-generated tasks before deleting the product
+    const costingWs = await prisma.workstream.findFirst({
+      where: { projectId: id, name: 'Product Costing' },
+    })
+    if (costingWs) {
+      await prisma.task.deleteMany({
+        where: { workstreamId: costingWs.id, description: { contains: `__productTask:${productId}:` } },
+      })
     }
     await prisma.product.delete({ where: { id: productId } })
     return Response.json({ ok: true })
