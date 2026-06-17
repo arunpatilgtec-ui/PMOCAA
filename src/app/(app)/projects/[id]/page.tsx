@@ -994,6 +994,7 @@ export default function ProjectDetailPage() {
         open={addResourceOpen}
         onOpenChange={setAddResourceOpen}
         projectId={project.id}
+        existingUserIds={project.allocations.map((a) => a.userId)}
         onAllocated={load}
       />
 

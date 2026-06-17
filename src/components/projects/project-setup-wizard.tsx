@@ -28,6 +28,7 @@ interface ProductDraft {
   brand: string
   modelNo: string
   leadId: string
+  resourceIds: string[]
 }
 
 export interface ProjectSetupWizardProps {
@@ -63,7 +64,7 @@ export function ProjectSetupWizard({
   // Step: Products (new projects only)
   const [productDrafts, setProductDrafts] = useState<ProductDraft[]>(() => {
     const count = numberOfProducts && numberOfProducts > 0 ? numberOfProducts : 1
-    return Array.from({ length: count }, () => ({ brand: '', modelNo: '', leadId: '' }))
+    return Array.from({ length: count }, () => ({ brand: '', modelNo: '', leadId: '', resourceIds: [] }))
   })
   // Step: Links
   const [links, setLinks] = useState<string[]>([''])
@@ -111,7 +112,19 @@ export function ProjectSetupWizard({
   }
 
   function addProductRow() {
-    setProductDrafts((d) => [...d, { brand: '', modelNo: '', leadId: '' }])
+    setProductDrafts((d) => [...d, { brand: '', modelNo: '', leadId: '', resourceIds: [] }])
+  }
+
+  function addResourceToProduct(i: number, uid: string) {
+    setProductDrafts((d) =>
+      d.map((p, j) => j === i ? { ...p, resourceIds: [...p.resourceIds, uid] } : p)
+    )
+  }
+
+  function removeResourceFromProduct(i: number, uid: string) {
+    setProductDrafts((d) =>
+      d.map((p, j) => j === i ? { ...p, resourceIds: p.resourceIds.filter((r) => r !== uid) } : p)
+    )
   }
 
   function removeProductRow(i: number) {
@@ -152,8 +165,8 @@ export function ProjectSetupWizard({
                   brand: p.brand.trim(),
                   modelNo: p.modelNo.trim(),
                   leadId: p.leadId || null,
-                  resourceCount: null,
-                  resources: [],
+                  resourceCount: p.resourceIds.length > 0 ? p.resourceIds.length : null,
+                  resources: p.resourceIds.map((uid) => ({ userId: uid, subsystems: [], costingTypes: [] })),
                 }),
               })
             )
@@ -350,6 +363,53 @@ export function ProjectSetupWizard({
                         ))}
                       </SelectContent>
                     </Select>
+
+                    {/* Multi-resource assignment */}
+                    <div className="space-y-1.5">
+                      <p className="text-xs font-medium text-muted-foreground">Resources (optional)</p>
+                      {p.resourceIds.length > 0 && (
+                        <div className="flex flex-wrap gap-1.5">
+                          {p.resourceIds.map((uid) => {
+                            const u = users.find((u) => u.id === uid)
+                            if (!u) return null
+                            return (
+                              <span key={uid} className="flex items-center gap-1 text-xs px-2 py-0.5 bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-full text-blue-700 dark:text-blue-300">
+                                {u.name.split(' ')[0]}
+                                <button
+                                  type="button"
+                                  onClick={() => removeResourceFromProduct(i, uid)}
+                                  className="ml-0.5 text-blue-400 hover:text-red-500 transition-colors"
+                                >
+                                  <X className="h-2.5 w-2.5" />
+                                </button>
+                              </span>
+                            )
+                          })}
+                        </div>
+                      )}
+                      <Select
+                        value="__pick__"
+                        onValueChange={(v) => {
+                          const s = v as string | null
+                          if (s && s !== '__pick__' && !p.resourceIds.includes(s)) {
+                            addResourceToProduct(i, s)
+                          }
+                        }}
+                      >
+                        <SelectTrigger className="h-8 text-sm">
+                          <SelectValue placeholder="Add a resource…" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__pick__">Add a resource…</SelectItem>
+                          {users
+                            .filter((u) => !p.resourceIds.includes(u.id))
+                            .map((u) => (
+                              <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>
+                            ))
+                          }
+                        </SelectContent>
+                      </Select>
+                    </div>
                   </div>
                 ))}
               </div>

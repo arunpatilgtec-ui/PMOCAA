@@ -195,15 +195,18 @@ export function ProductsPanel({
   const subsystems = SUBSYSTEMS_BY_CATEGORY[project.category ?? ''] ?? []
   const allocatedUsers = project.allocations.map((a) => a.user)
 
-  // Also fetch all project users for lead selection (not just allocated)
+  // Fetch all users for dropdowns
   const [allUsers, setAllUsers] = useState<ProductUser[]>([])
+  const [isLoadingUsers, setIsLoadingUsers] = useState(true)
   useEffect(() => {
-    if (!canManage) return
+    // Fetch regardless of canManage so dropdowns are ready immediately
+    setIsLoadingUsers(true)
     fetch('/api/users')
       .then((r) => r.json())
       .then((d) => setAllUsers(Array.isArray(d) ? d.filter((u: ProductUser & { isActive?: boolean }) => u.isActive !== false) : []))
       .catch(() => {})
-  }, [canManage])
+      .finally(() => setIsLoadingUsers(false))
+  }, [])
 
   const load = useCallback(async () => {
     try {
@@ -221,7 +224,8 @@ export function ProductsPanel({
 
   function openAdd() {
     setEditingProduct(null)
-    setForm(emptyForm())
+    // Pre-populate one empty resource row so the UI is immediately obvious
+    setForm({ ...emptyForm(), resources: [{ userId: '', subsystems: [], costingTypes: [] }] })
     setDialogOpen(true)
   }
 
@@ -356,7 +360,10 @@ export function ProductsPanel({
     setExpandedTab((t) => ({ ...t, [productId]: tab }))
   }
 
+  // leadOptions: use allUsers once loaded, fall back to allocatedUsers only for the lead dropdown
   const leadOptions = allUsers.length > 0 ? allUsers : allocatedUsers
+  // resourceUserOptions: always use allUsers (never fall back to empty allocatedUsers)
+  const resourceUserOptions = allUsers
 
   if (loading) {
     return <div className="text-sm text-muted-foreground p-4">Loading products…</div>
@@ -670,7 +677,7 @@ export function ProductsPanel({
               )}
 
               {form.resources.map((r, i) => {
-                const personName = leadOptions.find((u) => u.id === r.userId)?.name
+                const personName = resourceUserOptions.find((u) => u.id === r.userId)?.name
                 return (
                   <div key={i} className="rounded-md border p-3 space-y-3 bg-muted/20">
                     {/* Person selector */}
@@ -684,8 +691,10 @@ export function ProductsPanel({
                             <SelectValue placeholder="Select person…">{personName || null}</SelectValue>
                           </SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="none">Select person…</SelectItem>
-                            {leadOptions.map((u) => (
+                            <SelectItem value="none">
+                              {isLoadingUsers ? 'Loading users…' : 'Select person…'}
+                            </SelectItem>
+                            {resourceUserOptions.map((u) => (
                               <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>
                             ))}
                           </SelectContent>

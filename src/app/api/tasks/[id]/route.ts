@@ -80,7 +80,14 @@ export async function PATCH(req: NextRequest, ctx: RouteContext<'/api/tasks/[id]
       })
     }
 
-    const canEditDates = ['ADMIN', 'MANAGER', 'PLANNER'].includes(session.role)
+    let canEditDates = ['ADMIN', 'MANAGER', 'PLANNER'].includes(session.role)
+    if (!canEditDates && session.role === 'PROJECT_LEAD') {
+      const ws = await prisma.workstream.findUnique({
+        where: { id: existing.workstreamId },
+        select: { project: { select: { leadId: true } } },
+      })
+      if (ws?.project.leadId === session.id) canEditDates = true
+    }
 
     const task = await prisma.task.update({
       where: { id },
