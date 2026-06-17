@@ -80,7 +80,7 @@ function DateRange({ start, end, muted }: { start?: string; end?: string; muted?
   )
 }
 
-export function WorkstreamPanel({ project, onRefresh, productId }: { project: Project; onRefresh: () => void; productId?: string }) {
+export function WorkstreamPanel({ project, onRefresh, productId, onlyDeliverables }: { project: Project; onRefresh: () => void; productId?: string; onlyDeliverables?: boolean }) {
   const { user } = useAuthStore()
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
   const [expandedTask, setExpandedTask] = useState<string | null>(null)
@@ -199,13 +199,17 @@ export function WorkstreamPanel({ project, onRefresh, productId }: { project: Pr
 
   const now = new Date()
 
-  const visibleWorkstreams = productId
-    ? project.workstreams.map((ws) =>
-        ws.name === 'Product Costing'
-          ? { ...ws, tasks: ws.tasks.filter((t) => t.description?.includes(`__productTask:${productId}:`)) }
-          : ws
-      )
-    : project.workstreams
+  const visibleWorkstreams = onlyDeliverables
+    ? project.workstreams.filter((ws) => ws.name === 'Deliverables')
+    : productId
+    ? project.workstreams
+        .filter((ws) => ws.name !== 'Deliverables')
+        .map((ws) =>
+          ws.name === 'Product Costing'
+            ? { ...ws, tasks: ws.tasks.filter((t) => t.description?.includes(`__productTask:${productId}:`)) }
+            : ws
+        )
+    : project.workstreams.filter((ws) => ws.name !== 'Deliverables')
 
   return (
     <div className="space-y-3">

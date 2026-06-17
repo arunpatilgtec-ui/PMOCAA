@@ -19,6 +19,54 @@ function t(name: string, durationDays: number): TaskTemplate {
   return { name, durationDays, estimatedHours: durationDays * 8 }
 }
 
+// Report deliverables for Refrigeration (project-level checklist, no scheduling)
+const REFRIGERATION_DELIVERABLES: TaskTemplate[] = [
+  t('Excel CG Files', 1),
+  t('BOB Preparation', 1),
+  t('BOB Verification', 2),
+  t('Product Overview', 1),
+  t('Best of Best Slide', 1),
+  t('Subsystem Deep Dive', 2),
+  t('Foam Thickness', 1),
+  t('Stakeholder Asks', 3),
+  t('FMOT', 1),
+  t('Re-used parts', 1),
+  t('Supply Chain Footprint', 2),
+  t('Category - Sub-system', 1),
+  t("Cost element - Material, Process, Margin, etc'", 1),
+  t('Market Placement', 1),
+  t('Project results summary', 1),
+  t('SME Review', 1),
+  t('Internal Review', 1),
+  t('Report Out', 1),
+  t('Feedback Form', 1),
+  t('Project Close Signoff', 1),
+]
+
+// Report deliverables for other categories (project-level checklist, no scheduling)
+const SIMPLE_DELIVERABLES: TaskTemplate[] = [
+  t('Excel CG Files', 1),
+  t('BOB Preparation', 1),
+  t('BOB Verification', 1),
+  t('Project results summary', 1),
+  t('Market Placement', 1),
+  t('Category - Sub-system', 1),
+  t("Cost element - Material, Process, Margin, etc'", 1),
+  t('Product Overview', 1),
+  t('Best of Best', 1),
+  t('Technology Analysis', 1),
+  t('Supply Chain Footprint', 1),
+  t('Re-used parts', 1),
+  t('FMOT', 1),
+  t('MVT', 1),
+  t('GAME', 1),
+  t('Project Close Signoff', 1),
+  t('SME Review', 1),
+  t('Internal Review', 1),
+  t('Report Out', 1),
+  t('Feedback Form', 1),
+]
+
 // Full Refrigeration template (from Template-Ref sheet, sequential)
 const REFRIGERATION_TEMPLATE: WorkstreamTemplate[] = [
   {
@@ -65,28 +113,11 @@ const REFRIGERATION_TEMPLATE: WorkstreamTemplate[] = [
   },
   {
     name: 'Report',
-    tasks: [
-      t('Excel CG Files', 1),
-      t('BOB Preparation', 1),
-      t('BOB Verification', 2),
-      t('Product Overview', 1),
-      t('Best of Best Slide', 1),
-      t('Subsystem Deep Dive', 2),
-      t('Foam Thickness', 1),
-      t('Stakeholder Asks', 3),
-      t('FMOT', 1),
-      t('Re-used parts', 1),
-      t('Supply Chain Footprint', 2),
-      t('Category - Sub-system', 1),
-      t("Cost element - Material, Process, Margin, etc'", 1),
-      t('Market Placement', 1),
-      t('Project results summary', 1),
-      t('SME Review', 1),
-      t('Internal Review', 1),
-      t('Report Out', 1),
-      t('Feedback Form', 1),
-      t('Project Close Signoff', 1),
-    ],
+    tasks: [t('Report', 17)],
+  },
+  {
+    name: 'Deliverables',
+    tasks: REFRIGERATION_DELIVERABLES,
   },
 ]
 
@@ -108,28 +139,11 @@ function simpleTemplate(tearDownTasks: string[]): WorkstreamTemplate[] {
     },
     {
       name: 'Report',
-      tasks: [
-        t('Excel CG Files', 1),
-        t('BOB Preparation', 1),
-        t('BOB Verification', 1),
-        t('Project results summary', 1),
-        t('Market Placement', 1),
-        t('Category - Sub-system', 1),
-        t("Cost element - Material, Process, Margin, etc'", 1),
-        t('Product Overview', 1),
-        t('Best of Best', 1),
-        t('Technology Analysis', 1),
-        t('Supply Chain Footprint', 1),
-        t('Re-used parts', 1),
-        t('FMOT', 1),
-        t('MVT', 1),
-        t('GAME', 1),
-        t('Project Close Signoff', 1),
-        t('SME Review', 1),
-        t('Internal Review', 1),
-        t('Report Out', 1),
-        t('Feedback Form', 1),
-      ],
+      tasks: [t('Report', 17)],
+    },
+    {
+      name: 'Deliverables',
+      tasks: SIMPLE_DELIVERABLES,
     },
   ]
 }

@@ -42,6 +42,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       let maxEnd = new Date(cursor)
 
       for (const ws of wsTemplates) {
+        if (ws.name === 'Deliverables') continue // No scheduling — created as checklist
         if (ws.name === 'Report') {
           let rc = tdMidDate ? new Date(tdMidDate) : new Date(cursor)
           for (const task of ws.tasks) {
@@ -93,7 +94,22 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
             data: { name: wsTemplate.name, projectId: id, order: wsOrder++ },
           })
 
-          if (wsTemplate.name === 'Report') {
+          if (wsTemplate.name === 'Deliverables') {
+            // Deliverables are a checklist — no scheduling, no dates, owner = project lead
+            let taskOrder = 0
+            for (const taskTemplate of wsTemplate.tasks) {
+              await tx.task.create({
+                data: {
+                  name: taskTemplate.name,
+                  workstreamId: ws.id,
+                  status: 'BACKLOG',
+                  priority: 'MEDIUM',
+                  order: taskOrder++,
+                  ...(leadId ? { ownerId: leadId } : {}),
+                },
+              })
+            }
+          } else if (wsTemplate.name === 'Report') {
             // Report starts at teardown midpoint (parallel with second half of teardown)
             let rc = tdMidDate ? new Date(tdMidDate) : new Date(cursor)
             let taskOrder = 0

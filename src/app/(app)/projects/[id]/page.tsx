@@ -21,7 +21,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select'
 import {
-  ArrowLeft, Users, Layers, GitBranch,
+  ArrowLeft, Users, Layers, GitBranch, FileText,
   MoreHorizontal, Edit2, Trash2, ShieldCheck, ShieldOff, CalendarRange,
   UserPlus, MessageSquarePlus, AlertTriangle, Siren, Send, CheckCheck,
   Link as LinkIcon, Plus, X, Wand2,
@@ -635,6 +635,9 @@ export default function ProjectDetailPage() {
           <TabsTrigger value="products">
             <Layers className="mr-1.5 h-3.5 w-3.5" /> Products
           </TabsTrigger>
+          <TabsTrigger value="report">
+            <FileText className="mr-1.5 h-3.5 w-3.5" /> Report
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="workstreams" className="mt-4">
@@ -724,6 +727,10 @@ export default function ProjectDetailPage() {
 
         <TabsContent value="products" className="mt-4">
           <ProductsPanel project={project} onRefresh={load} />
+        </TabsContent>
+
+        <TabsContent value="report" className="mt-4">
+          <WorkstreamPanel project={project} onRefresh={load} onlyDeliverables />
         </TabsContent>
       </Tabs>
 
