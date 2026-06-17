@@ -11,6 +11,8 @@ export async function GET(req: NextRequest) {
     const ownerId = searchParams.get('ownerId')
     const projectId = searchParams.get('projectId')
     const assignedByMe = searchParams.get('assignedByMe') === 'true'
+    // scope=all bypasses role-based filtering (used by Kanban so every user sees all tasks)
+    const scopeAll = searchParams.get('scope') === 'all'
 
     // Build AND conditions so role filter + query params compose safely
     const conditions: object[] = []
@@ -27,13 +29,13 @@ export async function GET(req: NextRequest) {
           { approvedById: session.id },
         ],
       })
-    } else {
+    } else if (!scopeAll) {
       // Role-based access: determines which tasks a user may see at all
       if (session.role === 'RESOURCE') {
         // Only tasks explicitly assigned to this user
         conditions.push({ ownerId: session.id })
       } else if (session.role === 'PROJECT_LEAD') {
-        // Tasks in their projects OR directly assigned to them (e.g. via direct assignment)
+        // Tasks in their projects OR directly assigned to them
         conditions.push({
           OR: [
             { workstream: { project: { leadId: session.id } } },
@@ -51,6 +53,7 @@ export async function GET(req: NextRequest) {
       }
       // ADMIN, MANAGER, PLANNER, LEADERSHIP: no restriction — see all tasks
     }
+    // scopeAll=true → no role filter; used by Kanban board for full visibility
 
     const tasks = await prisma.task.findMany({
       where: conditions.length > 0 ? { AND: conditions } : {},

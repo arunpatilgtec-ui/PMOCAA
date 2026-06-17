@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState, useCallback, useRef } from 'react'
+import { useRouter } from 'next/navigation'
 import { DragDropContext, Droppable, Draggable, DropResult } from '@hello-pangea/dnd'
 import { toast } from 'sonner'
 import { Card, CardContent } from '@/components/ui/card'
@@ -114,11 +115,19 @@ function timeInStatus(statusChangedAt: string): string {
 
 export default function KanbanPage() {
   const { user } = useAuthStore()
+  const router = useRouter()
   const [tasks, setTasks] = useState<Task[]>([])
   const [projects, setProjects] = useState<Project[]>([])
   const [loading, setLoading] = useState(true)
   const [projectFilter, setProjectFilter] = useState<string | null>('ALL')
   const [ownerFilter, setOwnerFilter] = useState<string | null>('ALL')
+
+  // Project leads use the Gantt view instead
+  useEffect(() => {
+    if (user?.role === 'PROJECT_LEAD') {
+      router.replace('/gantt')
+    }
+  }, [user, router])
 
   // Rework dialog state
   const [reworkOpen, setReworkOpen] = useState(false)
@@ -142,7 +151,7 @@ export default function KanbanPage() {
   const load = useCallback(async () => {
     try {
       const [taskRes, projRes] = await Promise.all([
-        fetch('/api/tasks'),
+        fetch('/api/tasks?scope=all'),   // all tasks visible to everyone on the board
         fetch('/api/projects'),
       ])
       const [taskData, projData] = await Promise.all([taskRes.json(), projRes.json()])
@@ -285,6 +294,9 @@ export default function KanbanPage() {
     user
       ? task.assignedById === user.id || REVIEWER_ROLES.has(user.role)
       : false
+
+  // While the redirect fires, render nothing to avoid a flash of the board
+  if (user?.role === 'PROJECT_LEAD') return null
 
   return (
     <div className="p-6 h-full flex flex-col">
