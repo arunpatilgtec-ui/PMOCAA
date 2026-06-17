@@ -406,7 +406,9 @@ export default function ProjectDetailPage() {
             <span className={`text-xs px-2 py-0.5 rounded font-medium ${STATUS_COLORS[project.status]}`}>
               {project.status.replace('_', ' ')}
             </span>
-            <Badge variant="outline" className="text-xs">{project.type}</Badge>
+            {project.type === 'TEARDOWN' && (
+              <Badge variant="outline" className="text-xs">Teardown</Badge>
+            )}
             {project.category && (
               <Badge variant="outline" className="text-xs text-blue-600 border-blue-300">
                 {project.category}{project.productType ? ` · ${project.productType}` : ''}
@@ -449,11 +451,11 @@ export default function ProjectDetailPage() {
               <DropdownMenuItem onClick={openEditProject}>
                 <Edit2 className="mr-2 h-4 w-4" /> Edit Project
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setWizardOpen(true)}>
-                <Wand2 className="mr-2 h-4 w-4 text-blue-600" /> Reconfigure Schedule
-              </DropdownMenuItem>
               {userIsPlanner && (
                 <>
+                  <DropdownMenuItem onClick={() => setWizardOpen(true)}>
+                    <Wand2 className="mr-2 h-4 w-4 text-blue-600" /> Reconfigure Schedule
+                  </DropdownMenuItem>
                   <DropdownMenuItem onClick={openEditTimeline}>
                     <CalendarRange className="mr-2 h-4 w-4" /> Edit Timeline
                   </DropdownMenuItem>
@@ -1002,6 +1004,7 @@ export default function ProjectDetailPage() {
           projectType={project.type}
           projectClassification={project.projectClassification}
           startDate={project.startDate.slice(0, 10)}
+          numberOfProducts={project.numberOfProducts}
           hasWorkstreams={(project.workstreams?.length ?? 0) > 0}
           onComplete={() => {
             setWizardOpen(false)
@@ -1011,7 +1014,7 @@ export default function ProjectDetailPage() {
           }}
           onDismiss={() => {
             setWizardOpen(false)
-            localStorage.setItem(`wizard-dismissed-${project.id}`, '1')
+            // No localStorage — wizard will re-open next visit until a schedule is generated
           }}
         />
       )}

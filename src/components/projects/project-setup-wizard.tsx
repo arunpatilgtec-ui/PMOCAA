@@ -24,23 +24,29 @@ interface User {
   isActive: boolean
 }
 
+interface ProductDraft {
+  brand: string
+  modelNo: string
+  leadId: string
+}
+
 export interface ProjectSetupWizardProps {
   projectId: string
   projectType: string
   projectClassification?: string
   startDate: string
+  numberOfProducts?: number
   hasWorkstreams?: boolean
   onComplete: () => void
   onDismiss: () => void
 }
-
-const TOTAL_STEPS = 4
 
 export function ProjectSetupWizard({
   projectId,
   projectType,
   projectClassification,
   startDate,
+  numberOfProducts,
   hasWorkstreams = false,
   onComplete,
   onDismiss,
@@ -49,23 +55,31 @@ export function ProjectSetupWizard({
   const [submitting, setSubmitting] = useState(false)
   const [users, setUsers] = useState<User[]>([])
 
-  // Step 1
+  // Step: Category
   const [category, setCategory] = useState('')
   const [productType, setProductType] = useState('')
-  // Step 2
+  // Step: Lead
   const [leadId, setLeadId] = useState('')
-  // Step 3
+  // Step: Products (new projects only)
+  const [productDrafts, setProductDrafts] = useState<ProductDraft[]>(() => {
+    const count = numberOfProducts && numberOfProducts > 0 ? numberOfProducts : 1
+    return Array.from({ length: count }, () => ({ brand: '', modelNo: '', leadId: '' }))
+  })
+  // Step: Links
   const [links, setLinks] = useState<string[]>([''])
 
+  // Reconfigure skips the products step (products already exist)
+  const STEP_NAMES: string[] = hasWorkstreams
+    ? ['Category', 'Lead', 'Links', 'Review']
+    : ['Category', 'Lead', 'Products', 'Links', 'Review']
+  const TOTAL_STEPS = STEP_NAMES.length
+  const currentStepName = STEP_NAMES[step - 1]
+
   useEffect(() => {
-    async function fetchUsers() {
-      try {
-        const res = await fetch('/api/users')
-        const d = await res.json()
-        setUsers(Array.isArray(d) ? d.filter((u: User) => u.isActive !== false) : [])
-      } catch {}
-    }
-    fetchUsers()
+    fetch('/api/users')
+      .then((r) => r.json())
+      .then((d) => setUsers(Array.isArray(d) ? d.filter((u: User) => u.isActive !== false) : []))
+      .catch(() => {})
   }, [])
 
   const hasTemplate = !!(category && CATEGORY_TEMPLATES[category])
@@ -88,25 +102,65 @@ export function ProjectSetupWizard({
   const workstreamCount = hasTemplate ? CATEGORY_TEMPLATES[category].length : 0
 
   function canProceed() {
-    if (step === 1) return !!category
+    if (currentStepName === 'Category') return !!category
     return true
+  }
+
+  function updateProduct(i: number, field: keyof ProductDraft, value: string) {
+    setProductDrafts((d) => d.map((p, j) => (j === i ? { ...p, [field]: value } : p)))
+  }
+
+  function addProductRow() {
+    setProductDrafts((d) => [...d, { brand: '', modelNo: '', leadId: '' }])
+  }
+
+  function removeProductRow(i: number) {
+    setProductDrafts((d) => d.filter((_, j) => j !== i))
+  }
+
+  function updateLink(i: number, val: string) {
+    const next = [...links]
+    next[i] = val
+    setLinks(next)
   }
 
   async function handleSubmit() {
     setSubmitting(true)
     try {
-      const body = {
-        category: category || null,
-        productType: productType || null,
-        leadId: leadId || null,
-        projectLinks: links.filter((l) => l.trim()),
-      }
       const res = await fetch(`/api/projects/${projectId}/setup`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
+        body: JSON.stringify({
+          category: category || null,
+          productType: productType || null,
+          leadId: leadId || null,
+          projectLinks: links.filter((l) => l.trim()),
+        }),
       })
       if (!res.ok) throw new Error((await res.json()).error || 'Setup failed')
+
+      // Create products for new projects only
+      if (!hasWorkstreams) {
+        const validProducts = productDrafts.filter((p) => p.brand.trim())
+        if (validProducts.length > 0) {
+          await Promise.all(
+            validProducts.map((p) =>
+              fetch(`/api/projects/${projectId}/products`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  brand: p.brand.trim(),
+                  modelNo: p.modelNo.trim(),
+                  leadId: p.leadId || null,
+                  resourceCount: null,
+                  resources: [],
+                }),
+              })
+            )
+          )
+        }
+      }
+
       toast.success(hasTemplate ? 'Schedule generated! Check the Timeline tab.' : 'Project setup saved!')
       onComplete()
     } catch (err: unknown) {
@@ -114,12 +168,6 @@ export function ProjectSetupWizard({
     } finally {
       setSubmitting(false)
     }
-  }
-
-  function updateLink(i: number, val: string) {
-    const next = [...links]
-    next[i] = val
-    setLinks(next)
   }
 
   const isLastStep = step === TOTAL_STEPS
@@ -155,8 +203,8 @@ export function ProjectSetupWizard({
         {/* Body */}
         <div className="p-5 space-y-4 overflow-y-auto flex-1">
 
-          {/* ── Step 1: Category + Product Type ── */}
-          {step === 1 && (
+          {/* ── Category + Product Type ── */}
+          {currentStepName === 'Category' && (
             <>
               <div>
                 <h3 className="text-sm font-semibold">Product Category</h3>
@@ -209,15 +257,17 @@ export function ProjectSetupWizard({
                 </div>
               )}
               {category === 'Other' && (
-                <p className="text-xs text-muted-foreground bg-muted/50 rounded px-3 py-2">
-                  No template for &quot;Other&quot;. You can add workstreams and tasks manually after setup.
-                </p>
+                <div className="bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800 rounded px-3 py-2">
+                  <p className="text-xs text-amber-800 dark:text-amber-300">
+                    <strong>No template for &quot;Other&quot;.</strong> You can still save the project setup and add workstreams and tasks manually from the Timeline tab.
+                  </p>
+                </div>
               )}
             </>
           )}
 
-          {/* ── Step 2: Project Lead ── */}
-          {step === 2 && (
+          {/* ── Project Lead ── */}
+          {currentStepName === 'Lead' && (
             <>
               <div>
                 <h3 className="text-sm font-semibold">Assign Project Lead</h3>
@@ -245,8 +295,76 @@ export function ProjectSetupWizard({
             </>
           )}
 
-          {/* ── Step 3: Links ── */}
-          {step === 3 && (
+          {/* ── Products (new project only) ── */}
+          {currentStepName === 'Products' && (
+            <>
+              <div>
+                <h3 className="text-sm font-semibold">Products</h3>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Enter the brand and model for each product. Leave brand blank to skip a row.
+                </p>
+              </div>
+              <div className="space-y-2">
+                {productDrafts.map((p, i) => (
+                  <div key={i} className="rounded-md border p-3 space-y-2 bg-muted/10">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-medium text-muted-foreground">Product {i + 1}</span>
+                      {productDrafts.length > 1 && (
+                        <Button
+                          variant="ghost" size="icon"
+                          className="h-6 w-6 text-muted-foreground hover:text-red-500"
+                          onClick={() => removeProductRow(i)}
+                        >
+                          <X className="h-3 w-3" />
+                        </Button>
+                      )}
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <Input
+                        placeholder="Brand *"
+                        value={p.brand}
+                        onChange={(e) => updateProduct(i, 'brand', e.target.value)}
+                        className="h-8 text-sm"
+                      />
+                      <Input
+                        placeholder="Model No."
+                        value={p.modelNo}
+                        onChange={(e) => updateProduct(i, 'modelNo', e.target.value)}
+                        className="h-8 text-sm"
+                      />
+                    </div>
+                    <Select
+                      value={p.leadId || 'none'}
+                      onValueChange={(v) => {
+                        const s = v as string | null
+                        updateProduct(i, 'leadId', !s || s === 'none' ? '' : s)
+                      }}
+                    >
+                      <SelectTrigger className="h-8 text-sm">
+                        <SelectValue placeholder="Assign lead (optional)…" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">No lead</SelectItem>
+                        {users.map((u) => (
+                          <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                ))}
+              </div>
+              <Button
+                variant="outline" size="sm"
+                className="h-7 text-xs w-full"
+                onClick={addProductRow}
+              >
+                <Plus className="h-3 w-3 mr-1" /> Add Product
+              </Button>
+            </>
+          )}
+
+          {/* ── Links ── */}
+          {currentStepName === 'Links' && (
             <>
               <div>
                 <h3 className="text-sm font-semibold">Project Links</h3>
@@ -285,8 +403,8 @@ export function ProjectSetupWizard({
             </>
           )}
 
-          {/* ── Step 4: Review + Generate ── */}
-          {step === 4 && (
+          {/* ── Review + Generate ── */}
+          {currentStepName === 'Review' && (
             <>
               <div>
                 <h3 className="text-sm font-semibold">Review &amp; Generate</h3>
@@ -320,6 +438,12 @@ export function ProjectSetupWizard({
                   <span className="text-muted-foreground">Project Lead</span>
                   <span className="font-medium">{users.find((u) => u.id === leadId)?.name || 'None'}</span>
                 </div>
+                {!hasWorkstreams && productDrafts.filter((p) => p.brand.trim()).length > 0 && (
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Products</span>
+                    <span className="font-medium">{productDrafts.filter((p) => p.brand.trim()).length} product(s)</span>
+                  </div>
+                )}
                 {previewEndDate && (
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">Est. End Date</span>

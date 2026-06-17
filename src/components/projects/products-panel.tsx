@@ -474,7 +474,7 @@ export function ProductsPanel({
                                   </div>
                                   {r.subsystems.length > 0 && (
                                     <div className="flex flex-wrap gap-1 mt-1">
-                                      <span className="text-xs text-muted-foreground mr-0.5">Teardown:</span>
+                                      <span className="text-xs text-muted-foreground mr-0.5">Subsystems:</span>
                                       {r.subsystems.map((s) => (
                                         <span key={s} className="text-xs px-1.5 py-0.5 rounded bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800">{s}</span>
                                       ))}
@@ -591,7 +591,7 @@ export function ProductsPanel({
               )}
 
               {form.resources.map((r, i) => {
-                const personName = allocatedUsers.find((u) => u.id === r.userId)?.name
+                const personName = leadOptions.find((u) => u.id === r.userId)?.name
                 return (
                   <div key={i} className="rounded-md border p-3 space-y-3 bg-muted/20">
                     {/* Person selector */}
@@ -606,7 +606,7 @@ export function ProductsPanel({
                           </SelectTrigger>
                           <SelectContent>
                             <SelectItem value="none">Select person…</SelectItem>
-                            {allocatedUsers.map((u) => (
+                            {leadOptions.map((u) => (
                               <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>
                             ))}
                           </SelectContent>
@@ -624,7 +624,7 @@ export function ProductsPanel({
                     {/* Subsystem assignment */}
                     {subsystems.length > 0 && (
                       <div className="space-y-1.5">
-                        <Label className="text-xs text-muted-foreground">Teardown Subsystems</Label>
+                        <Label className="text-xs text-muted-foreground">Subsystems</Label>
                         <div className="flex flex-wrap gap-1.5">
                           {subsystems.map((sub) => (
                             <button
