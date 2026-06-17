@@ -203,6 +203,22 @@ export default function ProjectDetailPage() {
     (t) => t.endDate && new Date(t.endDate) < now && !['COMPLETED', 'CANCELLED'].includes(t.status)
   )
 
+  async function syncTemplateTasks() {
+    try {
+      const res = await fetch(`/api/projects/${id}/sync-template`, { method: 'POST' })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error)
+      if (data.added === 0) {
+        toast.info('All template tasks already present — nothing to add')
+      } else {
+        toast.success(`Added ${data.added} missing task${data.added === 1 ? '' : 's'} from template`)
+        load()
+      }
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'Sync failed')
+    }
+  }
+
   function openEditProject() {
     if (!project) return
     setEditName(project.name)
@@ -472,6 +488,9 @@ export default function ProjectDetailPage() {
                 <>
                   <DropdownMenuItem onClick={() => setWizardOpen(true)}>
                     <Wand2 className="mr-2 h-4 w-4 text-blue-600" /> Reconfigure Schedule
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={syncTemplateTasks}>
+                    <Plus className="mr-2 h-4 w-4 text-green-600" /> Sync Template Tasks
                   </DropdownMenuItem>
                   <DropdownMenuItem onClick={openEditTimeline}>
                     <CalendarRange className="mr-2 h-4 w-4" /> Edit Timeline
