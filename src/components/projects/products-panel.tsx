@@ -14,7 +14,7 @@ import {
 } from '@/components/ui/select'
 import {
   Plus, Pencil, Trash2, ChevronDown, ChevronRight, X, User2, History,
-  ClipboardList, Users,
+  ClipboardList, Users, Scale,
 } from 'lucide-react'
 import { format } from 'date-fns'
 
@@ -324,6 +324,30 @@ export function ProductsPanel({
     })
   }
 
+  function autoDistribute() {
+    if (subsystems.length === 0) return
+    const filledCount = form.resources.filter((r) => r.userId).length
+    if (filledCount < 2) return
+
+    setForm((f) => {
+      // Prefer assigning subsystems to MECHANICAL resources; fall back to all
+      const filled = f.resources.map((r, i) => ({ r, i })).filter(({ r }) => r.userId)
+      const mechanical = filled.filter(({ r }) => r.costingTypes.includes('MECHANICAL'))
+      const targets = mechanical.length > 0 ? mechanical : filled
+      const n = targets.length
+      const chunkSize = Math.floor(subsystems.length / n)
+      const remainder = subsystems.length % n
+
+      const next = f.resources.map((r) => ({ ...r, subsystems: [] as string[] }))
+      targets.forEach(({ i }, ti) => {
+        const start = ti * chunkSize + Math.min(ti, remainder)
+        const size = chunkSize + (ti < remainder ? 1 : 0)
+        next[i] = { ...next[i], subsystems: subsystems.slice(start, start + size) }
+      })
+      return { ...f, resources: next }
+    })
+  }
+
   function getTab(productId: string) {
     return expandedTab[productId] ?? 'resources'
   }
@@ -492,6 +516,50 @@ export function ProductsPanel({
                               ))}
                             </div>
                           )}
+
+                          {/* Workload distribution (shown when 2+ resources and category has subsystems) */}
+                          {p.resources.length >= 2 && subsystems.length > 0 && (
+                            <div className="mt-3 pt-2.5 border-t border-border/40 space-y-1.5">
+                              <div className="flex items-center gap-1.5">
+                                <Scale className="h-3 w-3 text-muted-foreground" />
+                                <p className="text-xs font-medium text-muted-foreground">Workload Distribution</p>
+                              </div>
+                              {p.resources.map((r) => {
+                                const pct = Math.round((r.subsystems.length / subsystems.length) * 100)
+                                return (
+                                  <div key={r.id} className="flex items-center gap-2">
+                                    <span className="text-xs w-20 truncate shrink-0 text-foreground/70">
+                                      {r.user.name.split(' ')[0]}
+                                    </span>
+                                    <div className="flex-1 h-1.5 bg-muted rounded-full overflow-hidden">
+                                      <div
+                                        className="h-full bg-blue-500 rounded-full transition-all duration-500"
+                                        style={{ width: `${pct}%` }}
+                                      />
+                                    </div>
+                                    <span className="text-xs text-muted-foreground shrink-0 tabular-nums w-16 text-right">
+                                      {r.subsystems.length}/{subsystems.length} · {pct}%
+                                    </span>
+                                  </div>
+                                )
+                              })}
+                              {(() => {
+                                const assigned = new Set(p.resources.flatMap((r) => r.subsystems))
+                                const uncovered = subsystems.filter((s) => !assigned.has(s))
+                                if (uncovered.length === subsystems.length) return null
+                                return uncovered.length > 0 ? (
+                                  <p className="text-[11px] text-amber-600 dark:text-amber-400 pt-0.5">
+                                    ⚠ {uncovered.length} subsystem{uncovered.length !== 1 ? 's' : ''} not yet assigned
+                                  </p>
+                                ) : (
+                                  <p className="text-[11px] text-green-600 dark:text-green-400 pt-0.5">
+                                    ✓ All {subsystems.length} subsystems assigned
+                                  </p>
+                                )
+                              })()}
+                            </div>
+                          )}
+
                           {canManage && (
                             <Button
                               variant="outline" size="sm" className="h-7 text-xs mt-3 w-full"
@@ -581,9 +649,20 @@ export function ProductsPanel({
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <Label>Assigned Resources</Label>
-                <Button type="button" variant="ghost" size="sm" className="h-6 text-xs" onClick={addResource}>
-                  <Plus className="h-3 w-3 mr-1" /> Add Person
-                </Button>
+                <div className="flex items-center gap-1.5">
+                  {form.resources.filter((r) => r.userId).length >= 2 && subsystems.length > 0 && (
+                    <Button
+                      type="button" variant="outline" size="sm"
+                      className="h-6 text-xs gap-1 text-blue-600 border-blue-200 hover:bg-blue-50"
+                      onClick={autoDistribute}
+                    >
+                      <Scale className="h-3 w-3" /> Auto-Distribute
+                    </Button>
+                  )}
+                  <Button type="button" variant="ghost" size="sm" className="h-6 text-xs" onClick={addResource}>
+                    <Plus className="h-3 w-3 mr-1" /> Add Person
+                  </Button>
+                </div>
               </div>
 
               {form.resources.length === 0 && (
@@ -612,6 +691,11 @@ export function ProductsPanel({
                           </SelectContent>
                         </Select>
                       </div>
+                      {subsystems.length > 0 && r.subsystems.length > 0 && (
+                        <span className="text-xs font-semibold text-blue-600 shrink-0 tabular-nums">
+                          {Math.round((r.subsystems.length / subsystems.length) * 100)}%
+                        </span>
+                      )}
                       <Button
                         type="button" variant="ghost" size="icon"
                         className="h-8 w-8 text-muted-foreground hover:text-red-500 shrink-0"
