@@ -25,9 +25,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     const startDate = new Date(project.startDate)
     const leadId: string | null = data.leadId || project.leadId || null
 
-    const CHECKLIST_WS = new Set(['Planning', 'Deliverables', 'Report'])
-
-    // Compute end date: sequential through scheduled workstreams (Planning/Deliverables/Report are checklists)
+    // Compute end date: all workstreams scheduled sequentially
     let endDate: Date
     if (wsTemplates) {
       let cursor = new Date(startDate)
@@ -35,7 +33,6 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       let maxEnd = new Date(cursor)
 
       for (const ws of wsTemplates) {
-        if (CHECKLIST_WS.has(ws.name)) continue
         for (const task of ws.tasks) {
           const end = addWorkingDays(new Date(cursor), task.durationDays - 1)
           if (end > maxEnd) maxEnd = new Date(end)
@@ -74,43 +71,27 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
             data: { name: wsTemplate.name, projectId: id, order: wsOrder++ },
           })
 
-          if (CHECKLIST_WS.has(wsTemplate.name)) {
-            // Checklist tasks — no scheduling, no dates
-            // Deliverables default owner = project lead; others unassigned
-            let taskOrder = 0
-            for (const taskTemplate of wsTemplate.tasks) {
-              await tx.task.create({
-                data: {
-                  name: taskTemplate.name,
-                  workstreamId: ws.id,
-                  status: 'BACKLOG',
-                  priority: 'MEDIUM',
-                  order: taskOrder++,
-                  ...(wsTemplate.name === 'Deliverables' && leadId ? { ownerId: leadId } : {}),
-                },
-              })
-            }
-          } else {
-            let taskOrder = 0
-            for (const taskTemplate of wsTemplate.tasks) {
-              const taskStart = new Date(cursor)
-              const taskEnd = addWorkingDays(new Date(cursor), taskTemplate.durationDays - 1)
-              await tx.task.create({
-                data: {
-                  name: taskTemplate.name,
-                  workstreamId: ws.id,
-                  status: 'BACKLOG',
-                  priority: 'MEDIUM',
-                  startDate: taskStart,
-                  endDate: taskEnd,
-                  estimatedHours: taskTemplate.estimatedHours,
-                  order: taskOrder++,
-                  // Tear Down defaults to project lead; Costing stays unassigned
-                  ...(wsTemplate.name === 'Tear Down' && leadId ? { ownerId: leadId } : {}),
-                },
-              })
-              cursor = addWorkingDays(taskEnd, 1)
-            }
+          let taskOrder = 0
+          for (const taskTemplate of wsTemplate.tasks) {
+            const taskStart = new Date(cursor)
+            const taskEnd = addWorkingDays(new Date(cursor), taskTemplate.durationDays - 1)
+            await tx.task.create({
+              data: {
+                name: taskTemplate.name,
+                workstreamId: ws.id,
+                status: 'BACKLOG',
+                priority: 'MEDIUM',
+                startDate: taskStart,
+                endDate: taskEnd,
+                estimatedHours: taskTemplate.estimatedHours,
+                order: taskOrder++,
+                // Tear Down + Deliverables default to project lead
+                ...((wsTemplate.name === 'Tear Down' || wsTemplate.name === 'Deliverables') && leadId
+                  ? { ownerId: leadId }
+                  : {}),
+              },
+            })
+            cursor = addWorkingDays(taskEnd, 1)
           }
         }
       }

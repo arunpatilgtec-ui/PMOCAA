@@ -208,10 +208,13 @@ export default function ProjectDetailPage() {
       const res = await fetch(`/api/projects/${id}/sync-template`, { method: 'POST' })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error)
-      if (data.added === 0) {
+      const parts: string[] = []
+      if (data.added > 0) parts.push(`added ${data.added} task${data.added === 1 ? '' : 's'}`)
+      if (data.updated > 0) parts.push(`scheduled ${data.updated} task${data.updated === 1 ? '' : 's'} with dates`)
+      if (parts.length === 0) {
         toast.info('All template tasks already present — nothing to add')
       } else {
-        toast.success(`Added ${data.added} missing task${data.added === 1 ? '' : 's'} from template`)
+        toast.success(`Sync complete: ${parts.join(', ')}`)
         load()
       }
     } catch (e: unknown) {

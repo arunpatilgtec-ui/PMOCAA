@@ -1,26 +1,44 @@
 'use client'
 
-import { useRef, useState, useCallback } from 'react'
+import { useRef, useState, useCallback, useEffect } from 'react'
 import { useAuthStore } from '@/store/auth'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import {
   addDays, differenceInCalendarDays, format, isSameDay, isWeekend,
   eachDayOfInterval, endOfWeek, startOfWeek,
 } from 'date-fns'
-import { ChevronLeft, ChevronRight, ZoomIn, ZoomOut, Calendar } from 'lucide-react'
+import { ChevronLeft, ChevronRight, ZoomIn, ZoomOut, Calendar, Pencil, X } from 'lucide-react'
 
 interface TaskOwner { id: string; name: string }
 interface Task {
-  id: string; name: string; status: string; priority: string
-  startDate?: string; endDate?: string
+  id: string
+  name: string
+  status: string
+  priority: string
+  startDate?: string
+  endDate?: string
+  actualStartDate?: string
+  actualEndDate?: string
+  description?: string
   owner?: TaskOwner
 }
 interface Workstream {
-  id: string; name: string; tasks: Task[]
+  id: string
+  name: string
+  tasks: Task[]
+}
+interface Product {
+  id: string
+  brand: string
+  modelNo: string
 }
 interface Project {
-  id: string; startDate: string; endDate: string
+  id: string
+  startDate: string
+  endDate: string
   workstreams: Workstream[]
 }
 
@@ -45,7 +63,7 @@ const STATUS_HOVER: Record<string, string> = {
 }
 
 const LABEL_W = 220
-const ROW_H = 34
+const ROW_H = 42
 const HEADER_H = 52
 
 type DragType = 'move' | 'resize-left' | 'resize-right'
@@ -57,6 +75,10 @@ interface DragState {
   origStart: Date
   origEnd: Date
 }
+
+type GanttRow =
+  | { type: 'ws'; ws: Workstream; label: string }
+  | { type: 'task'; ws: Workstream; task: Task; label: string }
 
 export function ProjectGanttView({
   project,
@@ -77,15 +99,26 @@ export function ProjectGanttView({
   const [dragging, setDragging] = useState<DragState | null>(null)
   const [dragDeltaDays, setDragDeltaDays] = useState(0)
   const [saving, setSaving] = useState(false)
+  const [products, setProducts] = useState<Product[]>([])
+  const [editTask, setEditTask] = useState<{ task: Task; label: string } | null>(null)
+  const [actualStart, setActualStart] = useState('')
+  const [actualEnd, setActualEnd] = useState('')
+  const [savingActual, setSavingActual] = useState(false)
 
   const chartRef = useRef<HTMLDivElement>(null)
   const dragRef = useRef<DragState | null>(null)
+
+  useEffect(() => {
+    fetch(`/api/projects/${project.id}/products`)
+      .then((r) => r.json())
+      .then((d) => { if (Array.isArray(d)) setProducts(d) })
+      .catch(() => {})
+  }, [project.id])
 
   const today = new Date()
   const viewEnd = addDays(viewStart, Math.ceil(700 / dayW))
   const days = eachDayOfInterval({ start: viewStart, end: viewEnd })
 
-  // Week headers
   const weeks: Array<{ label: string; days: Date[] }> = []
   let wk = startOfWeek(viewStart, { weekStartsOn: 1 })
   while (wk <= viewEnd) {
@@ -95,18 +128,45 @@ export function ProjectGanttView({
     wk = addDays(wEnd, 1)
   }
 
-  const allRows: Array<{ type: 'ws' | 'task'; ws: Workstream; task?: Task }> = []
+  // Build rows — group Product Costing tasks by product
+  const allRows: GanttRow[] = []
   for (const ws of project.workstreams) {
-    allRows.push({ type: 'ws', ws })
-    for (const task of ws.tasks) {
-      allRows.push({ type: 'task', ws, task })
+    if (ws.name === 'Product Costing') {
+      const byProduct = new Map<string, Task[]>()
+      const untaggedTasks: Task[] = []
+      for (const task of ws.tasks) {
+        const match = task.description?.match(/__productTask:([^:]+):/)
+        if (match) {
+          const pid = match[1]
+          if (!byProduct.has(pid)) byProduct.set(pid, [])
+          byProduct.get(pid)!.push(task)
+        } else {
+          untaggedTasks.push(task)
+        }
+      }
+      if (byProduct.size === 0 && untaggedTasks.length === 0) {
+        allRows.push({ type: 'ws', ws, label: 'Product Costing' })
+      } else {
+        for (const [productId, tasks] of byProduct) {
+          const p = products.find((pr) => pr.id === productId)
+          const label = p ? `${p.brand}${p.modelNo ? ` ${p.modelNo}` : ''}` : 'Product Costing'
+          allRows.push({ type: 'ws', ws, label })
+          for (const task of tasks) allRows.push({ type: 'task', ws, task, label })
+        }
+        for (const task of untaggedTasks) {
+          allRows.push({ type: 'task', ws, task, label: 'Product Costing' })
+        }
+      }
+    } else {
+      allRows.push({ type: 'ws', ws, label: ws.name })
+      for (const task of ws.tasks) allRows.push({ type: 'task', ws, task, label: ws.name })
     }
   }
 
-  function getBarStyle(task: Task): { left: number; width: number; visible: boolean } {
-    if (!task.startDate || !task.endDate) return { left: 0, width: 0, visible: false }
-    const s = new Date(task.startDate)
-    const e = new Date(task.endDate)
+  function getBarStyle(start?: string, end?: string): { left: number; width: number; visible: boolean } {
+    if (!start || !end) return { left: 0, width: 0, visible: false }
+    const s = new Date(start)
+    const e = new Date(end)
     const left = differenceInCalendarDays(s, viewStart) * dayW
     const width = Math.max(dayW, (differenceInCalendarDays(e, s) + 1) * dayW - 2)
     const visible = left < days.length * dayW && left + width > 0
@@ -114,7 +174,7 @@ export function ProjectGanttView({
   }
 
   function getDragAdjustedBar(task: Task) {
-    if (!dragging || dragging.taskId !== task.id) return getBarStyle(task)
+    if (!dragging || dragging.taskId !== task.id) return getBarStyle(task.startDate, task.endDate)
     const { type, origStart, origEnd } = dragging
     const delta = dragDeltaDays
     let s = new Date(origStart)
@@ -122,7 +182,6 @@ export function ProjectGanttView({
     if (type === 'move') { s = addDays(s, delta); e = addDays(e, delta) }
     else if (type === 'resize-left') { s = addDays(s, delta) }
     else if (type === 'resize-right') { e = addDays(e, delta) }
-    // clamp: start <= end
     if (s > e) { if (type === 'resize-left') s = e; else e = s }
     const left = differenceInCalendarDays(s, viewStart) * dayW
     const width = Math.max(dayW, (differenceInCalendarDays(e, s) + 1) * dayW - 2)
@@ -153,8 +212,7 @@ export function ProjectGanttView({
 
   const handlePointerMove = useCallback((e: React.PointerEvent) => {
     if (!dragRef.current) return
-    const dx = e.clientX - dragRef.current.startX
-    const delta = Math.round(dx / dayW)
+    const delta = Math.round((e.clientX - dragRef.current.startX) / dayW)
     setDragDeltaDays(delta)
   }, [dayW])
 
@@ -180,7 +238,6 @@ export function ProjectGanttView({
       if (newEnd < newStart) newEnd = newStart
     }
 
-    // Only save if dates actually changed
     const origS = drag.origStart.toISOString().slice(0, 10)
     const origE = drag.origEnd.toISOString().slice(0, 10)
     const newS = newStart.toISOString().slice(0, 10)
@@ -206,6 +263,35 @@ export function ProjectGanttView({
       setSaving(false)
     }
   }, [dayW, onRefresh])
+
+  function openEditTask(task: Task, label: string) {
+    setEditTask({ task, label })
+    setActualStart(task.actualStartDate?.slice(0, 10) || '')
+    setActualEnd(task.actualEndDate?.slice(0, 10) || '')
+  }
+
+  async function saveActualDates() {
+    if (!editTask) return
+    setSavingActual(true)
+    try {
+      const res = await fetch(`/api/tasks/${editTask.task.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          actualStartDate: actualStart || null,
+          actualEndDate: actualEnd || null,
+        }),
+      })
+      if (!res.ok) throw new Error()
+      toast.success('Actual dates saved')
+      onRefresh()
+      setEditTask(null)
+    } catch {
+      toast.error('Failed to save actual dates')
+    } finally {
+      setSavingActual(false)
+    }
+  }
 
   const todayOffset = differenceInCalendarDays(today, viewStart) * dayW
 
@@ -235,163 +321,230 @@ export function ProjectGanttView({
         </div>
         {saving && <span className="text-xs text-muted-foreground">Saving…</span>}
         {canEditDates && !saving && (
-          <span className="text-xs text-muted-foreground ml-auto">Drag bars to move · drag edges to resize</span>
+          <span className="text-xs text-muted-foreground ml-auto">Drag bars to move · ✏ to record actual dates</span>
         )}
       </div>
 
-      {/* Gantt chart */}
-      <div className="border rounded-lg overflow-hidden flex-1">
-        <div
-          className="overflow-auto"
-          style={{ maxHeight: '60vh' }}
-          ref={chartRef}
-          onPointerMove={dragging ? handlePointerMove : undefined}
-          onPointerUp={dragging ? handlePointerUp : undefined}
-        >
-          {/* Sticky header */}
-          <div className="flex sticky top-0 z-20 bg-background border-b">
-            {/* Label column header */}
-            <div style={{ width: LABEL_W, minWidth: LABEL_W, height: HEADER_H }} className="shrink-0 border-r bg-muted/50 px-3 flex items-end pb-1 text-xs font-medium text-muted-foreground">
-              Task
-            </div>
-            {/* Week/day headers */}
-            <div className="flex shrink-0">
-              {weeks.map((week, wi) => (
-                <div key={wi} className="border-r last:border-0">
-                  <div
-                    className="px-2 py-1 text-xs font-medium text-muted-foreground border-b bg-muted/30 whitespace-nowrap"
-                    style={{ width: week.days.length * dayW }}
-                  >
-                    {week.label}
+      {/* Chart + edit panel */}
+      <div className="flex gap-3 flex-1 min-h-0">
+        {/* Gantt chart */}
+        <div className="flex-1 min-w-0 border rounded-lg overflow-hidden">
+          <div
+            className="overflow-auto"
+            style={{ maxHeight: '60vh' }}
+            ref={chartRef}
+            onPointerMove={dragging ? handlePointerMove : undefined}
+            onPointerUp={dragging ? handlePointerUp : undefined}
+          >
+            {/* Sticky header */}
+            <div className="flex sticky top-0 z-20 bg-background border-b">
+              <div style={{ width: LABEL_W, minWidth: LABEL_W, height: HEADER_H }} className="shrink-0 border-r bg-muted/50 px-3 flex items-end pb-1 text-xs font-medium text-muted-foreground">
+                Task
+              </div>
+              <div className="flex shrink-0">
+                {weeks.map((week, wi) => (
+                  <div key={wi} className="border-r last:border-0">
+                    <div
+                      className="px-2 py-1 text-xs font-medium text-muted-foreground border-b bg-muted/30 whitespace-nowrap"
+                      style={{ width: week.days.length * dayW }}
+                    >
+                      {week.label}
+                    </div>
+                    <div className="flex">
+                      {week.days.map((day) => (
+                        <div
+                          key={day.toISOString()}
+                          style={{ width: dayW }}
+                          className={`text-center text-[10px] py-0.5 border-r last:border-0 ${
+                            isSameDay(day, today) ? 'bg-blue-100 text-blue-700 font-bold dark:bg-blue-950' :
+                            isWeekend(day) ? 'bg-muted/60 text-muted-foreground/40' : 'text-muted-foreground'
+                          }`}
+                        >
+                          {dayW >= 20 ? day.getDate() : ''}
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                  <div className="flex">
-                    {week.days.map((day) => (
-                      <div
-                        key={day.toISOString()}
-                        style={{ width: dayW }}
-                        className={`text-center text-[10px] py-0.5 border-r last:border-0 ${
-                          isSameDay(day, today) ? 'bg-blue-100 text-blue-700 font-bold dark:bg-blue-950' :
-                          isWeekend(day) ? 'bg-muted/60 text-muted-foreground/40' : 'text-muted-foreground'
-                        }`}
-                      >
-                        {dayW >= 20 ? day.getDate() : ''}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ))}
+                ))}
+              </div>
             </div>
-          </div>
 
-          {/* Rows */}
-          {allRows.map((row) => {
-            if (row.type === 'ws') {
+            {/* Rows */}
+            {allRows.map((row, ri) => {
+              if (row.type === 'ws') {
+                return (
+                  <div key={`ws-${row.ws.id}-${ri}`} className="flex border-b bg-muted/20">
+                    <div
+                      style={{ width: LABEL_W, minWidth: LABEL_W, height: ROW_H }}
+                      className="shrink-0 border-r px-3 flex items-center text-xs font-semibold text-muted-foreground uppercase tracking-wide"
+                    >
+                      {row.label}
+                    </div>
+                    <div className="relative flex-1" style={{ height: ROW_H }}>
+                      {days.map((day, di) => isWeekend(day) ? (
+                        <div key={di} className="absolute top-0 bottom-0 bg-muted/40" style={{ left: di * dayW, width: dayW }} />
+                      ) : null)}
+                      {todayOffset >= 0 && (
+                        <div className="absolute top-0 bottom-0 w-px bg-blue-500/60 z-10" style={{ left: todayOffset }} />
+                      )}
+                    </div>
+                  </div>
+                )
+              }
+
+              const task = row.task
+              const { left, width, visible } = getDragAdjustedBar(task)
+              const actualBar = getBarStyle(task.actualStartDate, task.actualEndDate)
+              const isDragging = dragging?.taskId === task.id
+              const isEditing = editTask?.task.id === task.id
+
               return (
-                <div key={`ws-${row.ws.id}`} className="flex border-b bg-muted/20">
+                <div
+                  key={`task-${task.id}`}
+                  className={`flex border-b transition-colors group ${isEditing ? 'bg-emerald-50 dark:bg-emerald-950/20' : 'hover:bg-muted/10'}`}
+                >
+                  {/* Label */}
                   <div
                     style={{ width: LABEL_W, minWidth: LABEL_W, height: ROW_H }}
-                    className="shrink-0 border-r px-3 flex items-center text-xs font-semibold text-muted-foreground uppercase tracking-wide"
+                    className="shrink-0 border-r px-3 flex items-center gap-2 text-xs overflow-hidden"
                   >
-                    {row.ws.name}
-                  </div>
-                  <div className="relative flex-1" style={{ height: ROW_H }}>
-                    {/* Background stripes */}
-                    {days.map((day, di) =>
-                      isWeekend(day) ? (
-                        <div key={di} className="absolute top-0 bottom-0 bg-muted/40" style={{ left: di * dayW, width: dayW }} />
-                      ) : null
+                    <div className={`h-1.5 w-1.5 rounded-full shrink-0 ${STATUS_BG[task.status] || 'bg-slate-400'}`} />
+                    <span className="truncate flex-1" title={task.name}>{task.name}</span>
+                    {task.owner && (
+                      <span className="shrink-0 text-[10px] text-muted-foreground truncate max-w-[50px]">
+                        {task.owner.name.split(' ')[0]}
+                      </span>
                     )}
-                    {/* Today line */}
+                    <button
+                      className="shrink-0 opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-foreground transition-opacity"
+                      onClick={() => openEditTask(task, row.label)}
+                      title="Record actual dates"
+                    >
+                      <Pencil className="h-2.5 w-2.5" />
+                    </button>
+                  </div>
+
+                  {/* Timeline area */}
+                  <div
+                    className="relative flex-1 select-none"
+                    style={{ height: ROW_H }}
+                  >
+                    {days.map((day, di) => isWeekend(day) ? (
+                      <div key={di} className="absolute top-0 bottom-0 bg-muted/40" style={{ left: di * dayW, width: dayW }} />
+                    ) : null)}
                     {todayOffset >= 0 && (
                       <div className="absolute top-0 bottom-0 w-px bg-blue-500/60 z-10" style={{ left: todayOffset }} />
+                    )}
+
+                    {/* Planned bar */}
+                    {visible && (
+                      <div
+                        className={`absolute rounded flex items-center text-white text-[10px] font-medium overflow-hidden transition-opacity ${STATUS_BG[task.status]} ${STATUS_HOVER[task.status]} ${isDragging ? 'opacity-80 shadow-lg ring-2 ring-white/40 cursor-grabbing' : canEditDates ? 'cursor-grab' : 'cursor-default'}`}
+                        style={{ left: Math.max(0, left), width, top: 3, height: 18 }}
+                      >
+                        {canEditDates && (
+                          <div
+                            className="absolute left-0 top-0 bottom-0 w-2 cursor-ew-resize z-20 hover:bg-black/20"
+                            onPointerDown={(e) => handlePointerDown(e, task, 'resize-left')}
+                          />
+                        )}
+                        <div
+                          className="flex-1 px-2 overflow-hidden whitespace-nowrap select-none"
+                          onPointerDown={canEditDates ? (e) => handlePointerDown(e, task, 'move') : undefined}
+                          style={{ cursor: canEditDates ? 'grab' : 'default' }}
+                        >
+                          {width > 60 && task.name}
+                        </div>
+                        {canEditDates && (
+                          <div
+                            className="absolute right-0 top-0 bottom-0 w-2 cursor-ew-resize z-20 hover:bg-black/20"
+                            onPointerDown={(e) => handlePointerDown(e, task, 'resize-right')}
+                          />
+                        )}
+                      </div>
+                    )}
+
+                    {/* Actual bar — emerald, below the planned bar */}
+                    {actualBar.visible && (
+                      <div
+                        className="absolute rounded-sm bg-emerald-500/80"
+                        style={{ left: Math.max(0, actualBar.left), width: actualBar.width, top: 26, height: 10 }}
+                        title={`Actual: ${task.actualStartDate?.slice(0, 10)} – ${task.actualEndDate?.slice(0, 10)}`}
+                      />
+                    )}
+
+                    {!task.startDate && (
+                      <div className="absolute inset-y-0 left-2 flex items-center">
+                        <span className="text-[10px] text-muted-foreground/50">no dates</span>
+                      </div>
                     )}
                   </div>
                 </div>
               )
-            }
-
-            const task = row.task!
-            const { left, width, visible } = getDragAdjustedBar(task)
-            const isDragging = dragging?.taskId === task.id
-
-            return (
-              <div
-                key={`task-${task.id}`}
-                className="flex border-b hover:bg-muted/10 transition-colors"
-              >
-                {/* Label */}
-                <div
-                  style={{ width: LABEL_W, minWidth: LABEL_W, height: ROW_H }}
-                  className="shrink-0 border-r px-3 flex items-center gap-2 text-xs overflow-hidden"
-                >
-                  <div className={`h-1.5 w-1.5 rounded-full shrink-0 ${STATUS_BG[task.status] || 'bg-slate-400'}`} />
-                  <span className="truncate" title={task.name}>{task.name}</span>
-                  {task.owner && (
-                    <span className="ml-auto shrink-0 text-[10px] text-muted-foreground truncate max-w-[60px]">
-                      {task.owner.name.split(' ')[0]}
-                    </span>
-                  )}
-                </div>
-
-                {/* Timeline area */}
-                <div
-                  className="relative flex-1 select-none"
-                  style={{ height: ROW_H }}
-                >
-                  {/* Background */}
-                  {days.map((day, di) =>
-                    isWeekend(day) ? (
-                      <div key={di} className="absolute top-0 bottom-0 bg-muted/40" style={{ left: di * dayW, width: dayW }} />
-                    ) : null
-                  )}
-                  {todayOffset >= 0 && (
-                    <div className="absolute top-0 bottom-0 w-px bg-blue-500/60 z-10" style={{ left: todayOffset }} />
-                  )}
-
-                  {/* Task bar */}
-                  {visible && (
-                    <div
-                      className={`absolute top-2 bottom-2 rounded flex items-center text-white text-[10px] font-medium overflow-hidden transition-opacity ${STATUS_BG[task.status]} ${STATUS_HOVER[task.status]} ${isDragging ? 'opacity-80 shadow-lg ring-2 ring-white/40 cursor-grabbing' : canEditDates ? 'cursor-grab' : 'cursor-default'}`}
-                      style={{ left: Math.max(0, left), width }}
-                    >
-                      {/* Left resize handle */}
-                      {canEditDates && (
-                        <div
-                          className="absolute left-0 top-0 bottom-0 w-2 cursor-ew-resize z-20 hover:bg-black/20"
-                          onPointerDown={(e) => handlePointerDown(e, task, 'resize-left')}
-                        />
-                      )}
-
-                      {/* Drag area (middle) */}
-                      <div
-                        className="flex-1 px-2 py-1 overflow-hidden whitespace-nowrap select-none"
-                        onPointerDown={canEditDates ? (e) => handlePointerDown(e, task, 'move') : undefined}
-                        style={{ cursor: canEditDates ? 'grab' : 'default' }}
-                      >
-                        {width > 60 && task.name}
-                      </div>
-
-                      {/* Right resize handle */}
-                      {canEditDates && (
-                        <div
-                          className="absolute right-0 top-0 bottom-0 w-2 cursor-ew-resize z-20 hover:bg-black/20"
-                          onPointerDown={(e) => handlePointerDown(e, task, 'resize-right')}
-                        />
-                      )}
-                    </div>
-                  )}
-
-                  {/* No dates placeholder */}
-                  {!task.startDate && (
-                    <div className="absolute inset-y-0 left-2 flex items-center">
-                      <span className="text-[10px] text-muted-foreground/50">no dates</span>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )
-          })}
+            })}
+          </div>
         </div>
+
+        {/* Actual dates edit panel */}
+        {editTask && (
+          <div className="w-60 shrink-0 border rounded-lg bg-background p-4 flex flex-col gap-4 self-start">
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <p className="text-sm font-semibold leading-tight truncate">{editTask.task.name}</p>
+                <p className="text-xs text-muted-foreground mt-0.5">{editTask.label}</p>
+              </div>
+              <button
+                className="shrink-0 text-muted-foreground hover:text-foreground"
+                onClick={() => setEditTask(null)}
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            {(editTask.task.startDate || editTask.task.endDate) && (
+              <div className="space-y-1">
+                <div className="flex items-center gap-1.5">
+                  <div className={`h-2 w-2 rounded-sm shrink-0 ${STATUS_BG[editTask.task.status]}`} />
+                  <span className="text-xs font-medium">Planned</span>
+                </div>
+                <p className="text-xs text-muted-foreground pl-3.5">
+                  {editTask.task.startDate ? format(new Date(editTask.task.startDate), 'MMM d') : '?'}
+                  {' – '}
+                  {editTask.task.endDate ? format(new Date(editTask.task.endDate), 'MMM d, yyyy') : '?'}
+                </p>
+              </div>
+            )}
+
+            <div className="space-y-3">
+              <div className="flex items-center gap-1.5">
+                <div className="h-2 w-2 rounded-sm bg-emerald-500 shrink-0" />
+                <span className="text-xs font-medium">Actual Dates</span>
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs text-muted-foreground">Start</Label>
+                <Input
+                  type="date"
+                  className="h-7 text-xs"
+                  value={actualStart}
+                  onChange={(e) => setActualStart(e.target.value)}
+                />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs text-muted-foreground">End</Label>
+                <Input
+                  type="date"
+                  className="h-7 text-xs"
+                  value={actualEnd}
+                  onChange={(e) => setActualEnd(e.target.value)}
+                />
+              </div>
+            </div>
+
+            <Button size="sm" className="w-full" onClick={saveActualDates} disabled={savingActual}>
+              {savingActual ? 'Saving…' : 'Save Actual Dates'}
+            </Button>
+          </div>
+        )}
       </div>
 
       {/* Legend */}
@@ -402,6 +555,10 @@ export function ProjectGanttView({
             <span className="text-xs text-muted-foreground capitalize">{status.replace(/_/g, ' ').toLowerCase()}</span>
           </div>
         ))}
+        <div className="flex items-center gap-1.5">
+          <div className="h-2 w-4 rounded-sm bg-emerald-500/80" />
+          <span className="text-xs text-muted-foreground">Actual</span>
+        </div>
         {!canEditDates && (
           <span className="ml-auto text-xs text-muted-foreground">Only planners can edit dates</span>
         )}

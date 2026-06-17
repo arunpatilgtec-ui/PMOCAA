@@ -4,9 +4,8 @@ import { requireAuth } from '@/lib/auth'
 import { CATEGORY_TEMPLATES } from '@/lib/project-templates'
 import { addWorkingDays } from '@/lib/date-utils'
 
-const CHECKLIST_WS = new Set(['Planning', 'Deliverables'])
-
-// Adds missing template tasks to existing workstreams — non-destructive (never deletes).
+// Adds missing template tasks AND fills in dates for existing undated tasks.
+// Never deletes or modifies tasks that already have dates.
 export async function POST(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const session = await requireAuth()
@@ -27,57 +26,109 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
     if (!project) return Response.json({ error: 'Not found' }, { status: 404 })
 
     const wsTemplates = project.category ? CATEGORY_TEMPLATES[project.category] : undefined
-    if (!wsTemplates) return Response.json({ added: 0 })
+    if (!wsTemplates) return Response.json({ added: 0, updated: 0 })
 
     const leadId: string | null = project.leadId || null
     let totalAdded = 0
+    let totalUpdated = 0
 
     await prisma.$transaction(async (tx) => {
+      // cursor tracks the next available date as we sequence workstreams in template order
+      let cursor = new Date(project.startDate)
+      cursor.setHours(0, 0, 0, 0)
+
       for (const wsTemplate of wsTemplates) {
         const existingWs = project.workstreams.find((w) => w.name === wsTemplate.name)
-        if (!existingWs) continue // workstream doesn't exist yet — skip (setup handles creation)
+
+        if (!existingWs) {
+          // Workstream missing entirely — advance cursor by template duration so later
+          // workstreams still land in the right position
+          for (const tmpl of wsTemplate.tasks) {
+            const end = addWorkingDays(new Date(cursor), tmpl.durationDays - 1)
+            cursor = addWorkingDays(end, 1)
+          }
+          continue
+        }
 
         const existingNames = new Set(existingWs.tasks.map((t) => t.name))
-        const missingTasks = wsTemplate.tasks.filter((t) => !existingNames.has(t.name))
-        if (missingTasks.length === 0) continue
+        const datedTasks = existingWs.tasks.filter((t) => t.startDate && t.endDate)
 
-        const isChecklist = CHECKLIST_WS.has(wsTemplate.name)
-        let nextOrder = existingWs.tasks.length
+        if (datedTasks.length > 0) {
+          // Workstream already has dated tasks — lock them in place, advance cursor past the last one
+          const maxEnd = new Date(Math.max(...datedTasks.map((t) => new Date(t.endDate!).getTime())))
+          cursor = addWorkingDays(maxEnd, 1)
 
-        // For scheduled workstreams, new tasks go after the last existing task
-        const lastTask = existingWs.tasks[existingWs.tasks.length - 1]
-        let cursor: Date | null = lastTask?.endDate
-          ? addWorkingDays(new Date(lastTask.endDate), 1)
-          : null
+          // Still create any missing tasks at the tail of this workstream
+          const missingTasks = wsTemplate.tasks.filter((t) => !existingNames.has(t.name))
+          let nextOrder = existingWs.tasks.length
+          for (const tmpl of missingTasks) {
+            const taskStart = new Date(cursor)
+            const taskEnd = addWorkingDays(new Date(cursor), tmpl.durationDays - 1)
+            await tx.task.create({
+              data: {
+                name: tmpl.name,
+                workstreamId: existingWs.id,
+                status: 'BACKLOG',
+                priority: 'MEDIUM',
+                order: nextOrder++,
+                startDate: taskStart,
+                endDate: taskEnd,
+                estimatedHours: tmpl.estimatedHours,
+                ...((wsTemplate.name === 'Tear Down' || wsTemplate.name === 'Deliverables') && leadId
+                  ? { ownerId: leadId }
+                  : {}),
+              },
+            })
+            cursor = addWorkingDays(taskEnd, 1)
+            totalAdded++
+          }
+        } else {
+          // Workstream has NO dated tasks — fill in dates for every existing task from cursor
+          let taskCursor = new Date(cursor)
+          for (const task of existingWs.tasks) {
+            const tmpl = wsTemplate.tasks.find((t) => t.name === task.name)
+            const duration = tmpl?.durationDays ?? 1
+            const taskStart = new Date(taskCursor)
+            const taskEnd = addWorkingDays(taskStart, duration - 1)
+            await tx.task.update({
+              where: { id: task.id },
+              data: { startDate: taskStart, endDate: taskEnd },
+            })
+            taskCursor = addWorkingDays(taskEnd, 1)
+            totalUpdated++
+          }
 
-        for (const taskTemplate of missingTasks) {
-          const taskStart = !isChecklist && cursor ? new Date(cursor) : undefined
-          const taskEnd = !isChecklist && cursor
-            ? addWorkingDays(new Date(cursor), taskTemplate.durationDays - 1)
-            : undefined
+          // Also create any missing tasks right after the updated ones
+          const missingTasks = wsTemplate.tasks.filter((t) => !existingNames.has(t.name))
+          let nextOrder = existingWs.tasks.length
+          for (const tmpl of missingTasks) {
+            const taskStart = new Date(taskCursor)
+            const taskEnd = addWorkingDays(taskStart, tmpl.durationDays - 1)
+            await tx.task.create({
+              data: {
+                name: tmpl.name,
+                workstreamId: existingWs.id,
+                status: 'BACKLOG',
+                priority: 'MEDIUM',
+                order: nextOrder++,
+                startDate: taskStart,
+                endDate: taskEnd,
+                estimatedHours: tmpl.estimatedHours,
+                ...((wsTemplate.name === 'Tear Down' || wsTemplate.name === 'Deliverables') && leadId
+                  ? { ownerId: leadId }
+                  : {}),
+              },
+            })
+            taskCursor = addWorkingDays(taskEnd, 1)
+            totalAdded++
+          }
 
-          await tx.task.create({
-            data: {
-              name: taskTemplate.name,
-              workstreamId: existingWs.id,
-              status: 'BACKLOG',
-              priority: 'MEDIUM',
-              order: nextOrder++,
-              ...(taskStart ? { startDate: taskStart } : {}),
-              ...(taskEnd ? { endDate: taskEnd } : {}),
-              estimatedHours: taskTemplate.estimatedHours,
-              // Deliverables default to project lead; others unassigned
-              ...(wsTemplate.name === 'Deliverables' && leadId ? { ownerId: leadId } : {}),
-            },
-          })
-
-          if (cursor && taskEnd) cursor = addWorkingDays(taskEnd, 1)
-          totalAdded++
+          cursor = taskCursor
         }
       }
     })
 
-    return Response.json({ added: totalAdded })
+    return Response.json({ added: totalAdded, updated: totalUpdated })
   } catch (err: unknown) {
     if (err instanceof Error && err.message === 'Unauthorized') {
       return Response.json({ error: 'Unauthorized' }, { status: 401 })
