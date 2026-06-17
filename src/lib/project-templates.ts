@@ -59,6 +59,8 @@ const REFRIGERATION_TEMPLATE: WorkstreamTemplate[] = [
       t('Ice And Water', 1),
       t('Cooling System', 2),
       t('Control System', 3),
+      t('PCB', 2),
+      t('Harness', 2),
     ],
   },
   {
