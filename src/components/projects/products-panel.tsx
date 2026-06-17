@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useAuthStore } from '@/store/auth'
 import { toast } from 'sonner'
-import { Card, CardContent, CardHeader } from '@/components/ui/card'
+import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -13,7 +13,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select'
 import {
-  Plus, Pencil, Trash2, ChevronDown, ChevronRight, X, User2, History,
+  Plus, Pencil, Trash2, X, User2, History,
   ClipboardList, Users, Scale,
 } from 'lucide-react'
 import { format } from 'date-fns'
@@ -56,6 +56,18 @@ interface ProductFormState {
   resources: Array<{ userId: string; subsystems: string[]; costingTypes: string[] }>
 }
 
+interface ProductTask {
+  id: string
+  name: string
+  description?: string
+  status: string
+  priority: string
+  startDate?: string
+  endDate?: string
+  pctComplete?: number
+  owner?: { id: string; name: string }
+}
+
 // ── Subsystem sets per category ──────────────────────────────────────────────
 
 const SUBSYSTEMS_BY_CATEGORY: Record<string, string[]> = {
@@ -72,6 +84,23 @@ const SUBSYSTEMS_BY_CATEGORY: Record<string, string[]> = {
 
 const COSTING_TYPES = ['MECHANICAL', 'HARNESS', 'PCB'] as const
 const COSTING_LABELS: Record<string, string> = { MECHANICAL: 'Mechanical', HARNESS: 'Harness', PCB: 'PCB' }
+
+const STATUS_COLORS: Record<string, string> = {
+  BACKLOG: 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400',
+  PLANNED: 'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300',
+  IN_PROGRESS: 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900 dark:text-yellow-300',
+  REVIEW: 'bg-purple-100 text-purple-700 dark:bg-purple-900 dark:text-purple-300',
+  REWORK: 'bg-orange-100 text-orange-700 dark:bg-orange-900 dark:text-orange-300',
+  COMPLETED: 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300',
+  CANCELLED: 'bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300',
+}
+
+const PRIORITY_DOT: Record<string, string> = {
+  LOW: 'bg-slate-400',
+  MEDIUM: 'bg-blue-500',
+  HIGH: 'bg-orange-500',
+  CRITICAL: 'bg-red-500',
+}
 
 function emptyForm(): ProductFormState {
   return { brand: '', modelNo: '', leadId: '', resourceCount: '', resources: [] }
@@ -167,6 +196,227 @@ function ProductHistoryPanel({ productId, projectId }: { productId: string; proj
   )
 }
 
+// ── ProductDetailView ─────────────────────────────────────────────────────────
+
+function ProductDetailView({
+  product,
+  projectId,
+  tasks,
+  tasksLoading,
+  subsystems,
+  canManage,
+  onEdit,
+  onDelete,
+  deletingId,
+}: {
+  product: Product
+  projectId: string
+  tasks: ProductTask[]
+  tasksLoading: boolean
+  subsystems: string[]
+  canManage: boolean
+  onEdit: (p: Product, e: React.MouseEvent) => void
+  onDelete: (p: Product) => void
+  deletingId: string | null
+}) {
+  const now = new Date()
+  const avgPct = tasks.length > 0
+    ? Math.round(tasks.reduce((s, t) => s + (t.pctComplete ?? 0), 0) / tasks.length)
+    : null
+
+  return (
+    <div className="space-y-4">
+      {/* Edit / Delete actions */}
+      {canManage && (
+        <div className="flex justify-end gap-1">
+          <Button variant="ghost" size="icon" className="h-7 w-7" title="Edit product" onClick={(e) => onEdit(product, e)}>
+            <Pencil className="h-3.5 w-3.5" />
+          </Button>
+          <Button
+            variant="ghost" size="icon"
+            className="h-7 w-7 text-red-500 hover:text-red-600 hover:bg-red-50"
+            title="Remove product"
+            disabled={deletingId === product.id}
+            onClick={(e) => { e.stopPropagation(); onDelete(product) }}
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </Button>
+        </div>
+      )}
+
+      {/* Product summary card */}
+      <Card>
+        <CardContent className="p-4">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-lg font-semibold">{product.brand}</span>
+                {product.modelNo && (
+                  <span className="text-sm font-mono text-muted-foreground">{product.modelNo}</span>
+                )}
+              </div>
+              <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                {product.lead && (
+                  <Badge variant="outline" className="text-xs h-5">Lead: {product.lead.name}</Badge>
+                )}
+                <Badge variant="secondary" className="text-xs h-5">
+                  {product.resources.length}{product.resourceCount ? `/${product.resourceCount}` : ''} resource{product.resources.length !== 1 ? 's' : ''}
+                </Badge>
+                {avgPct !== null && (
+                  <Badge variant="outline" className="text-xs h-5">{avgPct}% complete</Badge>
+                )}
+              </div>
+            </div>
+          </div>
+          {avgPct !== null && (
+            <div className="mt-3">
+              <div className="h-1.5 bg-muted rounded-full overflow-hidden">
+                <div className="h-full bg-blue-500 rounded-full transition-all" style={{ width: `${avgPct}%` }} />
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Subsystem Tasks */}
+      <div className="space-y-2">
+        <div className="flex items-center gap-2">
+          <h3 className="text-sm font-semibold">Subsystem Tasks</h3>
+          {!tasksLoading && (
+            <Badge variant="secondary" className="text-xs">{tasks.length}</Badge>
+          )}
+        </div>
+
+        {tasksLoading ? (
+          <p className="text-xs text-muted-foreground py-3">Loading tasks…</p>
+        ) : tasks.length === 0 ? (
+          <div className="text-center py-8 text-muted-foreground border-2 border-dashed rounded-lg">
+            <p className="text-sm">No tasks yet</p>
+            <p className="text-xs mt-0.5">Assign resources with subsystems to generate tasks automatically</p>
+          </div>
+        ) : (
+          <div className="rounded-lg border border-border divide-y divide-border">
+            {tasks.map((task) => {
+              const isLate = task.endDate &&
+                new Date(task.endDate) < now &&
+                !['COMPLETED', 'CANCELLED'].includes(task.status)
+              const subName = task.name.includes(' — ') ? task.name.split(' — ').slice(1).join(' — ') : task.name
+              return (
+                <div key={task.id} className="flex items-center gap-3 px-3 py-2.5">
+                  <div className={`h-2 w-2 rounded-full shrink-0 ${PRIORITY_DOT[task.priority] ?? 'bg-slate-400'}`} />
+                  <div className="flex-1 min-w-0">
+                    <span className="text-sm font-medium">{subName}</span>
+                  </div>
+                  {task.owner && (
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <div className="h-5 w-5 rounded-full bg-blue-100 dark:bg-blue-900 flex items-center justify-center text-[9px] font-bold text-blue-700 dark:text-blue-300">
+                        {task.owner.name.split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase()}
+                      </div>
+                      <span className="text-xs text-muted-foreground hidden sm:inline">{task.owner.name.split(' ')[0]}</span>
+                    </div>
+                  )}
+                  {task.startDate && task.endDate && (
+                    <span className="text-xs text-muted-foreground shrink-0 tabular-nums hidden md:inline">
+                      {format(new Date(task.startDate), 'MMM d')} – {format(new Date(task.endDate), 'MMM d')}
+                    </span>
+                  )}
+                  <span className={`text-xs px-1.5 py-0.5 rounded shrink-0 ${STATUS_COLORS[task.status] ?? STATUS_COLORS.BACKLOG}`}>
+                    {task.status.replace('_', ' ')}
+                  </span>
+                  {isLate && (
+                    <span className="text-xs px-1.5 py-0.5 rounded bg-red-100 text-red-600 dark:bg-red-900/40 dark:text-red-400 shrink-0">
+                      Late
+                    </span>
+                  )}
+                  {task.pctComplete != null && task.pctComplete > 0 && task.pctComplete < 100 && (
+                    <span className="text-xs text-muted-foreground shrink-0 tabular-nums">{task.pctComplete}%</span>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* Resources */}
+      {product.resources.length > 0 && (
+        <div className="space-y-2">
+          <div className="flex items-center gap-2">
+            <Users className="h-4 w-4 text-muted-foreground" />
+            <h3 className="text-sm font-semibold">Resources</h3>
+          </div>
+          <div className="space-y-2">
+            {product.resources.map((r) => (
+              <div key={r.id} className="rounded-md border p-2.5">
+                <div className="flex items-center gap-2 mb-1.5">
+                  <div className="h-6 w-6 rounded-full bg-blue-100 dark:bg-blue-900 flex items-center justify-center text-[10px] font-bold text-blue-700 dark:text-blue-300 shrink-0">
+                    {r.user.name.split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase()}
+                  </div>
+                  <div>
+                    <span className="text-sm font-medium">{r.user.name}</span>
+                    <span className="text-xs text-muted-foreground ml-1.5 capitalize">
+                      {r.user.role.replace(/_/g, ' ').toLowerCase()}
+                    </span>
+                  </div>
+                </div>
+                {r.subsystems.length > 0 && (
+                  <div className="flex flex-wrap gap-1 mt-1">
+                    <span className="text-xs text-muted-foreground mr-0.5">Subsystems:</span>
+                    {r.subsystems.map((s) => (
+                      <span key={s} className="text-xs px-1.5 py-0.5 rounded bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800">{s}</span>
+                    ))}
+                  </div>
+                )}
+                {r.costingTypes.length > 0 && (
+                  <div className="flex flex-wrap gap-1 mt-1">
+                    <span className="text-xs text-muted-foreground mr-0.5">Costing:</span>
+                    {r.costingTypes.map((c) => (
+                      <span key={c} className="text-xs px-1.5 py-0.5 rounded bg-orange-50 dark:bg-orange-950/40 text-orange-700 dark:text-orange-300 border border-orange-200 dark:border-orange-800">{COSTING_LABELS[c] || c}</span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+
+          {/* Workload distribution */}
+          {product.resources.length >= 2 && subsystems.length > 0 && (
+            <div className="pt-2 space-y-1.5">
+              <div className="flex items-center gap-1.5">
+                <Scale className="h-3 w-3 text-muted-foreground" />
+                <p className="text-xs font-medium text-muted-foreground">Workload Distribution</p>
+              </div>
+              {product.resources.map((r) => {
+                const pct = Math.round((r.subsystems.length / subsystems.length) * 100)
+                return (
+                  <div key={r.id} className="flex items-center gap-2">
+                    <span className="text-xs w-20 truncate shrink-0 text-foreground/70">{r.user.name.split(' ')[0]}</span>
+                    <div className="flex-1 h-1.5 bg-muted rounded-full overflow-hidden">
+                      <div className="h-full bg-blue-500 rounded-full" style={{ width: `${pct}%` }} />
+                    </div>
+                    <span className="text-xs text-muted-foreground shrink-0 tabular-nums w-16 text-right">
+                      {r.subsystems.length}/{subsystems.length} · {pct}%
+                    </span>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* History */}
+      <div className="space-y-2">
+        <div className="flex items-center gap-2">
+          <History className="h-4 w-4 text-muted-foreground" />
+          <h3 className="text-sm font-semibold">History</h3>
+        </div>
+        <ProductHistoryPanel productId={product.id} projectId={projectId} />
+      </div>
+    </div>
+  )
+}
+
 // ── Main panel ────────────────────────────────────────────────────────────────
 
 export function ProductsPanel({
@@ -179,8 +429,9 @@ export function ProductsPanel({
   const { user } = useAuthStore()
   const [products, setProducts] = useState<Product[]>([])
   const [loading, setLoading] = useState(true)
-  const [expandedId, setExpandedId] = useState<string | null>(null)
-  const [expandedTab, setExpandedTab] = useState<Record<string, 'resources' | 'history'>>({})
+  const [selectedProductId, setSelectedProductId] = useState<string | null>(null)
+  const [allTasks, setAllTasks] = useState<ProductTask[]>([])
+  const [tasksLoading, setTasksLoading] = useState(true)
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editingProduct, setEditingProduct] = useState<Product | null>(null)
   const [form, setForm] = useState<ProductFormState>(emptyForm())
@@ -195,11 +446,9 @@ export function ProductsPanel({
   const subsystems = SUBSYSTEMS_BY_CATEGORY[project.category ?? ''] ?? []
   const allocatedUsers = project.allocations.map((a) => a.user)
 
-  // Fetch all users for dropdowns
   const [allUsers, setAllUsers] = useState<ProductUser[]>([])
   const [isLoadingUsers, setIsLoadingUsers] = useState(true)
   useEffect(() => {
-    // Fetch regardless of canManage so dropdowns are ready immediately
     setIsLoadingUsers(true)
     fetch('/api/users')
       .then((r) => r.json())
@@ -218,13 +467,23 @@ export function ProductsPanel({
     }
   }, [project.id])
 
+  useEffect(() => { load() }, [load])
+
   useEffect(() => {
-    load()
-  }, [load])
+    setTasksLoading(true)
+    fetch(`/api/tasks?projectId=${project.id}`)
+      .then((r) => r.json())
+      .then((d) => setAllTasks(Array.isArray(d) ? d : []))
+      .catch(() => {})
+      .finally(() => setTasksLoading(false))
+  }, [project.id])
+
+  function getProductTasks(productId: string): ProductTask[] {
+    return allTasks.filter((t) => t.description?.includes(`__productTask:${productId}:`))
+  }
 
   function openAdd() {
     setEditingProduct(null)
-    // Pre-populate one empty resource row so the UI is immediately obvious
     setForm({ ...emptyForm(), resources: [{ userId: '', subsystems: [], costingTypes: [] }] })
     setDialogOpen(true)
   }
@@ -274,6 +533,11 @@ export function ProductsPanel({
       if (!res.ok) throw new Error((await res.json()).error)
       toast.success(editingProduct ? 'Product updated' : 'Product added')
       setDialogOpen(false)
+      // Refresh tasks after save (subsystem tasks may have changed)
+      fetch(`/api/tasks?projectId=${project.id}`)
+        .then((r) => r.json())
+        .then((d) => setAllTasks(Array.isArray(d) ? d : []))
+        .catch(() => {})
       load()
       onRefresh()
     } catch (e: unknown) {
@@ -287,7 +551,16 @@ export function ProductsPanel({
       const res = await fetch(`/api/projects/${project.id}/products/${p.id}`, { method: 'DELETE' })
       if (!res.ok) throw new Error()
       toast.success('Product removed')
+      // Select adjacent product after deletion
+      const idx = products.findIndex((x) => x.id === p.id)
+      const next = products[idx + 1] ?? products[idx - 1] ?? null
+      setSelectedProductId(next?.id ?? null)
       load()
+      // Refresh tasks after delete
+      fetch(`/api/tasks?projectId=${project.id}`)
+        .then((r) => r.json())
+        .then((d) => setAllTasks(Array.isArray(d) ? d : []))
+        .catch(() => {})
       onRefresh()
     } catch {
       toast.error('Failed to remove product')
@@ -334,7 +607,6 @@ export function ProductsPanel({
     if (filledCount < 2) return
 
     setForm((f) => {
-      // Prefer assigning subsystems to MECHANICAL resources; fall back to all
       const filled = f.resources.map((r, i) => ({ r, i })).filter(({ r }) => r.userId)
       const mechanical = filled.filter(({ r }) => r.costingTypes.includes('MECHANICAL'))
       const targets = mechanical.length > 0 ? mechanical : filled
@@ -352,246 +624,83 @@ export function ProductsPanel({
     })
   }
 
-  function getTab(productId: string) {
-    return expandedTab[productId] ?? 'resources'
-  }
-
-  function setTab(productId: string, tab: 'resources' | 'history') {
-    setExpandedTab((t) => ({ ...t, [productId]: tab }))
-  }
-
-  // leadOptions: use allUsers once loaded, fall back to allocatedUsers only for the lead dropdown
   const leadOptions = allUsers.length > 0 ? allUsers : allocatedUsers
-  // resourceUserOptions: always use allUsers (never fall back to empty allocatedUsers)
   const resourceUserOptions = allUsers
+
+  // Auto-select first product once loaded
+  useEffect(() => {
+    if (products.length > 0 && !selectedProductId) {
+      setSelectedProductId(products[0].id)
+    }
+  }, [products, selectedProductId])
 
   if (loading) {
     return <div className="text-sm text-muted-foreground p-4">Loading products…</div>
   }
 
+  const selectedProduct = selectedProductId ? products.find((p) => p.id === selectedProductId) : null
+
   return (
-    <div className="space-y-4">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <p className="text-sm text-muted-foreground">
-          {products.length} product{products.length !== 1 ? 's' : ''}
-          {project.numberOfProducts ? ` of ${project.numberOfProducts} planned` : ''}
-        </p>
+    <div className="space-y-0">
+      {/* Product tab strip */}
+      <div className="flex items-center border-b border-border overflow-x-auto">
+        {products.map((p) => (
+          <button
+            key={p.id}
+            onClick={() => setSelectedProductId(p.id)}
+            className={`px-3 py-2 text-sm whitespace-nowrap border-b-2 -mb-px transition-colors ${
+              selectedProductId === p.id
+                ? 'border-blue-500 text-blue-600 dark:text-blue-400 font-medium'
+                : 'border-transparent text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            {p.brand}{p.modelNo ? ` ${p.modelNo}` : ''}
+          </button>
+        ))}
         {canManage && (
-          <Button size="sm" onClick={openAdd}>
-            <Plus className="mr-1.5 h-3.5 w-3.5" /> Add Product
-          </Button>
+          <button
+            onClick={openAdd}
+            className="px-3 py-2 text-sm whitespace-nowrap border-b-2 border-transparent text-muted-foreground hover:text-foreground flex items-center gap-1 -mb-px"
+          >
+            <Plus className="h-3.5 w-3.5" /> Add
+          </button>
         )}
       </div>
 
-      {/* Empty state */}
-      {products.length === 0 ? (
-        <div className="text-center py-14 text-muted-foreground border-2 border-dashed rounded-lg">
-          <User2 className="h-10 w-10 mx-auto mb-3 opacity-30" />
-          <p className="text-sm font-medium">No products added yet</p>
-          {canManage && (
-            <Button variant="link" className="mt-1 text-xs" onClick={openAdd}>Add the first product</Button>
-          )}
-        </div>
-      ) : (
-        <div className="space-y-3">
-          {products.map((p) => {
-            const isOpen = expandedId === p.id
-            const tab = getTab(p.id)
-            const assignedCount = p.resources.length
-            const plannedCount = p.resourceCount
+      {/* Tab content */}
+      <div className="pt-4">
+        {products.length === 0 ? (
+          <div className="text-center py-14 text-muted-foreground border-2 border-dashed rounded-lg mt-4">
+            <User2 className="h-10 w-10 mx-auto mb-3 opacity-30" />
+            <p className="text-sm font-medium">No products added yet</p>
+            {canManage && (
+              <Button variant="link" className="mt-1 text-xs" onClick={openAdd}>Add the first product</Button>
+            )}
+          </div>
+        ) : selectedProduct ? (
+          <ProductDetailView
+            product={selectedProduct}
+            projectId={project.id}
+            tasks={getProductTasks(selectedProduct.id)}
+            tasksLoading={tasksLoading}
+            subsystems={subsystems}
+            canManage={canManage}
+            onEdit={openEdit}
+            onDelete={(p) => setDeleteConfirm(p)}
+            deletingId={deletingId}
+          />
+        ) : null}
+      </div>
 
-            return (
-              <Card key={p.id} className="overflow-hidden">
-                {/* Card header row */}
-                <CardHeader
-                  className="p-3 cursor-pointer hover:bg-muted/30 transition-colors"
-                  onClick={() => setExpandedId(isOpen ? null : p.id)}
-                >
-                  <div className="flex items-center gap-3">
-                    {isOpen
-                      ? <ChevronDown className="h-4 w-4 text-muted-foreground shrink-0" />
-                      : <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" />
-                    }
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-sm font-semibold">{p.brand}</span>
-                        {p.modelNo && (
-                          <span className="text-xs text-muted-foreground font-mono">{p.modelNo}</span>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
-                        {p.lead && (
-                          <Badge variant="outline" className="text-xs h-5">
-                            Lead: {p.lead.name}
-                          </Badge>
-                        )}
-                        <Badge variant="secondary" className="text-xs h-5">
-                          {assignedCount}{plannedCount ? `/${plannedCount}` : ''} resource{assignedCount !== 1 ? 's' : ''}
-                        </Badge>
-                      </div>
-                    </div>
-                    {canManage && (
-                      <div className="flex gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
-                        <Button variant="ghost" size="icon" className="h-7 w-7" title="Edit product" onClick={(e) => openEdit(p, e)}>
-                          <Pencil className="h-3.5 w-3.5" />
-                        </Button>
-                        <Button
-                          variant="ghost" size="icon"
-                          className="h-7 w-7 text-red-500 hover:text-red-600 hover:bg-red-50"
-                          title="Remove product"
-                          disabled={deletingId === p.id}
-                          onClick={(e) => { e.stopPropagation(); setDeleteConfirm(p) }}
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </Button>
-                      </div>
-                    )}
-                  </div>
-                </CardHeader>
+      {renderDialog()}
+      {renderDeleteConfirm()}
+    </div>
+  )
 
-                {/* Expanded content */}
-                {isOpen && (
-                  <CardContent className="p-0 border-t border-border/50">
-                    {/* Tab switcher */}
-                    <div className="flex gap-0 border-b border-border/50">
-                      <button
-                        className={`flex items-center gap-1.5 px-4 py-2 text-xs font-medium transition-colors border-b-2 -mb-px ${
-                          tab === 'resources'
-                            ? 'border-primary text-foreground'
-                            : 'border-transparent text-muted-foreground hover:text-foreground'
-                        }`}
-                        onClick={() => setTab(p.id, 'resources')}
-                      >
-                        <Users className="h-3.5 w-3.5" /> Resources
-                      </button>
-                      <button
-                        className={`flex items-center gap-1.5 px-4 py-2 text-xs font-medium transition-colors border-b-2 -mb-px ${
-                          tab === 'history'
-                            ? 'border-primary text-foreground'
-                            : 'border-transparent text-muted-foreground hover:text-foreground'
-                        }`}
-                        onClick={() => setTab(p.id, 'history')}
-                      >
-                        <History className="h-3.5 w-3.5" /> History
-                      </button>
-                    </div>
+  // ── Shared dialog renderers ───────────────────────────────────────────────
 
-                    <div className="p-3">
-                      {/* Resources tab */}
-                      {tab === 'resources' && (
-                        <>
-                          {p.resources.length === 0 ? (
-                            <div className="text-xs text-muted-foreground py-3 text-center">
-                              No resources assigned
-                              {plannedCount && assignedCount < plannedCount && (
-                                <span> ({plannedCount - assignedCount} slot{plannedCount - assignedCount !== 1 ? 's' : ''} open)</span>
-                              )}
-                            </div>
-                          ) : (
-                            <div className="space-y-2">
-                              {p.resources.map((r) => (
-                                <div key={r.id} className="rounded-md border p-2.5">
-                                  <div className="flex items-center gap-2 mb-1.5">
-                                    <div className="h-6 w-6 rounded-full bg-blue-100 dark:bg-blue-900 flex items-center justify-center text-[10px] font-bold text-blue-700 dark:text-blue-300 shrink-0">
-                                      {r.user.name.split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase()}
-                                    </div>
-                                    <div>
-                                      <span className="text-sm font-medium">{r.user.name}</span>
-                                      <span className="text-xs text-muted-foreground ml-1.5 capitalize">
-                                        {r.user.role.replace(/_/g, ' ').toLowerCase()}
-                                      </span>
-                                    </div>
-                                  </div>
-                                  {r.subsystems.length > 0 && (
-                                    <div className="flex flex-wrap gap-1 mt-1">
-                                      <span className="text-xs text-muted-foreground mr-0.5">Subsystems:</span>
-                                      {r.subsystems.map((s) => (
-                                        <span key={s} className="text-xs px-1.5 py-0.5 rounded bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800">{s}</span>
-                                      ))}
-                                    </div>
-                                  )}
-                                  {r.costingTypes.length > 0 && (
-                                    <div className="flex flex-wrap gap-1 mt-1">
-                                      <span className="text-xs text-muted-foreground mr-0.5">Costing:</span>
-                                      {r.costingTypes.map((c) => (
-                                        <span key={c} className="text-xs px-1.5 py-0.5 rounded bg-orange-50 dark:bg-orange-950/40 text-orange-700 dark:text-orange-300 border border-orange-200 dark:border-orange-800">{COSTING_LABELS[c] || c}</span>
-                                      ))}
-                                    </div>
-                                  )}
-                                </div>
-                              ))}
-                            </div>
-                          )}
-
-                          {/* Workload distribution (shown when 2+ resources and category has subsystems) */}
-                          {p.resources.length >= 2 && subsystems.length > 0 && (
-                            <div className="mt-3 pt-2.5 border-t border-border/40 space-y-1.5">
-                              <div className="flex items-center gap-1.5">
-                                <Scale className="h-3 w-3 text-muted-foreground" />
-                                <p className="text-xs font-medium text-muted-foreground">Workload Distribution</p>
-                              </div>
-                              {p.resources.map((r) => {
-                                const pct = Math.round((r.subsystems.length / subsystems.length) * 100)
-                                return (
-                                  <div key={r.id} className="flex items-center gap-2">
-                                    <span className="text-xs w-20 truncate shrink-0 text-foreground/70">
-                                      {r.user.name.split(' ')[0]}
-                                    </span>
-                                    <div className="flex-1 h-1.5 bg-muted rounded-full overflow-hidden">
-                                      <div
-                                        className="h-full bg-blue-500 rounded-full transition-all duration-500"
-                                        style={{ width: `${pct}%` }}
-                                      />
-                                    </div>
-                                    <span className="text-xs text-muted-foreground shrink-0 tabular-nums w-16 text-right">
-                                      {r.subsystems.length}/{subsystems.length} · {pct}%
-                                    </span>
-                                  </div>
-                                )
-                              })}
-                              {(() => {
-                                const assigned = new Set(p.resources.flatMap((r) => r.subsystems))
-                                const uncovered = subsystems.filter((s) => !assigned.has(s))
-                                if (uncovered.length === subsystems.length) return null
-                                return uncovered.length > 0 ? (
-                                  <p className="text-[11px] text-amber-600 dark:text-amber-400 pt-0.5">
-                                    ⚠ {uncovered.length} subsystem{uncovered.length !== 1 ? 's' : ''} not yet assigned
-                                  </p>
-                                ) : (
-                                  <p className="text-[11px] text-green-600 dark:text-green-400 pt-0.5">
-                                    ✓ All {subsystems.length} subsystems assigned
-                                  </p>
-                                )
-                              })()}
-                            </div>
-                          )}
-
-                          {canManage && (
-                            <Button
-                              variant="outline" size="sm" className="h-7 text-xs mt-3 w-full"
-                              onClick={(e) => openEdit(p, e)}
-                            >
-                              <Pencil className="h-3 w-3 mr-1" /> Edit / Reassign Resources
-                            </Button>
-                          )}
-                        </>
-                      )}
-
-                      {/* History tab */}
-                      {tab === 'history' && (
-                        <ProductHistoryPanel productId={p.id} projectId={project.id} />
-                      )}
-                    </div>
-                  </CardContent>
-                )}
-              </Card>
-            )
-          })}
-        </div>
-      )}
-
-      {/* ── Add / Edit Dialog ── */}
+  function renderDialog() {
+    return (
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
@@ -601,7 +710,6 @@ export function ProductsPanel({
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
-            {/* Basic fields */}
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <Label>Brand *</Label>
@@ -652,7 +760,6 @@ export function ProductsPanel({
               </div>
             </div>
 
-            {/* Resources */}
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <Label>Assigned Resources</Label>
@@ -680,7 +787,6 @@ export function ProductsPanel({
                 const personName = resourceUserOptions.find((u) => u.id === r.userId)?.name
                 return (
                   <div key={i} className="rounded-md border p-3 space-y-3 bg-muted/20">
-                    {/* Person selector */}
                     <div className="flex items-center gap-2">
                       <div className="flex-1">
                         <Select
@@ -714,7 +820,6 @@ export function ProductsPanel({
                       </Button>
                     </div>
 
-                    {/* Subsystem assignment */}
                     {subsystems.length > 0 && (
                       <div className="space-y-1.5">
                         <Label className="text-xs text-muted-foreground">Subsystems</Label>
@@ -736,7 +841,6 @@ export function ProductsPanel({
                       </div>
                     )}
 
-                    {/* Costing types */}
                     <div className="space-y-1.5">
                       <Label className="text-xs text-muted-foreground">Costing Responsibility</Label>
                       <div className="flex gap-2">
@@ -769,8 +873,11 @@ export function ProductsPanel({
           </div>
         </DialogContent>
       </Dialog>
+    )
+  }
 
-      {/* ── Delete Confirmation ── */}
+  function renderDeleteConfirm() {
+    return (
       <Dialog open={!!deleteConfirm} onOpenChange={(v) => { if (!v) setDeleteConfirm(null) }}>
         <DialogContent className="max-w-sm">
           <DialogHeader>
@@ -791,6 +898,6 @@ export function ProductsPanel({
           </div>
         </DialogContent>
       </Dialog>
-    </div>
-  )
+    )
+  }
 }
