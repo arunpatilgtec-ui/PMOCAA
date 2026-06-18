@@ -54,6 +54,17 @@ export async function POST(req: NextRequest, ctx: RouteContext<'/api/schedule-ch
             },
           }).catch(() => {})
         }
+
+        // If the change extends the overall project timeline, update project dates too
+        if (change.projectId && (proposedData.projectStartDate || proposedData.projectEndDate)) {
+          await prisma.project.update({
+            where: { id: change.projectId },
+            data: {
+              ...(proposedData.projectStartDate ? { startDate: new Date(proposedData.projectStartDate as string) } : {}),
+              ...(proposedData.projectEndDate ? { endDate: new Date(proposedData.projectEndDate as string) } : {}),
+            },
+          }).catch(() => {})
+        }
       }
 
       await prisma.scheduleChange.update({

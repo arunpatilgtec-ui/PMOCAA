@@ -16,7 +16,7 @@ import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import {
   ChevronLeft, ChevronRight, ZoomIn, ZoomOut,
   LayoutList, FolderKanban, X, Save, Search,
-  GripHorizontal,
+  GripHorizontal, Lock, AlertTriangle,
 } from 'lucide-react'
 import { useAuthStore } from '@/store/auth'
 import { toast } from 'sonner'
@@ -39,6 +39,8 @@ interface Project {
   startDate?: string; endDate?: string
   status: string; priority?: string
   description?: string
+  planStatus?: string
+  leadId?: string | null
 }
 
 interface EditForm {
@@ -113,14 +115,29 @@ export default function GanttPage() {
   const zoomRef = useRef(zoom)
   const canEditRef = useRef(false)
   const localTasksRef = useRef<Task[]>([])
+  const userRef = useRef(user)
+  const projectsRef = useRef<Project[]>([])
 
   useEffect(() => { zoomRef.current = zoom }, [zoom])
   useEffect(() => {
-    canEditRef.current = !!(user && ['ADMIN', 'MANAGER', 'PLANNER', 'PROJECT_LEAD'].includes(user.role))
+    userRef.current = user
+    canEditRef.current = !!(user && ['ADMIN', 'PLANNER', 'PROJECT_LEAD'].includes(user.role))
   }, [user])
   useEffect(() => { localTasksRef.current = localTasks }, [localTasks])
+  useEffect(() => { projectsRef.current = projects }, [projects])
 
-  const canEdit = !!(user && ['ADMIN', 'MANAGER', 'PLANNER', 'PROJECT_LEAD'].includes(user.role))
+  // Can this user edit tasks in a specific project?
+  function taskIsEditable(task: Task): boolean {
+    if (!user) return false
+    if (['ADMIN', 'PLANNER'].includes(user.role)) return true
+    if (user.role === 'PROJECT_LEAD') {
+      const proj = projects.find(p => p.id === task.workstream.project.id)
+      return proj?.leadId === user.id
+    }
+    return false
+  }
+
+  const canEdit = !!(user && ['ADMIN', 'PLANNER', 'PROJECT_LEAD'].includes(user.role))
 
   // Load tasks + projects
   useEffect(() => {
@@ -207,45 +224,122 @@ export default function GanttPage() {
       const d = dragRef.current
       dragRef.current = null
       setIsDragging(false)
-
       if (!d) return
 
+      const task = localTasksRef.current.find(t => t.id === d.taskId)
+
       if (!d.moved) {
-        // Pure click → open edit panel
-        if (canEditRef.current) {
-          const task = localTasksRef.current.find(t => t.id === d.taskId)
-          if (task) {
-            setEditForm({
-              taskId: task.id, name: task.name, status: task.status,
-              startDate: task.startDate?.slice(0, 10) ?? '',
-              endDate: task.endDate?.slice(0, 10) ?? '',
-              ownerId: task.ownerId ?? '',
-              projName: task.workstream.project.name,
-              wsName: task.workstream.name,
-            })
-          }
+        // Pure click → open edit panel for authorized users
+        if (canEditRef.current && task) {
+          setEditForm({
+            taskId: task.id, name: task.name, status: task.status,
+            startDate: task.startDate?.slice(0, 10) ?? '',
+            endDate: task.endDate?.slice(0, 10) ?? '',
+            ownerId: task.ownerId ?? '',
+            projName: task.workstream.project.name,
+            wsName: task.workstream.name,
+          })
         }
         return
       }
 
-      // Dragged → save new dates
-      try {
-        const res = await fetch(`/api/tasks/${d.taskId}`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ startDate: d.currentStart, endDate: d.currentEnd }),
-        })
-        if (!res.ok) {
+      if (!task) return
+
+      // Permission check
+      const u = userRef.current
+      const taskProject = projectsRef.current.find(p => p.id === task.workstream.project.id)
+      const isAdminOrPlanner = u && ['ADMIN', 'PLANNER'].includes(u.role)
+      const isTaskLead = u?.role === 'PROJECT_LEAD' && taskProject?.leadId === u.id
+
+      if (!isAdminOrPlanner && !isTaskLead) {
+        setLocalTasks(prev => prev.map(t =>
+          t.id === d.taskId ? { ...t, startDate: d.origStart, endDate: d.origEnd } : t
+        ))
+        toast.error('Only the project lead, planner, or admin can edit this plan')
+        return
+      }
+
+      const isLocked = taskProject && taskProject.planStatus !== 'DRAFT'
+
+      if (isLocked) {
+        const projStart = taskProject?.startDate ? new Date(taskProject.startDate) : null
+        const projEnd = taskProject?.endDate ? new Date(taskProject.endDate) : null
+        const newStart = new Date(d.currentStart)
+        const newEnd = new Date(d.currentEnd)
+        const extendsBounds = projStart && projEnd && (newStart < projStart || newEnd > projEnd)
+
+        if (extendsBounds) {
+          // Revert visual state — change goes for approval
+          setLocalTasks(prev => prev.map(t =>
+            t.id === d.taskId ? { ...t, startDate: d.origStart, endDate: d.origEnd } : t
+          ))
+          try {
+            const res = await fetch('/api/schedule-changes', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                changeType: 'TIMELINE_CHANGE_REQUESTED',
+                description: `Task "${task.name}" proposes dates outside the committed project timeline`,
+                projectId: task.workstream.project.id,
+                affectedTaskIds: [d.taskId],
+                currentData: { startDate: d.origStart, endDate: d.origEnd },
+                proposedData: {
+                  startDate: d.currentStart,
+                  endDate: d.currentEnd,
+                  ...(projStart && newStart < projStart ? { projectStartDate: d.currentStart } : {}),
+                  ...(projEnd && newEnd > projEnd ? { projectEndDate: d.currentEnd } : {}),
+                },
+              }),
+            })
+            if (res.ok) {
+              toast.info('Change submitted for planner approval — dates will update once approved')
+            } else {
+              toast.error('Failed to submit change request')
+            }
+          } catch {
+            toast.error('Failed to submit change request')
+          }
+        } else {
+          // Within project bounds — apply directly
+          try {
+            const res = await fetch(`/api/tasks/${d.taskId}`, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ startDate: d.currentStart, endDate: d.currentEnd }),
+            })
+            if (!res.ok) {
+              setLocalTasks(prev => prev.map(t =>
+                t.id === d.taskId ? { ...t, startDate: d.origStart, endDate: d.origEnd } : t
+              ))
+              toast.error('Failed to update task dates')
+            }
+          } catch {
+            setLocalTasks(prev => prev.map(t =>
+              t.id === d.taskId ? { ...t, startDate: d.origStart, endDate: d.origEnd } : t
+            ))
+            toast.error('Failed to update task dates')
+          }
+        }
+      } else {
+        // Plan is DRAFT — save directly
+        try {
+          const res = await fetch(`/api/tasks/${d.taskId}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ startDate: d.currentStart, endDate: d.currentEnd }),
+          })
+          if (!res.ok) {
+            setLocalTasks(prev => prev.map(t =>
+              t.id === d.taskId ? { ...t, startDate: d.origStart, endDate: d.origEnd } : t
+            ))
+            toast.error('Failed to update task dates')
+          }
+        } catch {
           setLocalTasks(prev => prev.map(t =>
             t.id === d.taskId ? { ...t, startDate: d.origStart, endDate: d.origEnd } : t
           ))
           toast.error('Failed to update task dates')
         }
-      } catch {
-        setLocalTasks(prev => prev.map(t =>
-          t.id === d.taskId ? { ...t, startDate: d.origStart, endDate: d.origEnd } : t
-        ))
-        toast.error('Failed to update task dates')
       }
     }
 
@@ -258,7 +352,8 @@ export default function GanttPage() {
   }, []) // empty deps — uses refs
 
   function startDrag(e: React.MouseEvent, taskId: string, type: 'move' | 'resize') {
-    if (!canEdit) return
+    const t = localTasksRef.current.find(tt => tt.id === taskId)
+    if (!t || !taskIsEditable(t)) return
     e.stopPropagation()
     e.preventDefault()
     const task = localTasksRef.current.find(t => t.id === taskId)
@@ -276,31 +371,98 @@ export default function GanttPage() {
     if (!editForm) return
     setEditSaving(true)
     try {
-      const res = await fetch(`/api/tasks/${editForm.taskId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: editForm.name,
-          status: editForm.status,
-          startDate: editForm.startDate || null,
-          endDate: editForm.endDate || null,
-          ownerId: editForm.ownerId || null,
-        }),
-      })
-      if (!res.ok) { toast.error('Failed to save task'); return }
-      const updated = await res.json()
-      const patch = {
-        name: updated.name, status: updated.status,
-        startDate: updated.startDate ? (updated.startDate as string).slice(0, 10) : undefined,
-        endDate: updated.endDate ? (updated.endDate as string).slice(0, 10) : undefined,
-        ownerId: updated.ownerId ?? undefined,
-        owner: updated.owner,
+      const task = localTasks.find(t => t.id === editForm.taskId)
+      const taskProject = projects.find(p => p.id === task?.workstream.project.id)
+
+      // Permission check
+      const isAdminOrPlanner = user && ['ADMIN', 'PLANNER'].includes(user.role)
+      const isTaskLead = user?.role === 'PROJECT_LEAD' && taskProject?.leadId === user.id
+      if (!isAdminOrPlanner && !isTaskLead) {
+        toast.error('Only the project lead, planner, or admin can edit this plan')
+        return
       }
-      setLocalTasks(prev => prev.map(t => t.id === editForm.taskId ? { ...t, ...patch } : t))
-      setTasks(prev => prev.map(t => t.id === editForm.taskId ? { ...t, ...patch } : t))
-      toast.success('Task saved')
-      setEditForm(null)
-      setUserSearch('')
+
+      const isLocked = taskProject && taskProject.planStatus !== 'DRAFT'
+      const origTask = tasks.find(t => t.id === editForm.taskId)
+      const origStart = origTask?.startDate?.slice(0, 10) ?? ''
+      const origEnd = origTask?.endDate?.slice(0, 10) ?? ''
+      const datesChanging = editForm.startDate !== origStart || editForm.endDate !== origEnd
+
+      // Check if new dates extend project bounds
+      let needsApproval = false
+      if (isLocked && datesChanging && editForm.startDate && editForm.endDate) {
+        const projStart = taskProject?.startDate ? new Date(taskProject.startDate) : null
+        const projEnd = taskProject?.endDate ? new Date(taskProject.endDate) : null
+        const newStart = new Date(editForm.startDate)
+        const newEnd = new Date(editForm.endDate)
+        needsApproval = !!(projStart && projEnd && (newStart < projStart || newEnd > projEnd))
+      }
+
+      if (needsApproval) {
+        // Save non-date fields immediately; submit date change for approval
+        const nonDateRes = await fetch(`/api/tasks/${editForm.taskId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: editForm.name, status: editForm.status, ownerId: editForm.ownerId || null }),
+        })
+        const projStart = taskProject?.startDate ? new Date(taskProject.startDate) : null
+        const projEnd = taskProject?.endDate ? new Date(taskProject.endDate) : null
+        const newStart = new Date(editForm.startDate)
+        const newEnd = new Date(editForm.endDate)
+        await fetch('/api/schedule-changes', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            changeType: 'TIMELINE_CHANGE_REQUESTED',
+            description: `Task "${editForm.name}" proposes dates outside the committed project timeline`,
+            projectId: task?.workstream.project.id,
+            affectedTaskIds: [editForm.taskId],
+            currentData: { startDate: origTask?.startDate, endDate: origTask?.endDate },
+            proposedData: {
+              startDate: editForm.startDate,
+              endDate: editForm.endDate,
+              ...(projStart && newStart < projStart ? { projectStartDate: editForm.startDate } : {}),
+              ...(projEnd && newEnd > projEnd ? { projectEndDate: editForm.endDate } : {}),
+            },
+          }),
+        })
+        if (nonDateRes.ok) {
+          const updated = await nonDateRes.json()
+          const patch = { name: updated.name, status: updated.status, ownerId: updated.ownerId ?? undefined, owner: updated.owner }
+          setLocalTasks(prev => prev.map(t => t.id === editForm.taskId ? { ...t, ...patch } : t))
+          setTasks(prev => prev.map(t => t.id === editForm.taskId ? { ...t, ...patch } : t))
+        }
+        toast.info('Date change submitted for planner approval')
+        setEditForm(null)
+        setUserSearch('')
+      } else {
+        // Apply everything directly
+        const res = await fetch(`/api/tasks/${editForm.taskId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: editForm.name,
+            status: editForm.status,
+            startDate: editForm.startDate || null,
+            endDate: editForm.endDate || null,
+            ownerId: editForm.ownerId || null,
+          }),
+        })
+        if (!res.ok) { toast.error('Failed to save task'); return }
+        const updated = await res.json()
+        const patch = {
+          name: updated.name, status: updated.status,
+          startDate: updated.startDate ? (updated.startDate as string).slice(0, 10) : undefined,
+          endDate: updated.endDate ? (updated.endDate as string).slice(0, 10) : undefined,
+          ownerId: updated.ownerId ?? undefined,
+          owner: updated.owner,
+        }
+        setLocalTasks(prev => prev.map(t => t.id === editForm.taskId ? { ...t, ...patch } : t))
+        setTasks(prev => prev.map(t => t.id === editForm.taskId ? { ...t, ...patch } : t))
+        toast.success('Task saved')
+        setEditForm(null)
+        setUserSearch('')
+      }
     } finally {
       setEditSaving(false)
     }
@@ -433,14 +595,15 @@ export default function GanttPage() {
     const clampedLeft = Math.max(0, left)
     const clampedWidth = Math.min(width, days.length * dayW - clampedLeft)
 
+    const editable = taskIsEditable(task)
     return (
       <div
         className={`absolute top-1/2 -translate-y-1/2 rounded overflow-hidden ${barBg} text-white select-none ${
-          canEdit ? 'cursor-grab active:cursor-grabbing' : ''
+          editable ? 'cursor-grab active:cursor-grabbing' : ''
         } ${isEditing ? 'ring-2 ring-white ring-offset-1' : ''}`}
         style={{ left: clampedLeft, width: clampedWidth, height: 24 }}
         title={`${task.name}${task.owner ? ` · ${task.owner.name}` : ''} · ${task.status}`}
-        onMouseDown={canEdit ? (e) => startDrag(e, task.id, 'move') : undefined}
+        onMouseDown={editable ? (e) => startDrag(e, task.id, 'move') : undefined}
       >
         {/* Progress overlay */}
         {pct > 0 && (
@@ -451,7 +614,7 @@ export default function GanttPage() {
           {dayW >= 28 ? task.name : ''}
         </span>
         {/* Resize handle — right edge */}
-        {canEdit && (
+        {editable && (
           <div
             className="absolute right-0 top-0 bottom-0 w-5 flex items-center justify-center cursor-col-resize hover:bg-black/20 z-20"
             onMouseDown={(e) => { e.stopPropagation(); startDrag(e, task.id, 'resize') }}
@@ -526,6 +689,21 @@ export default function GanttPage() {
           <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => setZoom(z => Math.max(z - 0.25, 0.5))}><ZoomOut className="h-4 w-4" /></Button>
         </div>
       </div>
+
+      {/* Lock banner — shown when a specific project is selected and its plan is committed */}
+      {(() => {
+        const selProj = selectedProject !== 'ALL' ? projects.find(p => p.id === selectedProject) : null
+        if (!selProj || selProj.planStatus === 'DRAFT' || !selProj.planStatus) return null
+        return (
+          <div className="flex items-center gap-2 mb-3 px-3 py-2 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-sm shrink-0">
+            <Lock className="h-4 w-4 shrink-0" />
+            <span>
+              Plan is <strong>{selProj.planStatus.replace('_', ' ')}</strong> — changes within the project timeline apply directly.
+              Date changes that extend the overall project start/end will be sent to the planner for approval.
+            </span>
+          </div>
+        )
+      })()}
 
       {/* Main area + edit panel side-by-side */}
       <div className="flex-1 min-h-0 flex gap-4 overflow-hidden">
