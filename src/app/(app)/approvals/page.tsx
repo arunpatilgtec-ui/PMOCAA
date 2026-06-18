@@ -321,6 +321,10 @@ export default function ApprovalsPage() {
               {wRequests.map((req) => {
                 const ia = inlineAssign[req.id] ?? { assigneeId: req.assignee?.id ?? '', estimatedHours: req.estimatedHours?.toString() ?? '' }
                 const isDirty = ia.assigneeId !== (req.assignee?.id ?? '') || ia.estimatedHours !== (req.estimatedHours?.toString() ?? '')
+                // Include current assignee in dropdown even if they're not in the active members list
+                const selectMembers = (ia.assigneeId && ia.assigneeId !== 'none' && !teamMembers.some(m => m.id === ia.assigneeId) && req.assignee)
+                  ? [...teamMembers, { id: req.assignee.id, name: req.assignee.name, role: '', capacityPct: 0 }]
+                  : teamMembers
                 return (
                 <Card key={req.id} className={req.status === 'REJECTED' ? 'opacity-60' : ''}>
                   <CardContent className="p-4 space-y-3">
@@ -379,10 +383,16 @@ export default function ApprovalsPage() {
                               setInlineAssign(prev => ({ ...prev, [req.id]: { ...ia, assigneeId: (!s || s === 'none') ? '' : s } }))
                             }}
                           >
-                            <SelectTrigger className="h-7 text-xs"><SelectValue placeholder="Unassigned" /></SelectTrigger>
+                            <SelectTrigger className="h-7 text-xs">
+                              <SelectValue placeholder="Unassigned">
+                                {ia.assigneeId && ia.assigneeId !== 'none'
+                                  ? (selectMembers.find(m => m.id === ia.assigneeId)?.name ?? '')
+                                  : ''}
+                              </SelectValue>
+                            </SelectTrigger>
                             <SelectContent>
                               <SelectItem value="none">— Unassigned —</SelectItem>
-                              {teamMembers.map(m => (
+                              {selectMembers.map(m => (
                                 <SelectItem key={m.id} value={m.id}>{m.name}
                                   {m.department ? ` · ${m.department}` : ''}
                                 </SelectItem>

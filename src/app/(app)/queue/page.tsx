@@ -240,9 +240,14 @@ export default function QueuePage() {
         </div>
         <div className="flex items-center gap-2">
           {canPickUser && (
-            <Select value={selectedUserId} onValueChange={(v) => setSelectedUserId(v ?? '')}>
+            <Select
+              value={selectedUserId}
+              onValueChange={(v) => setSelectedUserId(v ?? '')}
+            >
               <SelectTrigger className="w-48 h-9">
-                <SelectValue placeholder="Select resource…" />
+                <SelectValue placeholder="Select resource…">
+                  {userOptions.find(u => u.id === selectedUserId)?.name ?? ''}
+                </SelectValue>
               </SelectTrigger>
               <SelectContent>
                 {userOptions.map(u => (
