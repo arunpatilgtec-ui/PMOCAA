@@ -231,7 +231,7 @@ export default function ProjectDetailPage() {
     setEditCategory(project.category || '')
     setEditProductType(project.productType || '')
     setEditProjectOpen(true)
-    if (user && isPlanner(user.role) && editUsers.length === 0) {
+    if (canEditProject && editUsers.length === 0) {
       fetch('/api/users')
         .then((r) => r.json())
         .then((d) => setEditUsers(Array.isArray(d) ? d.filter((u: { isActive: boolean }) => u.isActive) : []))
@@ -242,7 +242,7 @@ export default function ProjectDetailPage() {
     setEditSaving(true)
     try {
       const body: Record<string, unknown> = { name: editName, status: editStatus, priority: editPriority }
-      if (user && isPlanner(user.role)) {
+      if (canEditProject) {
         body.leadId = editLeadId || null
         body.category = editCategory || null
         body.productType = editProductType || null
@@ -796,8 +796,8 @@ export default function ProjectDetailPage() {
                 </Select>
               </div>
             </div>
-            {/* Planner-only fields: Lead, Category, Product Type */}
-            {user && isPlanner(user.role) && (
+            {/* Lead, Category, Product Type — editable by planners and project lead */}
+            {canEditProject && (
               <>
                 <div className="space-y-1.5">
                   <Label>Project Lead</Label>

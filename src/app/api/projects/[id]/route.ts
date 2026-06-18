@@ -71,16 +71,20 @@ export async function PATCH(req: NextRequest, ctx: RouteContext<'/api/projects/[
     if (data.priority !== undefined) updateData.priority = data.priority
     if (data.projectLinks !== undefined) updateData.projectLinks = data.projectLinks
 
-    // Timeline + admin fields: PLANNER/ADMIN/MANAGER only
+    // Meta fields: planner/admin/manager OR the project lead (while DRAFT)
+    if (isFullAccess || isLeadWithAccess) {
+      if (data.leadId !== undefined) updateData.leadId = data.leadId
+      if (data.category !== undefined) updateData.category = data.category
+      if (data.productType !== undefined) updateData.productType = data.productType
+    }
+
+    // Timeline + privileged fields: PLANNER/ADMIN/MANAGER only
     if (isFullAccess) {
       if (data.startDate !== undefined) updateData.startDate = new Date(data.startDate)
       if (data.endDate !== undefined) updateData.endDate = new Date(data.endDate)
-      if (data.leadId !== undefined) updateData.leadId = data.leadId
       if (data.plannerId !== undefined) updateData.plannerId = data.plannerId
       if (data.editAccessGranted !== undefined) updateData.editAccessGranted = data.editAccessGranted
       if (data.planStatus !== undefined) updateData.planStatus = data.planStatus
-      if (data.category !== undefined) updateData.category = data.category
-      if (data.productType !== undefined) updateData.productType = data.productType
     }
 
     const project = await prisma.project.update({ where: { id }, data: updateData })

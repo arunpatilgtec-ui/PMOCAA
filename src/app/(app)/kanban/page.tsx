@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState, useCallback, useRef } from 'react'
-import { useRouter, useSearchParams } from 'next/navigation'
+import { useSearchParams } from 'next/navigation'
 import { DragDropContext, Droppable, Draggable, DropResult } from '@hello-pangea/dnd'
 import { toast } from 'sonner'
 import { Card, CardContent } from '@/components/ui/card'
@@ -115,7 +115,6 @@ function timeInStatus(statusChangedAt: string): string {
 
 export default function KanbanPage() {
   const { user } = useAuthStore()
-  const router = useRouter()
   const searchParams = useSearchParams()
   const [tasks, setTasks] = useState<Task[]>([])
   const [projects, setProjects] = useState<Project[]>([])
@@ -131,12 +130,13 @@ export default function KanbanPage() {
       .catch(() => {})
   }, [])
 
-  // Project leads use the Gantt view instead
+  // Default to "My Tasks" for resource-level roles; project leads see all tasks to monitor their team
   useEffect(() => {
-    if (user?.role === 'PROJECT_LEAD') {
-      router.replace('/gantt')
+    if (user?.role === 'RESOURCE' && !searchParams.get('owner')) {
+      setOwnerFilter('ME')
     }
-  }, [user, router])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.role])
 
   // Rework dialog state
   const [reworkOpen, setReworkOpen] = useState(false)
@@ -304,9 +304,6 @@ export default function KanbanPage() {
     user
       ? task.assignedById === user.id || REVIEWER_ROLES.has(user.role)
       : false
-
-  // While the redirect fires, render nothing to avoid a flash of the board
-  if (user?.role === 'PROJECT_LEAD') return null
 
   return (
     <div className="p-6 h-full flex flex-col">
