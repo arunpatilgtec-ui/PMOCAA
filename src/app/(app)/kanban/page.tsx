@@ -130,14 +130,6 @@ export default function KanbanPage() {
       .catch(() => {})
   }, [])
 
-  // Default to "My Tasks" for resource-level roles; project leads see all tasks to monitor their team
-  useEffect(() => {
-    if (user?.role === 'RESOURCE' && !searchParams.get('owner')) {
-      setOwnerFilter('ME')
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.role])
-
   // Rework dialog state
   const [reworkOpen, setReworkOpen] = useState(false)
   const [reworkTarget, setReworkTarget] = useState<Task | null>(null)
@@ -160,7 +152,7 @@ export default function KanbanPage() {
   const load = useCallback(async () => {
     try {
       const [taskRes, projRes] = await Promise.all([
-        fetch('/api/tasks?scope=all'),   // all tasks visible to everyone on the board
+        fetch('/api/tasks'),
         fetch('/api/projects'),
       ])
       const [taskData, projData] = await Promise.all([taskRes.json(), projRes.json()])
@@ -324,19 +316,21 @@ export default function KanbanPage() {
               ))}
             </SelectContent>
           </Select>
-          <Select value={ownerFilter ?? 'ALL'} onValueChange={setOwnerFilter}>
-            <SelectTrigger className="w-44 h-8 text-sm">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="ALL">All Assignees</SelectItem>
-              <SelectItem value="ME">My Tasks</SelectItem>
-              <SelectItem value="UNASSIGNED">Unassigned</SelectItem>
-              {allUsers.map((u) => (
-                <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          {user?.role !== 'RESOURCE' && (
+            <Select value={ownerFilter ?? 'ALL'} onValueChange={setOwnerFilter}>
+              <SelectTrigger className="w-44 h-8 text-sm">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="ALL">All Assignees</SelectItem>
+                <SelectItem value="ME">My Tasks</SelectItem>
+                <SelectItem value="UNASSIGNED">Unassigned</SelectItem>
+                {allUsers.map((u) => (
+                  <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
         </div>
       </div>
 
