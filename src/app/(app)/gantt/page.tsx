@@ -869,7 +869,11 @@ export default function GanttPage() {
                 </div>
               </div>
 
-              {/* Resource / Owner */}
+              {/* Resource / Owner — only shown to users who can reassign */}
+              {(() => {
+                const editTask = editForm ? localTasks.find(t => t.id === editForm.taskId) : null
+                if (!editTask || !taskIsEditable(editTask)) return null
+                return (
               <div className="space-y-1.5">
                 <Label className="text-xs">Assigned Resource</Label>
 
@@ -931,6 +935,8 @@ export default function GanttPage() {
                   ))}
                 </div>
               </div>
+                )
+              })()}
             </div>
 
             {/* Footer */}

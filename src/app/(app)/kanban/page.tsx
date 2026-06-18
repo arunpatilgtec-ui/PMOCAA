@@ -49,7 +49,7 @@ interface FullTask {
   owner?: { id: string; name: string; avatarUrl?: string; email?: string; role?: string }
   assignedBy?: { id: string; name: string; avatarUrl?: string; role?: string }
   approvedBy?: { id: string; name: string; avatarUrl?: string; role?: string }
-  workstream: { id: string; name: string; project: { id: string; name: string } }
+  workstream: { id: string; name: string; project: { id: string; name: string; leadId?: string | null } }
   history: HistoryEntry[]
 }
 
@@ -144,7 +144,10 @@ export default function KanbanPage() {
   const [editAssigneeId, setEditAssigneeId] = useState<string | null>(null)
   const [savingAssignee, setSavingAssignee] = useState(false)
 
-  const canEditAssignee = user && ['ADMIN', 'MANAGER', 'PLANNER'].includes(user.role)
+  const canEditAssignee = !!(user && (
+    ['ADMIN', 'PLANNER'].includes(user.role) ||
+    (user.role === 'PROJECT_LEAD' && detailFull?.workstream?.project?.leadId === user.id)
+  ))
 
   // Use a ref for load so the interval doesn't capture stale closures
   const loadRef = useRef<(() => Promise<void>) | undefined>(undefined)

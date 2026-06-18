@@ -47,8 +47,22 @@ export async function PATCH(req: NextRequest, ctx: RouteContext<'/api/tasks/[id]
     const data = await req.json()
 
     const existing = await prisma.task.findUniqueOrThrow({ where: { id } })
-    const ownerChanged = data.ownerId !== undefined && data.ownerId !== existing.ownerId
     const statusChanged = data.status !== undefined && data.status !== existing.status
+
+    // Determine project-level permissions (one DB call for PROJECT_LEAD checks)
+    let isProjectLead = false
+    if (session.role === 'PROJECT_LEAD') {
+      const ws = await prisma.workstream.findUnique({
+        where: { id: existing.workstreamId },
+        select: { project: { select: { leadId: true } } },
+      })
+      isProjectLead = ws?.project.leadId === session.id
+    }
+    const canAssign = ['ADMIN', 'PLANNER'].includes(session.role) || isProjectLead
+    const canEditDates = ['ADMIN', 'MANAGER', 'PLANNER'].includes(session.role) || isProjectLead
+
+    // Only count ownerId as "changed" if the caller is actually allowed to reassign
+    const ownerChanged = canAssign && data.ownerId !== undefined && data.ownerId !== existing.ownerId
 
     // Create history entry and update statusChangedAt when status changes
     if (statusChanged) {
@@ -80,15 +94,6 @@ export async function PATCH(req: NextRequest, ctx: RouteContext<'/api/tasks/[id]
       })
     }
 
-    let canEditDates = ['ADMIN', 'MANAGER', 'PLANNER'].includes(session.role)
-    if (!canEditDates && session.role === 'PROJECT_LEAD') {
-      const ws = await prisma.workstream.findUnique({
-        where: { id: existing.workstreamId },
-        select: { project: { select: { leadId: true } } },
-      })
-      if (ws?.project.leadId === session.id) canEditDates = true
-    }
-
     const task = await prisma.task.update({
       where: { id },
       data: {
@@ -115,7 +120,7 @@ export async function PATCH(req: NextRequest, ctx: RouteContext<'/api/tasks/[id]
         ...(data.pctComplete !== undefined && { pctComplete: Math.min(100, Math.max(0, Number(data.pctComplete))) }),
         ...(data.effortHours !== undefined && { effortHours: data.effortHours }),
         ...(data.estimatedHours !== undefined && { estimatedHours: data.estimatedHours }),
-        ...(data.ownerId !== undefined && { ownerId: data.ownerId }),
+        ...(data.ownerId !== undefined && canAssign && { ownerId: data.ownerId || null }),
         // Track who reassigned the task
         ...(ownerChanged && { assignedById: session.id }),
         ...(data.order !== undefined && { order: data.order }),
