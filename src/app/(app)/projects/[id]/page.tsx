@@ -193,9 +193,10 @@ export default function ProjectDetailPage() {
     : 0
 
   const userIsPlanner = user && isPlanner(user.role)
+  const userIsManager = user?.role === 'MANAGER'
   const userCanAllocate = user && canAllocateResources(user.role)
   const isProjectLead = user?.id === project.leadId
-  const canEditProject = userIsPlanner || (isProjectLead && project.planStatus === 'DRAFT')
+  const canEditProject = userIsPlanner || userIsManager || (isProjectLead && project.planStatus === 'DRAFT')
 
   // Overdue tasks
   const now = new Date()
@@ -504,6 +505,10 @@ export default function ProjectDetailPage() {
                       : <><ShieldCheck className="mr-2 h-4 w-4 text-green-600" /> Grant Edit Access</>
                     }
                   </DropdownMenuItem>
+                </>
+              )}
+              {(userIsPlanner || userIsManager) && (
+                <>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem className="text-red-600" onClick={() => setDeleteConfirm(true)}>
                     <Trash2 className="mr-2 h-4 w-4" /> Delete Project

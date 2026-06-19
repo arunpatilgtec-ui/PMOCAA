@@ -101,7 +101,7 @@ export async function DELETE(_req: NextRequest, ctx: RouteContext<'/api/projects
   try {
     const session = await requireAuth()
     const { id } = await ctx.params
-    if (!['ADMIN', 'PLANNER'].includes(session.role)) {
+    if (!['ADMIN', 'MANAGER', 'PLANNER'].includes(session.role)) {
       return Response.json({ error: 'Forbidden' }, { status: 403 })
     }
     await prisma.project.delete({ where: { id } })

@@ -53,7 +53,7 @@ export function canManageUsers(role: UserRole): boolean {
 }
 
 export function canCreateProject(role: UserRole): boolean {
-  return ['ADMIN', 'PLANNER', 'PROJECT_LEAD'].includes(role)
+  return ['ADMIN', 'MANAGER', 'PLANNER', 'PROJECT_LEAD'].includes(role)
 }
 
 export function isPlanner(role: UserRole): boolean {
