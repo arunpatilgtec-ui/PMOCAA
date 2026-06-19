@@ -638,7 +638,7 @@ export default function RequestsPage() {
               {filtered.map((req) => {
                 const isOwner = user?.id === req.submitter.id
                 const canEdit = isOwner && req.status !== 'CONVERTED'
-                const canDelete = (isOwner || !!(canManage)) && req.status !== 'CONVERTED'
+                const canDelete = isOwner && req.status !== 'CONVERTED'
                 const wasEdited = req.updatedAt && req.updatedAt !== req.createdAt
                 return (
                   <Card key={req.id} className={req.status === 'REJECTED' ? 'opacity-60' : ''}>

@@ -219,8 +219,7 @@ export async function DELETE(_req: NextRequest, ctx: RouteContext<'/api/requests
     if (!existing) return Response.json({ error: 'Not found' }, { status: 404 })
 
     const canDelete =
-      ['ADMIN', 'MANAGER', 'PLANNER'].includes(session.role) ||
-      (existing.submitterId === session.id && existing.status !== 'CONVERTED')
+      existing.submitterId === session.id && existing.status !== 'CONVERTED'
 
     if (!canDelete) return Response.json({ error: 'Forbidden' }, { status: 403 })
 
