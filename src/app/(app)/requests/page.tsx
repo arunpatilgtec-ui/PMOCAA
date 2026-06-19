@@ -26,7 +26,7 @@ interface User { id: string; name: string; role: string }
 
 interface Request {
   id: string; title: string; description: string; priority: string
-  type: string; status: string; notes?: string; createdAt: string
+  type: string; status: string; notes?: string; createdAt: string; updatedAt: string
   isRecurring?: boolean; startDate?: string; endDate?: string
   hoursPerDay?: number; estimatedHours?: number
   submitter: { id: string; name: string }
@@ -638,7 +638,8 @@ export default function RequestsPage() {
               {filtered.map((req) => {
                 const isOwner = user?.id === req.submitter.id
                 const canEdit = isOwner && req.status !== 'CONVERTED'
-                const canEditDelete = isOwner && req.status === 'SUBMITTED'
+                const canDelete = isOwner && req.status !== 'CONVERTED'
+                const wasEdited = req.updatedAt && req.updatedAt !== req.createdAt
                 return (
                   <Card key={req.id} className={req.status === 'REJECTED' ? 'opacity-60' : ''}>
                     <CardContent className="p-4">
@@ -660,6 +661,9 @@ export default function RequestsPage() {
                           <div className="flex items-center gap-3 mt-1.5 text-xs text-muted-foreground flex-wrap">
                             <span>By {req.submitter.name}</span>
                             <span>{format(new Date(req.createdAt), 'MMM d, yyyy')}</span>
+                            {wasEdited && (
+                              <span className="italic">Edited {format(new Date(req.updatedAt), 'MMM d, yyyy')}</span>
+                            )}
                             {req.assignedBy && <span>Assigned by: {req.assignedBy.name}</span>}
                             {req.assignee && <span>Reviewer: {req.assignee.name}</span>}
                             {(req.startDate || req.endDate) && (
@@ -685,7 +689,7 @@ export default function RequestsPage() {
 
                         <div className="flex flex-col items-end gap-1.5 shrink-0">
                           {/* Creator edit/delete */}
-                          {(canEdit || canEditDelete) && (
+                          {(canEdit || canDelete) && (
                             <div className="flex gap-1">
                               {canEdit && (
                                 <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground"
@@ -693,7 +697,7 @@ export default function RequestsPage() {
                                   <Pencil className="h-3.5 w-3.5" />
                                 </Button>
                               )}
-                              {canEditDelete && (
+                              {canDelete && (
                                 <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-muted-foreground hover:text-red-600"
                                   onClick={() => setDeleteReqId(req.id)}>
                                   <Trash2 className="h-3.5 w-3.5" />
