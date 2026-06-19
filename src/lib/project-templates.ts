@@ -119,6 +119,53 @@ const REFRIGERATION_TEMPLATE: WorkstreamTemplate[] = [
   },
 ]
 
+// Full Dishwasher template (from DW CSV, sequential)
+const DISHWASHER_TEMPLATE: WorkstreamTemplate[] = [
+  {
+    name: 'Planning',
+    tasks: [
+      t('Project Kickoff', 1),
+      t('Collect Deliverables', 1),
+    ],
+  },
+  {
+    name: 'Tear Down',
+    tasks: [
+      t('Packaging & Lit.', 0.5),
+      t('Racks', 0.5),
+      t('Water Delivery System', 1),
+      t('Door & Aesthetics, Dry System', 0.5),
+      t('Control System', 0.5),
+      t('Wash System', 1),
+      t('Tub & Chassis System', 1),
+    ],
+  },
+  {
+    name: 'Costing',
+    tasks: [
+      t('Packaging', 0.5),
+      t('Racks', 0.5),
+      t('Water Delivery System', 1),
+      t('Door & Aesthetics', 0.5),
+      t('Control System', 0.5),
+      t('Wash System', 1),
+      t('Tub & Chassis System', 1),
+    ],
+  },
+  {
+    name: 'BOB & A2Mac1',
+    tasks: [
+      t('BOB & A2Mac1', 2),
+    ],
+  },
+  {
+    name: 'Reports & Report-out',
+    tasks: [
+      t('Reports & Report-out', 5),
+    ],
+  },
+]
+
 // Builds simple workstreams for categories that don't yet have detailed hour data.
 // All tasks default to 1 day until a detailed template is added.
 function simpleTemplate(tearDownTasks: string[]): WorkstreamTemplate[] {
@@ -144,8 +191,8 @@ function simpleTemplate(tearDownTasks: string[]): WorkstreamTemplate[] {
 
 export const CATEGORY_TEMPLATES: Record<string, WorkstreamTemplate[]> = {
   Refrigeration: REFRIGERATION_TEMPLATE,
+  Dishwasher: DISHWASHER_TEMPLATE,
   Cooking: simpleTemplate(['Documentation', 'Chassis', 'Cooktop', 'Accessories', 'Cavity', 'Controls', 'Drawer', 'UI Console', 'Door']),
-  Dishwasher: simpleTemplate(['Packaging', 'Racks', 'Water Delivery System', 'Door & Aesthetics', 'Control System', 'Wash System', 'Tub & Chassis System']),
   Laundry: simpleTemplate(['Aesthetics', 'Structures', 'Performance Enablers', 'SES']),
   KASA: simpleTemplate(['Packaging', 'Steam & Milk Frother Asm', 'Aesthetics & Cabinet', 'Brewing System', 'Grinding System', 'Heating System', 'Filling & Distribution System', 'Controls']),
   'Food Disposer': simpleTemplate(['Packaging and Literature', 'Accessories', 'Aesthetic', 'Structure', 'Water and heating', 'Control']),
