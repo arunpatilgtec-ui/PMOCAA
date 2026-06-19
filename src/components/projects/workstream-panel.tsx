@@ -199,7 +199,9 @@ export function WorkstreamPanel({ project, onRefresh, productId, onlyDeliverable
 
   const now = new Date()
 
-  const CHECKLIST_WS = new Set(['Planning', 'Deliverables', 'Report'])
+  // Workstreams treated as project-level deliverables (Report tab); hidden from per-product Timeline.
+  // DW-specific entries: 'BOB & A2Mac1', 'Reports & Report-out'
+  const CHECKLIST_WS = new Set(['Planning', 'Deliverables', 'Report', 'BOB & A2Mac1', 'Reports & Report-out'])
   const visibleWorkstreams = onlyDeliverables
     ? project.workstreams.filter((ws) => CHECKLIST_WS.has(ws.name))
     : productId
