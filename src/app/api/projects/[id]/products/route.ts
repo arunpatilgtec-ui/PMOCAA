@@ -35,7 +35,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
 
     const project = await prisma.project.findUnique({
       where: { id },
-      select: { leadId: true, startDate: true, endDate: true },
+      select: { leadId: true, startDate: true, endDate: true, category: true },
     })
     const canManage =
       ['ADMIN', 'PLANNER', 'MANAGER'].includes(session.role) ||
@@ -126,6 +126,27 @@ export async function POST(req: NextRequest, ctx: Ctx) {
           estimatedHours: 8,
         })),
       })
+    }
+
+    // For DW projects, create a per-product BOB & A2Mac1 task
+    if (project?.category === 'Dishwasher') {
+      const bobWs = await prisma.workstream.findFirst({
+        where: { projectId: id, name: 'BOB & A2Mac1' },
+      })
+      if (bobWs) {
+        await prisma.task.create({
+          data: {
+            workstreamId: bobWs.id,
+            name: `${product.brand}${product.modelNo ? ` ${product.modelNo}` : ''} — BOB & A2Mac1`,
+            description: `__productTask:${product.id}:bob__`,
+            ownerId: product.leadId ?? null,
+            startDate: project.startDate ?? null,
+            endDate: project.endDate ?? null,
+            estimatedHours: 16,
+            effortHours: 16,
+          },
+        })
+      }
     }
 
     return Response.json(product, { status: 201 })

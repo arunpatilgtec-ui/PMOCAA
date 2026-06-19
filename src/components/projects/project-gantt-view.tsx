@@ -128,10 +128,13 @@ export function ProjectGanttView({
     wk = addDays(wEnd, 1)
   }
 
-  // Build rows — group Product Costing tasks by product
+  // Workstreams whose tasks are grouped per product in the Gantt
+  const PER_PRODUCT_WS = new Set(['Product Costing', 'BOB & A2Mac1'])
+
+  // Build rows — group per-product workstream tasks by product label
   const allRows: GanttRow[] = []
   for (const ws of project.workstreams) {
-    if (ws.name === 'Product Costing') {
+    if (PER_PRODUCT_WS.has(ws.name)) {
       const byProduct = new Map<string, Task[]>()
       const untaggedTasks: Task[] = []
       for (const task of ws.tasks) {
@@ -145,16 +148,16 @@ export function ProjectGanttView({
         }
       }
       if (byProduct.size === 0 && untaggedTasks.length === 0) {
-        allRows.push({ type: 'ws', ws, label: 'Product Costing' })
+        allRows.push({ type: 'ws', ws, label: ws.name })
       } else {
         for (const [productId, tasks] of byProduct) {
           const p = products.find((pr) => pr.id === productId)
-          const label = p ? `${p.brand}${p.modelNo ? ` ${p.modelNo}` : ''}` : 'Product Costing'
+          const label = p ? `${p.brand}${p.modelNo ? ` ${p.modelNo}` : ''}` : ws.name
           allRows.push({ type: 'ws', ws, label })
           for (const task of tasks) allRows.push({ type: 'task', ws, task, label })
         }
         for (const task of untaggedTasks) {
-          allRows.push({ type: 'task', ws, task, label: 'Product Costing' })
+          allRows.push({ type: 'task', ws, task, label: ws.name })
         }
       }
     } else {
