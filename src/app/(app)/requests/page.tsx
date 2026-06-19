@@ -637,6 +637,7 @@ export default function RequestsPage() {
             <div className="space-y-3">
               {filtered.map((req) => {
                 const isOwner = user?.id === req.submitter.id
+                const canEdit = isOwner && req.status !== 'CONVERTED'
                 const canEditDelete = isOwner && req.status === 'SUBMITTED'
                 return (
                   <Card key={req.id} className={req.status === 'REJECTED' ? 'opacity-60' : ''}>
@@ -684,16 +685,20 @@ export default function RequestsPage() {
 
                         <div className="flex flex-col items-end gap-1.5 shrink-0">
                           {/* Creator edit/delete */}
-                          {canEditDelete && (
+                          {(canEdit || canEditDelete) && (
                             <div className="flex gap-1">
-                              <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground"
-                                onClick={() => openEditRequest(req)}>
-                                <Pencil className="h-3.5 w-3.5" />
-                              </Button>
-                              <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-muted-foreground hover:text-red-600"
-                                onClick={() => setDeleteReqId(req.id)}>
-                                <Trash2 className="h-3.5 w-3.5" />
-                              </Button>
+                              {canEdit && (
+                                <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground"
+                                  onClick={() => openEditRequest(req)}>
+                                  <Pencil className="h-3.5 w-3.5" />
+                                </Button>
+                              )}
+                              {canEditDelete && (
+                                <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-muted-foreground hover:text-red-600"
+                                  onClick={() => setDeleteReqId(req.id)}>
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </Button>
+                              )}
                             </div>
                           )}
 

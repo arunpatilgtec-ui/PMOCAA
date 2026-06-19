@@ -27,15 +27,16 @@ export async function PATCH(req: NextRequest, ctx: RouteContext<'/api/requests/[
       return Response.json({ error: 'Not found' }, { status: 404 })
     }
 
-    const isOwnSubmitted = existing.submitterId === session.id && existing.status === 'SUBMITTED'
+    // Creator can edit their own request as long as it hasn't been converted to a project
+    const isOwnRequest = existing.submitterId === session.id && existing.status !== 'CONVERTED'
 
-    // Submitter can only edit their own SUBMITTED request (not status changes, not convert)
-    if (!isManager && !isOwnSubmitted) {
+    // Submitter can only edit their own non-converted request (not status changes, not convert)
+    if (!isManager && !isOwnRequest) {
       return Response.json({ error: 'Forbidden' }, { status: 403 })
     }
 
     // Submitter editing own request — only allow field edits, not status/conversion
-    if (!isManager && isOwnSubmitted) {
+    if (!isManager && isOwnRequest) {
       const updated = await prisma.request.update({
         where: { id },
         data: {
