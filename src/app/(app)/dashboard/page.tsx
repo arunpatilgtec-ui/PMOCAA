@@ -144,16 +144,16 @@ export default function DashboardPage() {
 
   const stats = isResource
     ? [
-        { label: 'In Progress', value: inProgressTasks.length, icon: PlayCircle,  href: '/kanban',    gradient: 'from-amber-500 to-orange-500',  ring: 'ring-amber-500/20' },
-        { label: 'Planned',     value: plannedTasks.length,    icon: ListTodo,     href: '/kanban',    gradient: 'from-blue-500 to-cyan-500',     ring: 'ring-blue-500/20' },
-        { label: 'In Review',   value: reviewTasks.length,     icon: Eye,          href: '/kanban',    gradient: 'from-violet-500 to-purple-600', ring: 'ring-violet-500/20' },
-        { label: 'Completed',   value: completedTasks.length,  icon: CheckCircle2, href: '/kanban',    gradient: 'from-emerald-500 to-green-600', ring: 'ring-emerald-500/20' },
+        { label: 'In Progress', value: inProgressTasks.length, icon: PlayCircle,  href: '/kanban',   iconBg: 'bg-amber-50 dark:bg-amber-950/40',   iconColor: 'text-amber-600 dark:text-amber-400' },
+        { label: 'Planned',     value: plannedTasks.length,    icon: ListTodo,     href: '/kanban',   iconBg: 'bg-blue-50 dark:bg-blue-950/40',     iconColor: 'text-blue-600 dark:text-blue-400' },
+        { label: 'In Review',   value: reviewTasks.length,     icon: Eye,          href: '/kanban',   iconBg: 'bg-violet-50 dark:bg-violet-950/40', iconColor: 'text-violet-600 dark:text-violet-400' },
+        { label: 'Completed',   value: completedTasks.length,  icon: CheckCircle2, href: '/kanban',   iconBg: 'bg-emerald-50 dark:bg-emerald-950/40', iconColor: 'text-emerald-600 dark:text-emerald-400' },
       ]
     : [
-        { label: 'Active Projects',       value: activeProjects.length,      icon: FolderKanban,   href: '/projects',   gradient: 'from-blue-500 to-indigo-600',    ring: 'ring-blue-500/20' },
-        { label: 'Delayed Projects',      value: delayedProjects.length,     icon: AlertTriangle,  href: '/projects',   gradient: 'from-red-500 to-rose-600',       ring: 'ring-red-500/20' },
-        { label: 'Pending Approvals',     value: pendingApprovals,           icon: Clock,          href: '/approvals',  gradient: 'from-amber-500 to-orange-500',   ring: 'ring-amber-500/20' },
-        { label: 'Overloaded Resources',  value: overloadedResources.length, icon: Users,          href: '/resources',  gradient: 'from-violet-500 to-purple-600',  ring: 'ring-violet-500/20' },
+        { label: 'Active Projects',      value: activeProjects.length,      icon: FolderKanban,  href: '/projects',  iconBg: 'bg-blue-50 dark:bg-blue-950/40',     iconColor: 'text-blue-600 dark:text-blue-400' },
+        { label: 'Delayed Projects',     value: delayedProjects.length,     icon: AlertTriangle, href: '/projects',  iconBg: 'bg-red-50 dark:bg-red-950/40',       iconColor: 'text-red-600 dark:text-red-400' },
+        { label: 'Pending Approvals',    value: pendingApprovals,           icon: Clock,         href: '/approvals', iconBg: 'bg-amber-50 dark:bg-amber-950/40',   iconColor: 'text-amber-600 dark:text-amber-400' },
+        { label: 'Overloaded Resources', value: overloadedResources.length, icon: Users,         href: '/resources', iconBg: 'bg-violet-50 dark:bg-violet-950/40', iconColor: 'text-violet-600 dark:text-violet-400' },
       ]
 
   if (loading) {
@@ -182,9 +182,9 @@ export default function DashboardPage() {
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.4 }}
       >
-        <h1 className="text-2xl sm:text-3xl font-bold">
-          <span className="gradient-text">{greeting},</span>{' '}
-          <span className="text-foreground">{user?.name?.split(' ')[0]}</span>
+        <h1 className="text-2xl sm:text-3xl font-bold text-foreground">
+          {greeting},{' '}
+          <span className="text-primary">{user?.name?.split(' ')[0]}</span>
         </h1>
         <p className="text-muted-foreground text-sm mt-1">
           {format(new Date(), 'EEEE, MMMM d, yyyy')}
@@ -203,12 +203,11 @@ export default function DashboardPage() {
           return (
             <motion.div key={stat.label} variants={item}>
               <Link href={stat.href}>
-                <div className={`card-hover relative overflow-hidden rounded-xl border border-border bg-card p-4 sm:p-5 ring-1 ${stat.ring} cursor-pointer`}>
-                  <div className={`absolute -top-6 -right-6 h-20 w-20 rounded-full bg-gradient-to-br ${stat.gradient} opacity-10 blur-xl`} />
-                  <div className={`inline-flex items-center justify-center w-10 h-10 rounded-xl bg-gradient-to-br ${stat.gradient} mb-3 shadow-sm`}>
-                    <Icon className="h-5 w-5 text-white" />
+                <div className="card-hover rounded-xl border border-border bg-card p-4 sm:p-5 cursor-pointer">
+                  <div className={`inline-flex items-center justify-center w-9 h-9 rounded-lg mb-3 ${stat.iconBg}`}>
+                    <Icon className={`h-[18px] w-[18px] ${stat.iconColor}`} />
                   </div>
-                  <p className="text-2xl sm:text-3xl font-bold text-foreground">{stat.value}</p>
+                  <p className="text-2xl sm:text-3xl font-bold tabular-nums text-foreground">{stat.value}</p>
                   <p className="text-xs sm:text-sm text-muted-foreground mt-0.5 leading-tight">{stat.label}</p>
                 </div>
               </Link>
@@ -229,9 +228,7 @@ export default function DashboardPage() {
             <Card>
               <CardHeader className="pb-3 flex flex-row items-center justify-between">
                 <CardTitle className="text-base font-semibold flex items-center gap-2">
-                  <div className="w-6 h-6 rounded-md bg-gradient-to-br from-blue-500 to-cyan-500 flex items-center justify-center">
-                    <ListTodo className="h-3.5 w-3.5 text-white" />
-                  </div>
+                  <ListTodo className="h-4 w-4 text-primary" />
                   My Active Tasks
                 </CardTitle>
                 <Link href="/kanban">
@@ -292,9 +289,7 @@ export default function DashboardPage() {
             <Card>
               <CardHeader className="pb-3 flex flex-row items-center justify-between">
                 <CardTitle className="text-base font-semibold flex items-center gap-2">
-                  <div className="w-6 h-6 rounded-md bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center">
-                    <FolderKanban className="h-3.5 w-3.5 text-white" />
-                  </div>
+                  <FolderKanban className="h-4 w-4 text-primary" />
                   Active Projects
                 </CardTitle>
                 <Link href="/projects">
@@ -350,9 +345,7 @@ export default function DashboardPage() {
             <Card>
               <CardHeader className="pb-3">
                 <CardTitle className="text-base font-semibold flex items-center gap-2">
-                  <div className="w-6 h-6 rounded-md bg-gradient-to-br from-red-500 to-rose-600 flex items-center justify-center">
-                    <AlertTriangle className="h-3.5 w-3.5 text-white" />
-                  </div>
+                  <AlertTriangle className="h-4 w-4 text-red-500" />
                   Delayed Projects
                 </CardTitle>
               </CardHeader>
@@ -387,9 +380,7 @@ export default function DashboardPage() {
               <Card>
                 <CardHeader className="pb-3 flex flex-row items-center justify-between">
                   <CardTitle className="text-base font-semibold flex items-center gap-2">
-                    <div className="w-6 h-6 rounded-md bg-gradient-to-br from-emerald-500 to-green-600 flex items-center justify-center">
-                      <TrendingUp className="h-3.5 w-3.5 text-white" />
-                    </div>
+                    <TrendingUp className="h-4 w-4 text-primary" />
                     Resource Load
                   </CardTitle>
                   <Link href="/resources">
@@ -404,7 +395,7 @@ export default function DashboardPage() {
                       <div className="flex items-center justify-between gap-2">
                         <div className="flex items-center gap-2 min-w-0">
                           <Avatar className="h-6 w-6 shrink-0">
-                            <AvatarFallback className="text-xs bg-gradient-to-br from-blue-500 to-violet-600 text-white">
+                            <AvatarFallback className="text-xs bg-muted text-muted-foreground">
                               {r.name.split(' ').map((n) => n[0]).join('').slice(0, 2)}
                             </AvatarFallback>
                           </Avatar>
@@ -416,7 +407,7 @@ export default function DashboardPage() {
                       </div>
                       <Progress
                         value={Math.min(r.utilizationPct, 100)}
-                        className={`h-1.5 ${r.isOverloaded ? '[&>div]:bg-gradient-to-r [&>div]:from-red-500 [&>div]:to-rose-600' : '[&>div]:bg-gradient-to-r [&>div]:from-blue-500 [&>div]:to-indigo-600'}`}
+                        className={`h-1 ${r.isOverloaded ? '[&>div]:bg-red-500' : ''}`}
                       />
                     </div>
                   ))}

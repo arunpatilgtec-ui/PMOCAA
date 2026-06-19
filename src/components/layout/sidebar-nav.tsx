@@ -34,25 +34,23 @@ interface NavItem {
   href: string
   icon: React.ComponentType<{ className?: string }>
   roles?: string[]
-  badge?: number
-  color?: string
 }
 
 const navItems: NavItem[] = [
-  { label: 'Dashboard', href: '/dashboard', icon: LayoutDashboard, color: 'text-blue-400' },
-  { label: 'Projects', href: '/projects', icon: FolderKanban, color: 'text-violet-400' },
-  { label: 'Requests', href: '/requests', icon: ClipboardList, color: 'text-amber-400' },
-  { label: 'Kanban', href: '/kanban', icon: SquareKanban, color: 'text-cyan-400' },
-  { label: 'Gantt', href: '/gantt', icon: GitBranch, color: 'text-emerald-400' },
-  { label: 'Timeline', href: '/timeline', icon: CalendarRange, color: 'text-teal-400', roles: ['RESOURCE', 'PROJECT_LEAD', 'WORKSTREAM_LEAD', 'PLANNER', 'LEADERSHIP'] },
-  { label: 'Queue', href: '/queue', icon: ListOrdered, color: 'text-orange-400' },
-  { label: 'Resources', href: '/resources', icon: Users, color: 'text-pink-400', roles: ['ADMIN', 'MANAGER', 'PLANNER', 'PROJECT_LEAD', 'WORKSTREAM_LEAD', 'LEADERSHIP'] },
-  { label: 'Approvals', href: '/approvals', icon: CheckSquare, color: 'text-green-400', roles: ['ADMIN', 'MANAGER', 'PLANNER'] },
-  { label: 'Reports', href: '/reports', icon: BarChart3, color: 'text-indigo-400' },
-  { label: 'Documents', href: '/documents', icon: FileText, color: 'text-sky-400', roles: ['ADMIN', 'MANAGER', 'PLANNER', 'PROJECT_LEAD', 'WORKSTREAM_LEAD', 'LEADERSHIP'] },
-  { label: 'Notifications', href: '/notifications', icon: Bell, color: 'text-yellow-400' },
-  { label: 'Settings', href: '/settings', icon: Settings, color: 'text-slate-400' },
-  { label: 'Users', href: '/users', icon: UserCog, color: 'text-red-400', roles: ['ADMIN'] },
+  { label: 'Dashboard',     href: '/dashboard',     icon: LayoutDashboard },
+  { label: 'Projects',      href: '/projects',      icon: FolderKanban },
+  { label: 'Requests',      href: '/requests',      icon: ClipboardList },
+  { label: 'Kanban',        href: '/kanban',        icon: SquareKanban },
+  { label: 'Gantt',         href: '/gantt',         icon: GitBranch },
+  { label: 'Timeline',      href: '/timeline',      icon: CalendarRange, roles: ['RESOURCE', 'PROJECT_LEAD', 'WORKSTREAM_LEAD', 'PLANNER', 'LEADERSHIP'] },
+  { label: 'Queue',         href: '/queue',         icon: ListOrdered },
+  { label: 'Resources',     href: '/resources',     icon: Users,         roles: ['ADMIN', 'MANAGER', 'PLANNER', 'PROJECT_LEAD', 'WORKSTREAM_LEAD', 'LEADERSHIP'] },
+  { label: 'Approvals',     href: '/approvals',     icon: CheckSquare,   roles: ['ADMIN', 'MANAGER', 'PLANNER'] },
+  { label: 'Reports',       href: '/reports',       icon: BarChart3 },
+  { label: 'Documents',     href: '/documents',     icon: FileText,      roles: ['ADMIN', 'MANAGER', 'PLANNER', 'PROJECT_LEAD', 'WORKSTREAM_LEAD', 'LEADERSHIP'] },
+  { label: 'Notifications', href: '/notifications', icon: Bell },
+  { label: 'Settings',      href: '/settings',      icon: Settings },
+  { label: 'Users',         href: '/users',         icon: UserCog,       roles: ['ADMIN'] },
 ]
 
 interface SidebarNavProps {
@@ -113,10 +111,7 @@ export function SidebarNav({
       >
         {/* Logo / header */}
         <div className="flex items-center h-14 px-3 border-b border-sidebar-border shrink-0">
-          <div className={cn(
-            'flex items-center justify-center w-8 h-8 rounded-lg shrink-0',
-            'bg-gradient-to-br from-blue-500 to-violet-600'
-          )}>
+          <div className="flex items-center justify-center w-8 h-8 rounded-lg shrink-0 bg-sidebar-primary">
             <BarChart3 className="h-4 w-4 text-white" />
           </div>
           {!collapsed && (
@@ -158,7 +153,7 @@ export function SidebarNav({
                     : 'text-sidebar-foreground/60 hover:bg-sidebar-accent/60 hover:text-sidebar-foreground'
                 )}
               >
-                <Icon className={cn('h-4 w-4 shrink-0', isActive ? 'text-sidebar-primary' : item.color)} />
+                <Icon className={cn('h-4 w-4 shrink-0', isActive ? 'text-sidebar-primary' : 'text-sidebar-foreground/40')} />
                 {!collapsed && (
                   <>
                     <span className="flex-1 truncate">
@@ -200,7 +195,7 @@ export function SidebarNav({
           {user && (
             <div className={cn('flex items-center gap-2 px-1', collapsed && 'justify-center')}>
               <Avatar className="h-8 w-8 shrink-0">
-                <AvatarFallback className="text-xs font-semibold bg-gradient-to-br from-blue-500 to-violet-600 text-white">
+                <AvatarFallback className="text-xs font-semibold bg-sidebar-primary text-white">
                   {initials}
                 </AvatarFallback>
               </Avatar>
