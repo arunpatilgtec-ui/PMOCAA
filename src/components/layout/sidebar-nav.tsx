@@ -19,16 +19,15 @@ import {
   CheckSquare,
   BarChart3,
   FileText,
-  AlertTriangle,
   SquareKanban,
   UserCog,
   ListOrdered,
   CalendarRange,
 } from 'lucide-react'
 import { useState } from 'react'
-import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
+import { ThemeToggle } from '@/components/ui/theme-toggle'
 
 interface NavItem {
   label: string
@@ -36,26 +35,39 @@ interface NavItem {
   icon: React.ComponentType<{ className?: string }>
   roles?: string[]
   badge?: number
+  color?: string
 }
 
 const navItems: NavItem[] = [
-  { label: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
-  { label: 'Projects', href: '/projects', icon: FolderKanban },
-  { label: 'Requests', href: '/requests', icon: ClipboardList },
-  { label: 'Kanban', href: '/kanban', icon: SquareKanban },
-  { label: 'Gantt', href: '/gantt', icon: GitBranch },
-  { label: 'Timeline', href: '/timeline', icon: CalendarRange, roles: ['RESOURCE', 'PROJECT_LEAD', 'WORKSTREAM_LEAD', 'PLANNER', 'LEADERSHIP'] },
-  { label: 'Queue', href: '/queue', icon: ListOrdered },
-  { label: 'Resources', href: '/resources', icon: Users, roles: ['ADMIN', 'MANAGER', 'PLANNER', 'PROJECT_LEAD', 'WORKSTREAM_LEAD', 'LEADERSHIP'] },
-  { label: 'Approvals', href: '/approvals', icon: CheckSquare, roles: ['ADMIN', 'MANAGER', 'PLANNER'] },
-  { label: 'Reports', href: '/reports', icon: BarChart3 },
-  { label: 'Documents', href: '/documents', icon: FileText, roles: ['ADMIN', 'MANAGER', 'PLANNER', 'PROJECT_LEAD', 'WORKSTREAM_LEAD', 'LEADERSHIP'] },
-  { label: 'Notifications', href: '/notifications', icon: Bell },
-  { label: 'Settings', href: '/settings', icon: Settings },
-  { label: 'Users', href: '/users', icon: UserCog, roles: ['ADMIN'] },
+  { label: 'Dashboard', href: '/dashboard', icon: LayoutDashboard, color: 'text-blue-400' },
+  { label: 'Projects', href: '/projects', icon: FolderKanban, color: 'text-violet-400' },
+  { label: 'Requests', href: '/requests', icon: ClipboardList, color: 'text-amber-400' },
+  { label: 'Kanban', href: '/kanban', icon: SquareKanban, color: 'text-cyan-400' },
+  { label: 'Gantt', href: '/gantt', icon: GitBranch, color: 'text-emerald-400' },
+  { label: 'Timeline', href: '/timeline', icon: CalendarRange, color: 'text-teal-400', roles: ['RESOURCE', 'PROJECT_LEAD', 'WORKSTREAM_LEAD', 'PLANNER', 'LEADERSHIP'] },
+  { label: 'Queue', href: '/queue', icon: ListOrdered, color: 'text-orange-400' },
+  { label: 'Resources', href: '/resources', icon: Users, color: 'text-pink-400', roles: ['ADMIN', 'MANAGER', 'PLANNER', 'PROJECT_LEAD', 'WORKSTREAM_LEAD', 'LEADERSHIP'] },
+  { label: 'Approvals', href: '/approvals', icon: CheckSquare, color: 'text-green-400', roles: ['ADMIN', 'MANAGER', 'PLANNER'] },
+  { label: 'Reports', href: '/reports', icon: BarChart3, color: 'text-indigo-400' },
+  { label: 'Documents', href: '/documents', icon: FileText, color: 'text-sky-400', roles: ['ADMIN', 'MANAGER', 'PLANNER', 'PROJECT_LEAD', 'WORKSTREAM_LEAD', 'LEADERSHIP'] },
+  { label: 'Notifications', href: '/notifications', icon: Bell, color: 'text-yellow-400' },
+  { label: 'Settings', href: '/settings', icon: Settings, color: 'text-slate-400' },
+  { label: 'Users', href: '/users', icon: UserCog, color: 'text-red-400', roles: ['ADMIN'] },
 ]
 
-export function SidebarNav({ unreadCount = 0, pendingRequestsCount = 0 }: { unreadCount?: number; pendingRequestsCount?: number }) {
+interface SidebarNavProps {
+  unreadCount?: number
+  pendingRequestsCount?: number
+  mobileOpen?: boolean
+  onMobileClose?: () => void
+}
+
+export function SidebarNav({
+  unreadCount = 0,
+  pendingRequestsCount = 0,
+  mobileOpen = false,
+  onMobileClose,
+}: SidebarNavProps) {
   const pathname = usePathname()
   const router = useRouter()
   const { user, logout } = useAuthStore()
@@ -79,99 +91,140 @@ export function SidebarNav({ unreadCount = 0, pendingRequestsCount = 0 }: { unre
     .slice(0, 2)
 
   return (
-    <aside
-      className={cn(
-        'flex flex-col h-full bg-sidebar border-r border-sidebar-border transition-all duration-200',
-        collapsed ? 'w-16' : 'w-60'
+    <>
+      {/* Mobile backdrop */}
+      {mobileOpen && (
+        <div
+          className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm lg:hidden"
+          onClick={onMobileClose}
+        />
       )}
-    >
-      {/* Logo */}
-      <div className="flex items-center h-14 px-3 border-b border-sidebar-border">
-        <BarChart3 className="h-6 w-6 text-blue-500 shrink-0" />
-        {!collapsed && (
-          <span className="ml-2 font-semibold text-sidebar-foreground text-sm truncate">
-            PMO Portal
-          </span>
+
+      <aside
+        className={cn(
+          'flex flex-col bg-sidebar border-r border-sidebar-border transition-all duration-300',
+          /* Desktop: static, always visible, collapsible width */
+          'lg:static lg:h-full lg:translate-x-0',
+          collapsed ? 'lg:w-16' : 'lg:w-60',
+          /* Mobile: fixed overlay */
+          'fixed inset-y-0 left-0 z-50 h-full w-72 shadow-2xl',
+          mobileOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0',
         )}
-        <button
-          onClick={() => setCollapsed(!collapsed)}
-          className="ml-auto p-1 rounded hover:bg-sidebar-accent text-sidebar-foreground/60 hover:text-sidebar-foreground"
-        >
-          {collapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
-        </button>
-      </div>
+      >
+        {/* Logo / header */}
+        <div className="flex items-center h-14 px-3 border-b border-sidebar-border shrink-0">
+          <div className={cn(
+            'flex items-center justify-center w-8 h-8 rounded-lg shrink-0',
+            'bg-gradient-to-br from-blue-500 to-violet-600'
+          )}>
+            <BarChart3 className="h-4 w-4 text-white" />
+          </div>
+          {!collapsed && (
+            <span className="ml-2.5 font-bold text-sidebar-foreground text-sm tracking-tight truncate">
+              PMO Portal
+            </span>
+          )}
+          <button
+            onClick={() => setCollapsed(!collapsed)}
+            className="ml-auto p-1.5 rounded-md hover:bg-sidebar-accent text-sidebar-foreground/50 hover:text-sidebar-foreground transition-colors hidden lg:block"
+          >
+            {collapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
+          </button>
+          {/* Mobile close */}
+          <button
+            onClick={onMobileClose}
+            className="ml-auto p-1.5 rounded-md hover:bg-sidebar-accent text-sidebar-foreground/50 hover:text-sidebar-foreground transition-colors lg:hidden"
+          >
+            <ChevronLeft className="h-4 w-4" />
+          </button>
+        </div>
 
-      {/* Navigation */}
-      <nav className="flex-1 overflow-y-auto py-2 px-2 space-y-0.5">
-        {filteredNav.map((item) => {
-          const isActive = pathname === item.href || pathname.startsWith(item.href + '/')
-          const Icon = item.icon
-          return (
-            <Link
-              key={item.href}
-              href={item.href}
-              className={cn(
-                'flex items-center gap-3 px-2 py-2 rounded-md text-sm transition-colors',
-                isActive
-                  ? 'bg-sidebar-accent text-sidebar-primary font-medium'
-                  : 'text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground'
-              )}
-            >
-              <Icon className="h-4 w-4 shrink-0" />
-              {!collapsed && (
-                <>
-                  <span className="flex-1 truncate">
-                    {item.href === '/projects' && user?.role === 'PROJECT_LEAD' ? 'My Projects' : item.label}
-                  </span>
-                  {item.label === 'Notifications' && unreadCount > 0 && (
-                    <Badge variant="destructive" className="text-xs px-1.5 py-0 h-5">
-                      {unreadCount > 9 ? '9+' : unreadCount}
-                    </Badge>
-                  )}
-                  {item.label === 'Requests' && pendingRequestsCount > 0 && (
-                    <Badge className="text-xs px-1.5 py-0 h-5 bg-orange-500 hover:bg-orange-500">
-                      {pendingRequestsCount > 9 ? '9+' : pendingRequestsCount}
-                    </Badge>
-                  )}
-                  {item.label === 'Approvals' && pendingRequestsCount > 0 && (
-                    <Badge className="text-xs px-1.5 py-0 h-5 bg-orange-500 hover:bg-orange-500">
-                      {pendingRequestsCount > 9 ? '9+' : pendingRequestsCount}
-                    </Badge>
-                  )}
-                </>
-              )}
-            </Link>
-          )
-        })}
-      </nav>
-
-      {/* User area */}
-      <div className="p-2 border-t border-sidebar-border">
-        {user && (
-          <div className={cn('flex items-center gap-2', collapsed && 'justify-center')}>
-            <Avatar className="h-8 w-8 shrink-0">
-              <AvatarFallback className="text-xs bg-blue-600 text-white">{initials}</AvatarFallback>
-            </Avatar>
-            {!collapsed && (
-              <div className="flex-1 min-w-0">
-                <p className="text-xs font-medium text-sidebar-foreground truncate">{user.name}</p>
-                <p className="text-xs text-sidebar-foreground/50 truncate capitalize">
-                  {user.role.toLowerCase().replace('_', ' ')}
-                </p>
-              </div>
-            )}
-            {!collapsed && (
-              <button
-                onClick={handleLogout}
-                className="p-1.5 rounded hover:bg-sidebar-accent text-sidebar-foreground/50 hover:text-red-400 transition-colors"
-                title="Sign out"
+        {/* Navigation */}
+        <nav className="flex-1 overflow-y-auto py-3 px-2 space-y-0.5">
+          {filteredNav.map((item) => {
+            const isActive = pathname === item.href || pathname.startsWith(item.href + '/')
+            const Icon = item.icon
+            const hasNotifBadge = item.label === 'Notifications' && unreadCount > 0
+            const hasReqBadge = (item.label === 'Requests' || item.label === 'Approvals') && pendingRequestsCount > 0
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                onClick={onMobileClose}
+                className={cn(
+                  'flex items-center gap-3 px-2.5 py-2 rounded-lg text-sm transition-all duration-150',
+                  isActive
+                    ? 'bg-sidebar-accent text-sidebar-foreground font-medium shadow-sm'
+                    : 'text-sidebar-foreground/60 hover:bg-sidebar-accent/60 hover:text-sidebar-foreground'
+                )}
               >
-                <LogOut className="h-4 w-4" />
-              </button>
+                <Icon className={cn('h-4 w-4 shrink-0', isActive ? 'text-sidebar-primary' : item.color)} />
+                {!collapsed && (
+                  <>
+                    <span className="flex-1 truncate">
+                      {item.href === '/projects' && user?.role === 'PROJECT_LEAD' ? 'My Projects' : item.label}
+                    </span>
+                    {hasNotifBadge && (
+                      <Badge variant="destructive" className="text-xs px-1.5 py-0 h-5 min-w-[20px]">
+                        {unreadCount > 9 ? '9+' : unreadCount}
+                      </Badge>
+                    )}
+                    {hasReqBadge && (
+                      <Badge className="text-xs px-1.5 py-0 h-5 min-w-[20px] bg-amber-500 hover:bg-amber-500 text-white">
+                        {pendingRequestsCount > 9 ? '9+' : pendingRequestsCount}
+                      </Badge>
+                    )}
+                  </>
+                )}
+                {collapsed && hasNotifBadge && (
+                  <span className="absolute right-2 top-1 h-2 w-2 rounded-full bg-red-500" />
+                )}
+              </Link>
+            )
+          })}
+        </nav>
+
+        {/* Bottom: theme toggle + user */}
+        <div className="shrink-0 border-t border-sidebar-border p-2 space-y-1">
+          {/* Theme toggle row */}
+          <div className={cn('flex items-center', collapsed ? 'justify-center' : 'px-1')}>
+            <ThemeToggle />
+            {!collapsed && (
+              <span className="ml-1 text-xs text-sidebar-foreground/40 select-none">
+                Toggle theme
+              </span>
             )}
           </div>
-        )}
-      </div>
-    </aside>
+
+          {/* User row */}
+          {user && (
+            <div className={cn('flex items-center gap-2 px-1', collapsed && 'justify-center')}>
+              <Avatar className="h-8 w-8 shrink-0">
+                <AvatarFallback className="text-xs font-semibold bg-gradient-to-br from-blue-500 to-violet-600 text-white">
+                  {initials}
+                </AvatarFallback>
+              </Avatar>
+              {!collapsed && (
+                <>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-semibold text-sidebar-foreground truncate">{user.name}</p>
+                    <p className="text-xs text-sidebar-foreground/45 truncate capitalize">
+                      {user.role.toLowerCase().replace(/_/g, ' ')}
+                    </p>
+                  </div>
+                  <button
+                    onClick={handleLogout}
+                    className="p-1.5 rounded-md hover:bg-sidebar-accent text-sidebar-foreground/40 hover:text-red-400 transition-colors"
+                    title="Sign out"
+                  >
+                    <LogOut className="h-4 w-4" />
+                  </button>
+                </>
+              )}
+            </div>
+          )}
+        </div>
+      </aside>
+    </>
   )
 }
