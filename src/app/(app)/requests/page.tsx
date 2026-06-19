@@ -507,7 +507,7 @@ export default function RequestsPage() {
   )
 
   const canManage = user && ['ADMIN', 'MANAGER', 'PLANNER'].includes(user.role)
-  const canStrategic = user && ['ADMIN', 'MANAGER', 'PLANNER'].includes(user.role)
+  const canStrategic = !!user && user.role !== 'RESOURCE'
 
   const counts: Record<string, number> = {
     ALL: requests.length,
