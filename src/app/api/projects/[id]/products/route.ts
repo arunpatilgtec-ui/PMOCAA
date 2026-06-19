@@ -1,6 +1,11 @@
 import { NextRequest } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { requireAuth } from '@/lib/auth'
+import { addWorkingDays } from '@/lib/date-utils'
+
+// DW: Planning(2) + TearDown(5) + Costing(5) = 12 working days before BOB
+const DW_BOB_OFFSET = 12
+const DW_BOB_DURATION = 2
 
 type Ctx = { params: Promise<{ id: string }> }
 
@@ -128,20 +133,22 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       })
     }
 
-    // For DW projects, create a per-product BOB & A2Mac1 task
+    // For DW projects, create a per-product BOB & A2Mac1 task with offset dates
     if (project?.category === 'Dishwasher') {
       const bobWs = await prisma.workstream.findFirst({
         where: { projectId: id, name: 'BOB & A2Mac1' },
       })
       if (bobWs) {
+        const bobStart = project.startDate ? addWorkingDays(new Date(project.startDate), DW_BOB_OFFSET) : null
+        const bobEnd = project.startDate ? addWorkingDays(new Date(project.startDate), DW_BOB_OFFSET + DW_BOB_DURATION - 1) : null
         await prisma.task.create({
           data: {
             workstreamId: bobWs.id,
             name: `${product.brand}${product.modelNo ? ` ${product.modelNo}` : ''} — BOB & A2Mac1`,
             description: `__productTask:${product.id}:bob__`,
             ownerId: product.leadId ?? null,
-            startDate: project.startDate ?? null,
-            endDate: project.endDate ?? null,
+            startDate: bobStart,
+            endDate: bobEnd,
             estimatedHours: 16,
             effortHours: 16,
           },

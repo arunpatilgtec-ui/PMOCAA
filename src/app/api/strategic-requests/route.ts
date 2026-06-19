@@ -30,7 +30,7 @@ export async function GET() {
 export async function POST(req: NextRequest) {
   try {
     const session = await requireAuth()
-    if (!['ADMIN', 'MANAGER', 'PLANNER'].includes(session.role)) {
+    if (!['ADMIN', 'MANAGER', 'PLANNER', 'PROJECT_LEAD'].includes(session.role)) {
       return Response.json({ error: 'Forbidden' }, { status: 403 })
     }
     const data = await req.json()

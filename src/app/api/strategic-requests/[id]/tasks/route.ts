@@ -7,7 +7,7 @@ type Ctx = { params: Promise<{ id: string }> }
 export async function POST(req: NextRequest, ctx: Ctx) {
   try {
     const session = await requireAuth()
-    if (!['ADMIN', 'MANAGER', 'PLANNER'].includes(session.role)) {
+    if (!['ADMIN', 'MANAGER', 'PLANNER', 'PROJECT_LEAD'].includes(session.role)) {
       return Response.json({ error: 'Forbidden' }, { status: 403 })
     }
     const { id } = await ctx.params

@@ -1,6 +1,10 @@
 import { NextRequest } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { requireAuth } from '@/lib/auth'
+import { addWorkingDays } from '@/lib/date-utils'
+
+const DW_BOB_OFFSET = 12
+const DW_BOB_DURATION = 2
 
 type Ctx = { params: Promise<{ id: string; productId: string }> }
 
@@ -154,7 +158,7 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
         await prisma.task.createMany({ data: taskRows })
       }
 
-      // For DW projects, sync the per-product BOB & A2Mac1 task
+      // For DW projects, sync the per-product BOB & A2Mac1 task with offset dates
       if (proj?.category === 'Dishwasher') {
         const bobWs = await prisma.workstream.findFirst({
           where: { projectId: id, name: 'BOB & A2Mac1' },
@@ -165,14 +169,16 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
           })
           const brand = productRecord?.brand ?? ''
           const modelNo = productRecord?.modelNo ?? ''
+          const bobStart = proj.startDate ? addWorkingDays(new Date(proj.startDate), DW_BOB_OFFSET) : null
+          const bobEnd = proj.startDate ? addWorkingDays(new Date(proj.startDate), DW_BOB_OFFSET + DW_BOB_DURATION - 1) : null
           await prisma.task.create({
             data: {
               workstreamId: bobWs.id,
               name: `${brand}${modelNo ? ` ${modelNo}` : ''} — BOB & A2Mac1`,
               description: `__productTask:${productId}:bob__`,
               ownerId: data.leadId || current.leadId || null,
-              startDate: proj?.startDate ?? null,
-              endDate: proj?.endDate ?? null,
+              startDate: bobStart,
+              endDate: bobEnd,
               estimatedHours: 16,
               effortHours: 16,
             },
