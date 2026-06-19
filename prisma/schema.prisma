@@ -98,6 +98,12 @@ enum PlanStatus {
   APPROVED
 }
 
+enum StrategicStatus {
+  ACTIVE
+  COMPLETED
+  CANCELLED
+}
+
 model User {
   id          String   @id @default(cuid())
   email       String   @unique
@@ -138,6 +144,8 @@ model User {
   taskOwnerChangesTo       TaskOwnerHistory[] @relation("TaskOwnerChangeTo")
   productHistoryChanges    ProductHistory[]   @relation("ProductHistoryChanger")
   productHistoryTargeted   ProductHistory[]   @relation("ProductHistoryTarget")
+  strategicRequestsSubmitted StrategicRequest[] @relation("StrategicRequestSubmitter")
+  strategicTasksAssigned     StrategicTask[]    @relation("StrategicTaskAssignee")
 
   @@map("users")
 }
@@ -457,6 +465,41 @@ model ProductResource {
 
   @@unique([productId, userId])
   @@map("product_resources")
+}
+
+model StrategicRequest {
+  id          String          @id @default(cuid())
+  title       String
+  description String?
+  startDate   DateTime
+  status      StrategicStatus @default(ACTIVE)
+  submitterId String
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  submitter User            @relation("StrategicRequestSubmitter", fields: [submitterId], references: [id], onDelete: Cascade)
+  tasks     StrategicTask[]
+
+  @@map("strategic_requests")
+}
+
+model StrategicTask {
+  id                 String   @id @default(cuid())
+  title              String
+  isRecurring        Boolean  @default(false)
+  hoursPerDay        Float?
+  estimatedHours     Float?
+  startDate          DateTime?
+  endDate            DateTime?
+  assigneeId         String?
+  strategicRequestId String
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  assignee         User?            @relation("StrategicTaskAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+  strategicRequest StrategicRequest @relation(fields: [strategicRequestId], references: [id], onDelete: Cascade)
+
+  @@map("strategic_tasks")
 }
 
 model TaskOwnerHistory {

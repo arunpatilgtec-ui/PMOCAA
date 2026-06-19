@@ -10,9 +10,7 @@ export async function PATCH(req: NextRequest, ctx: RouteContext<'/api/requests/[
     const { id } = await ctx.params
     const data = await req.json()
 
-    if (!['ADMIN', 'MANAGER', 'PLANNER'].includes(session.role)) {
-      return Response.json({ error: 'Forbidden' }, { status: 403 })
-    }
+    const isManager = ['ADMIN', 'MANAGER', 'PLANNER'].includes(session.role)
 
     // Fetch existing request to get submitter info and fields for task creation
     const existing = await prisma.request.findUnique({
@@ -27,6 +25,33 @@ export async function PATCH(req: NextRequest, ctx: RouteContext<'/api/requests/[
     })
     if (!existing) {
       return Response.json({ error: 'Not found' }, { status: 404 })
+    }
+
+    const isOwnSubmitted = existing.submitterId === session.id && existing.status === 'SUBMITTED'
+
+    // Submitter can only edit their own SUBMITTED request (not status changes, not convert)
+    if (!isManager && !isOwnSubmitted) {
+      return Response.json({ error: 'Forbidden' }, { status: 403 })
+    }
+
+    // Submitter editing own request — only allow field edits, not status/conversion
+    if (!isManager && isOwnSubmitted) {
+      const updated = await prisma.request.update({
+        where: { id },
+        data: {
+          ...(data.title !== undefined && { title: data.title }),
+          ...(data.description !== undefined && { description: data.description }),
+          ...(data.priority !== undefined && { priority: data.priority }),
+          ...(data.type !== undefined && { type: data.type }),
+          ...(data.notes !== undefined && { notes: data.notes || null }),
+          ...(data.startDate !== undefined && { startDate: data.startDate ? new Date(data.startDate) : null }),
+          ...(data.endDate !== undefined && { endDate: data.endDate ? new Date(data.endDate) : null }),
+          ...(data.isRecurring !== undefined && { isRecurring: data.isRecurring }),
+          ...(data.hoursPerDay !== undefined && { hoursPerDay: data.hoursPerDay ? parseFloat(String(data.hoursPerDay)) : null }),
+          ...(data.estimatedHours !== undefined && { estimatedHours: data.estimatedHours ? parseFloat(String(data.estimatedHours)) : null }),
+        },
+      })
+      return Response.json(updated)
     }
 
     // Convert to project
@@ -173,6 +198,33 @@ export async function PATCH(req: NextRequest, ctx: RouteContext<'/api/requests/[
     }
 
     return Response.json(request)
+  } catch (err: unknown) {
+    if (err instanceof Error && err.message === 'Unauthorized') {
+      return Response.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+    return Response.json({ error: 'Internal server error' }, { status: 500 })
+  }
+}
+
+export async function DELETE(_req: NextRequest, ctx: RouteContext<'/api/requests/[id]'>) {
+  try {
+    const session = await requireAuth()
+    const { id } = await ctx.params
+
+    const existing = await prisma.request.findUnique({
+      where: { id },
+      select: { submitterId: true, status: true },
+    })
+    if (!existing) return Response.json({ error: 'Not found' }, { status: 404 })
+
+    const canDelete =
+      ['ADMIN', 'MANAGER', 'PLANNER'].includes(session.role) ||
+      (existing.submitterId === session.id && existing.status === 'SUBMITTED')
+
+    if (!canDelete) return Response.json({ error: 'Forbidden' }, { status: 403 })
+
+    await prisma.request.delete({ where: { id } })
+    return Response.json({ ok: true })
   } catch (err: unknown) {
     if (err instanceof Error && err.message === 'Unauthorized') {
       return Response.json({ error: 'Unauthorized' }, { status: 401 })
