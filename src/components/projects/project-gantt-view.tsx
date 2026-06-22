@@ -129,21 +129,30 @@ export function ProjectGanttView({
     wk = addDays(wEnd, 1)
   }
 
-  // Workstreams whose names signal they belong to the Report tab only — hide from Gantt
-  const REPORT_ONLY = new Set(['Deliverables', 'Report', 'Reports & Report-out'])
+  // Workstream names that are always per-product (excluded from common section even if empty)
+  const PER_PRODUCT_NAMES = new Set(['Product Costing', 'BOB & A2Mac1', 'Costing'])
 
-  // Dynamically detect per-product workstreams: any WS that has at least one __productTask: tagged task
+  // Dynamically detect per-product workstreams: has tagged tasks OR matches a known per-product name
   const perProductWsIds = new Set(
     project.workstreams
-      .filter((ws) => ws.tasks.some((t) => t.description?.match(/__productTask:[^:]+:/)))
+      .filter((ws) =>
+        PER_PRODUCT_NAMES.has(ws.name) ||
+        ws.tasks.some((t) => t.description?.match(/__productTask:[^:]+:/))
+      )
       .map((ws) => ws.id)
   )
 
+  // Workstreams to hide from Gantt entirely (report/deliverables tab only)
+  function isReportOnly(name: string) {
+    const lower = name.toLowerCase()
+    return lower.includes('report') || lower === 'deliverables'
+  }
+
   const allRows: GanttRow[] = []
 
-  // 1. Common workstreams shown once at top
+  // 1. Common workstreams shown once at top (skip per-product, report-only, and empty)
   for (const ws of project.workstreams) {
-    if (perProductWsIds.has(ws.id) || REPORT_ONLY.has(ws.name)) continue
+    if (perProductWsIds.has(ws.id) || isReportOnly(ws.name) || ws.tasks.length === 0) continue
     allRows.push({ type: 'ws', ws, label: ws.name })
     for (const task of ws.tasks) allRows.push({ type: 'task', ws, task, label: ws.name })
   }
