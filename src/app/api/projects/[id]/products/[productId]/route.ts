@@ -171,30 +171,17 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
           const modelNo = productRecord?.modelNo ?? ''
           const bobStart = proj.startDate ? addWorkingDays(new Date(proj.startDate), DW_BOB_OFFSET) : null
           const bobEnd = proj.startDate ? addWorkingDays(new Date(proj.startDate), DW_BOB_OFFSET + DW_BOB_DURATION - 1) : null
-          const productLabel = `${brand}${modelNo ? ` ${modelNo}` : ''}`
-          await prisma.task.createMany({
-            data: [
-              {
-                workstreamId: bobWs.id,
-                name: `${productLabel} — A2Mac1`,
-                description: `__productTask:${productId}:a2mac1__`,
-                ownerId: data.leadId || current.leadId || null,
-                startDate: bobStart,
-                endDate: bobEnd,
-                estimatedHours: 16,
-                effortHours: 16,
-              },
-              {
-                workstreamId: bobWs.id,
-                name: `${productLabel} — BOB`,
-                description: `__productTask:${productId}:bob__`,
-                ownerId: data.leadId || current.leadId || null,
-                startDate: bobStart,
-                endDate: bobEnd,
-                estimatedHours: 16,
-                effortHours: 16,
-              },
-            ],
+          await prisma.task.create({
+            data: {
+              workstreamId: bobWs.id,
+              name: `${brand}${modelNo ? ` ${modelNo}` : ''} — BOB & A2Mac1`,
+              description: `__productTask:${productId}:bob__`,
+              ownerId: data.leadId || current.leadId || null,
+              startDate: bobStart,
+              endDate: bobEnd,
+              estimatedHours: 16,
+              effortHours: 16,
+            },
           })
         }
       }
