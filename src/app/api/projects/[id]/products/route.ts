@@ -141,17 +141,30 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       if (bobWs) {
         const bobStart = project.startDate ? addWorkingDays(new Date(project.startDate), DW_BOB_OFFSET) : null
         const bobEnd = project.startDate ? addWorkingDays(new Date(project.startDate), DW_BOB_OFFSET + DW_BOB_DURATION - 1) : null
-        await prisma.task.create({
-          data: {
-            workstreamId: bobWs.id,
-            name: `${product.brand}${product.modelNo ? ` ${product.modelNo}` : ''} — BOB & A2Mac1`,
-            description: `__productTask:${product.id}:bob__`,
-            ownerId: product.leadId ?? null,
-            startDate: bobStart,
-            endDate: bobEnd,
-            estimatedHours: 16,
-            effortHours: 16,
-          },
+        const productLabel = `${product.brand}${product.modelNo ? ` ${product.modelNo}` : ''}`
+        await prisma.task.createMany({
+          data: [
+            {
+              workstreamId: bobWs.id,
+              name: `${productLabel} — A2Mac1`,
+              description: `__productTask:${product.id}:a2mac1__`,
+              ownerId: product.leadId ?? null,
+              startDate: bobStart,
+              endDate: bobEnd,
+              estimatedHours: 16,
+              effortHours: 16,
+            },
+            {
+              workstreamId: bobWs.id,
+              name: `${productLabel} — BOB`,
+              description: `__productTask:${product.id}:bob__`,
+              ownerId: product.leadId ?? null,
+              startDate: bobStart,
+              endDate: bobEnd,
+              estimatedHours: 16,
+              effortHours: 16,
+            },
+          ],
         })
       }
     }
