@@ -138,14 +138,23 @@ export default function ProjectDetailPage() {
 
   const load = useCallback(async () => {
     try {
-      const res = await fetch(`/api/projects/${id}`)
-      if (!res.ok) { router.push('/projects'); return }
-      const data = await res.json()
+      const [projRes, prodRes] = await Promise.all([
+        fetch(`/api/projects/${id}`),
+        fetch(`/api/projects/${id}/products`),
+      ])
+      if (!projRes.ok) { router.push('/projects'); return }
+      const data = await projRes.json()
       setProject(data)
-      // Auto-open wizard for new projects with no workstreams (unless dismissed)
       const dismissKey = `wizard-dismissed-${id}`
       if (data.workstreams?.length === 0 && !localStorage.getItem(dismissKey)) {
         setWizardOpen(true)
+      }
+      if (prodRes.ok) {
+        const prods = await prodRes.json()
+        if (Array.isArray(prods)) {
+          setTimelineProducts(prods)
+          if (prods.length > 0) setTimelineProductId((prev) => prev ?? prods[0].id)
+        }
       }
     } finally {
       setLoading(false)
@@ -162,19 +171,6 @@ export default function ProjectDetailPage() {
       document.removeEventListener('visibilitychange', onVisible)
     }
   }, [load])
-
-  useEffect(() => {
-    if (!id) return
-    fetch(`/api/projects/${id}/products`)
-      .then((r) => r.json())
-      .then((d) => {
-        if (Array.isArray(d) && d.length > 0) {
-          setTimelineProducts(d)
-          setTimelineProductId((prev) => prev ?? d[0].id)
-        }
-      })
-      .catch(() => {})
-  }, [id])
 
   if (loading) {
     return (
