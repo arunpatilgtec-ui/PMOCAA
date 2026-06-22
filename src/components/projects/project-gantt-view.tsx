@@ -129,34 +129,37 @@ export function ProjectGanttView({
     wk = addDays(wEnd, 1)
   }
 
-  const PER_PRODUCT_WS = new Set(['Product Costing', 'BOB & A2Mac1'])
-  const CHECKLIST_WS = new Set(['Planning', 'Deliverables', 'Report', 'Reports & Report-out'])
+  // Workstreams whose names signal they belong to the Report tab only — hide from Gantt
+  const REPORT_ONLY = new Set(['Deliverables', 'Report', 'Reports & Report-out'])
+
+  // Dynamically detect per-product workstreams: any WS that has at least one __productTask: tagged task
+  const perProductWsIds = new Set(
+    project.workstreams
+      .filter((ws) => ws.tasks.some((t) => t.description?.match(/__productTask:[^:]+:/)))
+      .map((ws) => ws.id)
+  )
 
   const allRows: GanttRow[] = []
 
-  // 1. Common workstreams shown once at the top (not per-product, not report-only)
+  // 1. Common workstreams shown once at top
   for (const ws of project.workstreams) {
-    if (!PER_PRODUCT_WS.has(ws.name) && !CHECKLIST_WS.has(ws.name)) {
-      allRows.push({ type: 'ws', ws, label: ws.name })
-      for (const task of ws.tasks) allRows.push({ type: 'task', ws, task, label: ws.name })
-    }
+    if (perProductWsIds.has(ws.id) || REPORT_ONLY.has(ws.name)) continue
+    allRows.push({ type: 'ws', ws, label: ws.name })
+    for (const task of ws.tasks) allRows.push({ type: 'task', ws, task, label: ws.name })
   }
 
-  // 2. Per-product workstreams — collect all tagged tasks, group by product
-  const perProductWss = project.workstreams.filter((ws) => PER_PRODUCT_WS.has(ws.name))
-  if (perProductWss.length > 0) {
+  // 2. Per-product workstreams — gather ALL tagged tasks, group under one product header each
+  if (perProductWsIds.size > 0) {
     const productTaskMap = new Map<string, { task: Task; ws: Workstream }[]>()
-    const untagged: { task: Task; ws: Workstream }[] = []
 
-    for (const ws of perProductWss) {
+    for (const ws of project.workstreams) {
+      if (!perProductWsIds.has(ws.id)) continue
       for (const task of ws.tasks) {
         const match = task.description?.match(/__productTask:([^:]+):/)
         if (match) {
           const pid = match[1]
           if (!productTaskMap.has(pid)) productTaskMap.set(pid, [])
           productTaskMap.get(pid)!.push({ task, ws })
-        } else {
-          untagged.push({ task, ws })
         }
       }
     }
@@ -173,10 +176,6 @@ export function ProjectGanttView({
       for (const { task, ws } of taskList) {
         allRows.push({ type: 'task', ws, task, label })
       }
-    }
-
-    for (const { task, ws } of untagged) {
-      allRows.push({ type: 'task', ws, task, label: ws.name })
     }
   }
 
