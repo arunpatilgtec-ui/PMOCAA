@@ -479,7 +479,10 @@ export function ProductsPanel({
   }, [project.id])
 
   function getProductTasks(productId: string): ProductTask[] {
-    return allTasks.filter((t) => t.description?.includes(`__productTask:${productId}:`))
+    return allTasks.filter((t) => {
+      if (!t.description?.includes(`__productTask:${productId}:`)) return false
+      return !t.description.includes(':a2mac1__') && !t.description.includes(':bob__')
+    })
   }
 
   function openAdd() {

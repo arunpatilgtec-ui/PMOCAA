@@ -80,7 +80,7 @@ function DateRange({ start, end, muted }: { start?: string; end?: string; muted?
   )
 }
 
-export function WorkstreamPanel({ project, onRefresh, productId, onlyDeliverables, onlyPerProduct, hidePerProduct }: { project: Project; onRefresh: () => void; productId?: string; onlyDeliverables?: boolean; onlyPerProduct?: boolean; hidePerProduct?: boolean }) {
+export function WorkstreamPanel({ project, onRefresh, productId, onlyDeliverables }: { project: Project; onRefresh: () => void; productId?: string; onlyDeliverables?: boolean }) {
   const { user } = useAuthStore()
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
   const [expandedTask, setExpandedTask] = useState<string | null>(null)
@@ -205,12 +205,6 @@ export function WorkstreamPanel({ project, onRefresh, productId, onlyDeliverable
   const PER_PRODUCT_WS = new Set(['Product Costing', 'BOB & A2Mac1'])
   const visibleWorkstreams = onlyDeliverables
     ? project.workstreams.filter((ws) => CHECKLIST_WS.has(ws.name))
-    : onlyPerProduct && productId
-    ? project.workstreams
-        .filter((ws) => PER_PRODUCT_WS.has(ws.name))
-        .map((ws) => ({ ...ws, tasks: ws.tasks.filter((t) => t.description?.includes(`__productTask:${productId}:`)) }))
-    : hidePerProduct
-    ? project.workstreams.filter((ws) => !CHECKLIST_WS.has(ws.name) && !PER_PRODUCT_WS.has(ws.name))
     : productId
     ? project.workstreams
         .filter((ws) => !CHECKLIST_WS.has(ws.name))

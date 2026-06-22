@@ -78,7 +78,6 @@ interface DragState {
 
 type GanttRow =
   | { type: 'ws'; ws: Workstream; label: string }
-  | { type: 'product'; productId: string; label: string }
   | { type: 'task'; ws: Workstream; task: Task; label: string }
 
 export function ProjectGanttView({
@@ -129,56 +128,41 @@ export function ProjectGanttView({
     wk = addDays(wEnd, 1)
   }
 
-  // Workstreams whose tasks belong to individual products
+  // Workstreams whose tasks are grouped per product in the Gantt
   const PER_PRODUCT_WS = new Set(['Product Costing', 'BOB & A2Mac1'])
 
-  // Build rows: common workstreams first, then group per-product workstreams by product
+  // Build rows — group per-product workstream tasks by product label
   const allRows: GanttRow[] = []
-
-  // 1. Common workstreams
   for (const ws of project.workstreams) {
-    if (!PER_PRODUCT_WS.has(ws.name)) {
-      allRows.push({ type: 'ws', ws, label: ws.name })
-      for (const task of ws.tasks) allRows.push({ type: 'task', ws, task, label: ws.name })
-    }
-  }
-
-  // 2. Per-product workstreams — collect and group by productId
-  const perProductWss = project.workstreams.filter((ws) => PER_PRODUCT_WS.has(ws.name))
-  if (perProductWss.length > 0) {
-    const productTaskMap = new Map<string, { task: Task; ws: Workstream }[]>()
-    const untagged: { task: Task; ws: Workstream }[] = []
-
-    for (const ws of perProductWss) {
+    if (PER_PRODUCT_WS.has(ws.name)) {
+      const byProduct = new Map<string, Task[]>()
+      const untaggedTasks: Task[] = []
       for (const task of ws.tasks) {
         const match = task.description?.match(/__productTask:([^:]+):/)
-        if (match && match[1] !== 'unknown') {
+        if (match) {
           const pid = match[1]
-          if (!productTaskMap.has(pid)) productTaskMap.set(pid, [])
-          productTaskMap.get(pid)!.push({ task, ws })
+          if (!byProduct.has(pid)) byProduct.set(pid, [])
+          byProduct.get(pid)!.push(task)
         } else {
-          untagged.push({ task, ws })
+          untaggedTasks.push(task)
         }
       }
-    }
-
-    // Render in product order (use products array order, fallback to insertion order)
-    const orderedIds = products.length > 0
-      ? products.map((p) => p.id).filter((id) => productTaskMap.has(id))
-      : [...productTaskMap.keys()]
-
-    for (const pid of orderedIds) {
-      const taskList = productTaskMap.get(pid)!
-      const p = products.find((pr) => pr.id === pid)
-      const label = p ? `${p.brand}${p.modelNo ? ` ${p.modelNo}` : ''}` : pid
-      allRows.push({ type: 'product', productId: pid, label })
-      for (const { task, ws } of taskList) {
-        allRows.push({ type: 'task', ws, task, label })
+      if (byProduct.size === 0 && untaggedTasks.length === 0) {
+        allRows.push({ type: 'ws', ws, label: ws.name })
+      } else {
+        for (const [productId, tasks] of byProduct) {
+          const p = products.find((pr) => pr.id === productId)
+          const label = p ? `${p.brand}${p.modelNo ? ` ${p.modelNo}` : ''}` : ws.name
+          allRows.push({ type: 'ws', ws, label })
+          for (const task of tasks) allRows.push({ type: 'task', ws, task, label })
+        }
+        for (const task of untaggedTasks) {
+          allRows.push({ type: 'task', ws, task, label: ws.name })
+        }
       }
-    }
-
-    for (const { task, ws } of untagged) {
-      allRows.push({ type: 'task', ws, task, label: ws.name })
+    } else {
+      allRows.push({ type: 'ws', ws, label: ws.name })
+      for (const task of ws.tasks) allRows.push({ type: 'task', ws, task, label: ws.name })
     }
   }
 
@@ -390,27 +374,6 @@ export function ProjectGanttView({
 
             {/* Rows */}
             {allRows.map((row, ri) => {
-              if (row.type === 'product') {
-                return (
-                  <div key={`product-${row.productId}-${ri}`} className="flex border-b bg-primary/5 dark:bg-primary/10">
-                    <div
-                      style={{ width: LABEL_W, minWidth: LABEL_W, height: ROW_H }}
-                      className="shrink-0 border-r px-3 flex items-center text-xs font-bold text-primary tracking-wide"
-                    >
-                      {row.label}
-                    </div>
-                    <div className="relative flex-1" style={{ height: ROW_H }}>
-                      {days.map((day, di) => isWeekend(day) ? (
-                        <div key={di} className="absolute top-0 bottom-0 bg-muted/40" style={{ left: di * dayW, width: dayW }} />
-                      ) : null)}
-                      {todayOffset >= 0 && (
-                        <div className="absolute top-0 bottom-0 w-px bg-blue-500/60 z-10" style={{ left: todayOffset }} />
-                      )}
-                    </div>
-                  </div>
-                )
-              }
-
               if (row.type === 'ws') {
                 return (
                   <div key={`ws-${row.ws.id}-${ri}`} className="flex border-b bg-muted/20">
