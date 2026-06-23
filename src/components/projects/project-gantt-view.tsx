@@ -105,6 +105,7 @@ export function ProjectGanttView({
   const [actualStart, setActualStart] = useState('')
   const [actualEnd, setActualEnd] = useState('')
   const [savingActual, setSavingActual] = useState(false)
+  const [chartW, setChartW] = useState(900)
 
   const chartRef = useRef<HTMLDivElement>(null)
   const dragRef = useRef<DragState | null>(null)
@@ -116,8 +117,20 @@ export function ProjectGanttView({
       .catch(() => {})
   }, [project.id])
 
+  useEffect(() => {
+    const el = chartRef.current
+    if (!el) return
+    const ro = new ResizeObserver(() => {
+      setChartW(el.clientWidth)
+    })
+    ro.observe(el)
+    setChartW(el.clientWidth)
+    return () => ro.disconnect()
+  }, [])
+
   const today = new Date()
-  const viewEnd = addDays(viewStart, Math.ceil(700 / dayW))
+  const calendarW = Math.max(600, chartW - LABEL_W - 4)
+  const viewEnd = addDays(viewStart, Math.ceil(calendarW / dayW))
   const days = eachDayOfInterval({ start: viewStart, end: viewEnd })
 
   const weeks: Array<{ label: string; days: Date[] }> = []
@@ -129,16 +142,12 @@ export function ProjectGanttView({
     wk = addDays(wEnd, 1)
   }
 
-  // Workstream names that are always per-product (excluded from common section even if empty)
-  const PER_PRODUCT_NAMES = new Set(['Product Costing', 'BOB & A2Mac1', 'Costing'])
-
-  // Dynamically detect per-product workstreams: has tagged tasks OR matches a known per-product name
+  // A workstream is "per-product" only when it actually contains tagged tasks.
+  // Name-based detection caused shared workstreams (e.g. Refrigeration "Costing") to
+  // disappear from both common and product sections.
   const perProductWsIds = new Set(
     project.workstreams
-      .filter((ws) =>
-        PER_PRODUCT_NAMES.has(ws.name) ||
-        ws.tasks.some((t) => t.description?.match(/__productTask:[^:]+:/))
-      )
+      .filter((ws) => ws.tasks.some((t) => t.description?.match(/__productTask:[^:]+:/)))
       .map((ws) => ws.id)
   )
 
@@ -158,7 +167,7 @@ export function ProjectGanttView({
   }
 
   // 2. Per-product workstreams — gather ALL tagged tasks, group under one product header each
-  if (perProductWsIds.size > 0) {
+  if (perProductWsIds.size > 0 || products.length > 0) {
     const productTaskMap = new Map<string, { task: Task; ws: Workstream }[]>()
 
     for (const ws of project.workstreams) {
@@ -173,12 +182,13 @@ export function ProjectGanttView({
       }
     }
 
+    // Show all products — even those without tagged tasks yet
     const orderedIds = products.length > 0
-      ? products.map((p) => p.id).filter((id) => productTaskMap.has(id))
+      ? products.map((p) => p.id)
       : [...productTaskMap.keys()]
 
     for (const pid of orderedIds) {
-      const taskList = productTaskMap.get(pid)!
+      const taskList = productTaskMap.get(pid) ?? []
       const p = products.find((pr) => pr.id === pid)
       const label = p ? `${p.brand}${p.modelNo ? ` ${p.modelNo}` : ''}` : pid
       allRows.push({ type: 'product', productId: pid, label })

@@ -104,6 +104,13 @@ enum StrategicStatus {
   CANCELLED
 }
 
+enum LeaveType {
+  VACATION
+  SICK
+  PERSONAL
+  OTHER
+}
+
 model User {
   id          String   @id @default(cuid())
   email       String   @unique
@@ -146,6 +153,8 @@ model User {
   productHistoryTargeted   ProductHistory[]   @relation("ProductHistoryTarget")
   strategicRequestsSubmitted StrategicRequest[] @relation("StrategicRequestSubmitter")
   strategicTasksAssigned     StrategicTask[]    @relation("StrategicTaskAssignee")
+  leaves                     Leave[]
+  meetings                   Meeting[]
 
   @@map("users")
 }
@@ -500,6 +509,36 @@ model StrategicTask {
   strategicRequest StrategicRequest @relation(fields: [strategicRequestId], references: [id], onDelete: Cascade)
 
   @@map("strategic_tasks")
+}
+
+model Leave {
+  id           String    @id @default(cuid())
+  userId       String
+  type         LeaveType @default(VACATION)
+  startDate    DateTime
+  endDate      DateTime
+  reason       String?
+  tasksShifted Int       @default(0)
+  createdAt    DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("leaves")
+}
+
+model Meeting {
+  id          String   @id @default(cuid())
+  userId      String
+  title       String
+  date        DateTime
+  startTime   String
+  endTime     String
+  description String?
+  createdAt   DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("meetings")
 }
 
 model TaskOwnerHistory {

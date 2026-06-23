@@ -16,7 +16,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import {
   Plus, Search, ClipboardList, ArrowRight, CheckCircle2,
   XCircle, FolderPlus, Clock, AlertTriangle, Calendar, Repeat, Users, RotateCcw,
-  Pencil, Trash2, Target, ListPlus, ChevronDown, ChevronRight,
+  Pencil, Trash2, Target, ListPlus, ChevronDown, ChevronRight, Palmtree, RefreshCw, Video,
 } from 'lucide-react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -59,6 +59,26 @@ interface StrategicTaskData {
   startDate?: string
   endDate?: string
   assignee?: { id: string; name: string }
+}
+
+interface Meeting {
+  id: string
+  title: string
+  date: string
+  startTime: string
+  endTime: string
+  description?: string
+  createdAt: string
+}
+
+interface Leave {
+  id: string
+  type: string
+  startDate: string
+  endDate: string
+  reason?: string
+  tasksShifted: number
+  createdAt: string
 }
 
 interface StrategicRequest {
@@ -142,7 +162,7 @@ export default function RequestsPage() {
   const [createOpen,     setCreateOpen]     = useState(false)
   const [submitting,     setSubmitting]     = useState(false)
   const [actionLoading,  setActionLoading]  = useState<string | null>(null)
-  const [activeTab,      setActiveTab]      = useState<'requests' | 'assigned' | 'strategic'>('requests')
+  const [activeTab,      setActiveTab]      = useState<'requests' | 'assigned' | 'strategic' | 'leave' | 'meetings'>('requests')
   const [assignedTasks,  setAssignedTasks]  = useState<AssignedTask[]>([])
   const [assignedLoad,   setAssignedLoad]   = useState(false)
   const [reworkOpen,     setReworkOpen]     = useState<string | null>(null)
@@ -157,6 +177,27 @@ export default function RequestsPage() {
   const [reqEndDate,     setReqEndDate]     = useState('')
   const [reqHours,       setReqHours]       = useState('')
   const [formUsers,      setFormUsers]      = useState<User[]>([])
+
+  // Leave state
+  const [leaves,         setLeaves]         = useState<Leave[]>([])
+  const [leavesLoad,     setLeavesLoad]     = useState(false)
+  const [leaveOpen,      setLeaveOpen]      = useState(false)
+  const [leaveType,      setLeaveType]      = useState('VACATION')
+  const [leaveStart,     setLeaveStart]     = useState('')
+  const [leaveEnd,       setLeaveEnd]       = useState('')
+  const [leaveReason,    setLeaveReason]    = useState('')
+  const [leaveSubmit,    setLeaveSubmit]    = useState(false)
+
+  // Meeting state
+  const [meetings,       setMeetings]       = useState<Meeting[]>([])
+  const [meetingsLoad,   setMeetingsLoad]   = useState(false)
+  const [meetingOpen,    setMeetingOpen]    = useState(false)
+  const [meetTitle,      setMeetTitle]      = useState('')
+  const [meetDate,       setMeetDate]       = useState('')
+  const [meetStart,      setMeetStart]      = useState('')
+  const [meetEnd,        setMeetEnd]        = useState('')
+  const [meetDesc,       setMeetDesc]       = useState('')
+  const [meetSubmit,     setMeetSubmit]     = useState(false)
 
   // Edit regular request
   const [editReqId,      setEditReqId]      = useState<string | null>(null)
@@ -243,6 +284,76 @@ export default function RequestsPage() {
   useEffect(() => {
     if (activeTab === 'strategic') loadSr()
   }, [activeTab])
+
+  useEffect(() => {
+    if (activeTab !== 'leave') return
+    setLeavesLoad(true)
+    fetch('/api/leave')
+      .then(r => r.json())
+      .then(d => setLeaves(Array.isArray(d) ? d : []))
+      .catch(() => {})
+      .finally(() => setLeavesLoad(false))
+  }, [activeTab])
+
+  async function submitLeave() {
+    if (!leaveStart || !leaveEnd) { toast.error('Select start and end dates'); return }
+    if (new Date(leaveEnd) < new Date(leaveStart)) { toast.error('End date must be after start date'); return }
+    setLeaveSubmit(true)
+    try {
+      const res = await fetch('/api/leave', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: leaveType, startDate: leaveStart, endDate: leaveEnd, reason: leaveReason || undefined }),
+      })
+      if (!res.ok) throw new Error((await res.json()).error || 'Failed')
+      const data = await res.json()
+      toast.success(`Leave applied — ${data.tasksShifted} task${data.tasksShifted !== 1 ? 's' : ''} rescheduled`)
+      setLeaveOpen(false)
+      setLeaveStart(''); setLeaveEnd(''); setLeaveReason(''); setLeaveType('VACATION')
+      setLeaves(prev => [data, ...prev])
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'Failed to apply leave')
+    } finally { setLeaveSubmit(false) }
+  }
+
+  useEffect(() => {
+    if (activeTab !== 'meetings') return
+    setMeetingsLoad(true)
+    fetch('/api/meetings')
+      .then(r => r.json())
+      .then(d => setMeetings(Array.isArray(d) ? d : []))
+      .catch(() => {})
+      .finally(() => setMeetingsLoad(false))
+  }, [activeTab])
+
+  async function submitMeeting() {
+    if (!meetTitle.trim()) { toast.error('Title is required'); return }
+    if (!meetDate) { toast.error('Date is required'); return }
+    if (!meetStart || !meetEnd) { toast.error('Start and end times are required'); return }
+    if (meetEnd <= meetStart) { toast.error('End time must be after start time'); return }
+    setMeetSubmit(true)
+    try {
+      const res = await fetch('/api/meetings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: meetTitle, date: meetDate, startTime: meetStart, endTime: meetEnd, description: meetDesc || undefined }),
+      })
+      if (!res.ok) throw new Error((await res.json()).error || 'Failed')
+      const data = await res.json()
+      toast.success('Meeting logged')
+      setMeetingOpen(false)
+      setMeetTitle(''); setMeetDate(''); setMeetStart(''); setMeetEnd(''); setMeetDesc('')
+      setMeetings(prev => [data, ...prev])
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'Failed to log meeting')
+    } finally { setMeetSubmit(false) }
+  }
+
+  async function deleteMeeting(id: string) {
+    await fetch(`/api/meetings?id=${id}`, { method: 'DELETE' })
+    setMeetings(prev => prev.filter(m => m.id !== id))
+    toast.success('Meeting removed')
+  }
 
   function openNewRequest() {
     sForm.reset({ type: 'TEARDOWN', priority: 'MEDIUM' })
@@ -597,6 +708,38 @@ export default function RequestsPage() {
               )}
             </button>
           )}
+          <button
+            onClick={() => setActiveTab('leave')}
+            className={`flex items-center gap-2 px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+              activeTab === 'leave'
+                ? 'border-primary text-primary'
+                : 'border-transparent text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            <Palmtree className="h-4 w-4" />
+            Leave
+            {leaves.length > 0 && (
+              <span className="bg-green-100 text-green-700 text-xs rounded-full px-1.5 py-0.5 leading-none">
+                {leaves.length}
+              </span>
+            )}
+          </button>
+          <button
+            onClick={() => setActiveTab('meetings')}
+            className={`flex items-center gap-2 px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+              activeTab === 'meetings'
+                ? 'border-primary text-primary'
+                : 'border-transparent text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            <Video className="h-4 w-4" />
+            Meetings
+            {meetings.length > 0 && (
+              <span className="bg-sky-100 text-sky-700 text-xs rounded-full px-1.5 py-0.5 leading-none">
+                {meetings.length}
+              </span>
+            )}
+          </button>
         </div>
       )}
 
@@ -972,6 +1115,196 @@ export default function RequestsPage() {
           )}
         </div>
       )}
+
+      {/* ── MEETINGS TAB ── */}
+      {activeTab === 'meetings' && (
+        <div className="space-y-3">
+          <div className="flex justify-end">
+            <Button size="sm" onClick={() => setMeetingOpen(true)}>
+              <Video className="mr-1 h-4 w-4" /> Log Meeting
+            </Button>
+          </div>
+
+          {meetingsLoad ? (
+            <div className="space-y-3">{[...Array(2)].map((_, i) => <Skeleton key={i} className="h-16 rounded-lg" />)}</div>
+          ) : meetings.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-20">
+              <Video className="h-12 w-12 text-muted-foreground/40 mb-3" />
+              <p className="text-muted-foreground">No meetings logged yet</p>
+              <Button variant="link" className="mt-1 text-xs" onClick={() => setMeetingOpen(true)}>Log a meeting</Button>
+            </div>
+          ) : (
+            meetings.map(m => (
+              <Card key={m.id}>
+                <CardContent className="p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-medium text-sm">{m.title}</span>
+                        <span className="text-xs px-1.5 py-0.5 rounded bg-sky-100 text-sky-700 dark:bg-sky-900 dark:text-sky-300 flex items-center gap-1">
+                          <Calendar className="h-3 w-3" />
+                          {format(new Date(m.date), 'MMM d, yyyy')}
+                        </span>
+                        <span className="text-xs text-muted-foreground">
+                          {m.startTime} – {m.endTime}
+                        </span>
+                      </div>
+                      {m.description && <p className="text-sm text-muted-foreground mt-1">{m.description}</p>}
+                      <p className="text-xs text-muted-foreground mt-1">Logged {format(new Date(m.createdAt), 'MMM d, yyyy')}</p>
+                    </div>
+                    <button
+                      onClick={() => deleteMeeting(m.id)}
+                      className="text-muted-foreground hover:text-destructive transition-colors shrink-0"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </div>
+                </CardContent>
+              </Card>
+            ))
+          )}
+        </div>
+      )}
+
+      {/* ── Log Meeting Dialog ── */}
+      <Dialog open={meetingOpen} onOpenChange={setMeetingOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader><DialogTitle>Log a Meeting</DialogTitle></DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-1.5">
+              <Label>Title *</Label>
+              <Input placeholder="e.g. Project sync, Design review…" value={meetTitle} onChange={e => setMeetTitle(e.target.value)} />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Date *</Label>
+              <Input type="date" value={meetDate} onChange={e => setMeetDate(e.target.value)} />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label>Start Time *</Label>
+                <Input type="time" value={meetStart} onChange={e => setMeetStart(e.target.value)} />
+              </div>
+              <div className="space-y-1.5">
+                <Label>End Time *</Label>
+                <Input type="time" value={meetEnd} onChange={e => setMeetEnd(e.target.value)} />
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label>Notes (optional)</Label>
+              <Textarea placeholder="Agenda, attendees, decisions…" rows={2} value={meetDesc} onChange={e => setMeetDesc(e.target.value)} />
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setMeetingOpen(false)}>Cancel</Button>
+              <Button onClick={submitMeeting} disabled={meetSubmit}>
+                {meetSubmit ? 'Saving…' : 'Save Meeting'}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── LEAVE TAB ── */}
+      {activeTab === 'leave' && (
+        <div className="space-y-3">
+          <div className="flex justify-end">
+            <Button size="sm" onClick={() => setLeaveOpen(true)}>
+              <Palmtree className="mr-1 h-4 w-4" /> Apply for Leave
+            </Button>
+          </div>
+
+          {leavesLoad ? (
+            <div className="space-y-3">{[...Array(2)].map((_, i) => <Skeleton key={i} className="h-20 rounded-lg" />)}</div>
+          ) : leaves.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-20">
+              <Palmtree className="h-12 w-12 text-muted-foreground/40 mb-3" />
+              <p className="text-muted-foreground">No leave applied yet</p>
+              <Button variant="link" className="mt-1 text-xs" onClick={() => setLeaveOpen(true)}>Apply for leave</Button>
+            </div>
+          ) : (
+            leaves.map(lv => {
+              const LEAVE_COLORS: Record<string, string> = {
+                VACATION: 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300',
+                SICK:     'bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300',
+                PERSONAL: 'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300',
+                OTHER:    'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300',
+              }
+              return (
+                <Card key={lv.id}>
+                  <CardContent className="p-4">
+                    <div className="flex items-start gap-3">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${LEAVE_COLORS[lv.type] ?? LEAVE_COLORS.OTHER}`}>
+                            {lv.type.charAt(0) + lv.type.slice(1).toLowerCase()}
+                          </span>
+                          <span className="text-sm font-semibold flex items-center gap-1">
+                            <Calendar className="h-3.5 w-3.5 text-muted-foreground" />
+                            {format(new Date(lv.startDate), 'MMM d')} – {format(new Date(lv.endDate), 'MMM d, yyyy')}
+                          </span>
+                        </div>
+                        {lv.reason && <p className="text-sm text-muted-foreground mt-1">{lv.reason}</p>}
+                        <div className="flex items-center gap-3 mt-1.5 text-xs text-muted-foreground">
+                          <span>Applied {format(new Date(lv.createdAt), 'MMM d, yyyy')}</span>
+                          {lv.tasksShifted > 0 && (
+                            <span className="flex items-center gap-1 text-blue-600">
+                              <RefreshCw className="h-3 w-3" />
+                              {lv.tasksShifted} task{lv.tasksShifted !== 1 ? 's' : ''} rescheduled
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              )
+            })
+          )}
+        </div>
+      )}
+
+      {/* ── Apply Leave Dialog ── */}
+      <Dialog open={leaveOpen} onOpenChange={setLeaveOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader><DialogTitle>Apply for Leave</DialogTitle></DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-1.5">
+              <Label>Leave Type</Label>
+              <Select value={leaveType} onValueChange={v => setLeaveType(v ?? leaveType)}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="VACATION">Vacation</SelectItem>
+                  <SelectItem value="SICK">Sick Leave</SelectItem>
+                  <SelectItem value="PERSONAL">Personal</SelectItem>
+                  <SelectItem value="OTHER">Other</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label>Start Date *</Label>
+                <Input type="date" value={leaveStart} onChange={e => setLeaveStart(e.target.value)} />
+              </div>
+              <div className="space-y-1.5">
+                <Label>End Date *</Label>
+                <Input type="date" value={leaveEnd} onChange={e => setLeaveEnd(e.target.value)} min={leaveStart} />
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label>Reason (optional)</Label>
+              <Textarea placeholder="Brief reason…" rows={2} value={leaveReason} onChange={e => setLeaveReason(e.target.value)} />
+            </div>
+            <p className="text-xs text-muted-foreground bg-blue-50 dark:bg-blue-950 rounded-md p-2">
+              Your tasks scheduled during or after this leave will be automatically shifted forward by the number of working days taken.
+            </p>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setLeaveOpen(false)}>Cancel</Button>
+              <Button onClick={submitLeave} disabled={leaveSubmit}>
+                {leaveSubmit ? 'Applying…' : 'Apply Leave'}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* ── Submit Request Dialog ── */}
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>

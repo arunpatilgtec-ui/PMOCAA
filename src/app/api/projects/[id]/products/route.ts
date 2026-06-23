@@ -133,40 +133,42 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       })
     }
 
-    // For DW projects, create a per-product BOB & A2Mac1 task with offset dates
-    if (project?.category === 'Dishwasher') {
-      const bobWs = await prisma.workstream.findFirst({
-        where: { projectId: id, name: 'BOB & A2Mac1' },
+    // Create per-product BOB & A2Mac1 tasks — auto-create the workstream if needed
+    const existingBobWs = await prisma.workstream.findFirst({
+      where: { projectId: id, name: 'BOB & A2Mac1' },
+    })
+    const bobWsOrder = existingBobWs ? 0 : await prisma.workstream.count({ where: { projectId: id } })
+    const bobWs = existingBobWs ?? await prisma.workstream.create({
+      data: { projectId: id, name: 'BOB & A2Mac1', order: bobWsOrder },
+    })
+    if (bobWs) {
+      const bobStart = project?.startDate ? addWorkingDays(new Date(project.startDate), DW_BOB_OFFSET) : null
+      const bobEnd = project?.startDate ? addWorkingDays(new Date(project.startDate), DW_BOB_OFFSET + DW_BOB_DURATION - 1) : null
+      const productLabel = `${product.brand}${product.modelNo ? ` ${product.modelNo}` : ''}`
+      await prisma.task.createMany({
+        data: [
+          {
+            workstreamId: bobWs.id,
+            name: `${productLabel} — A2Mac1`,
+            description: `__productTask:${product.id}:a2mac1__`,
+            ownerId: product.leadId ?? null,
+            startDate: bobStart,
+            endDate: bobEnd,
+            estimatedHours: 16,
+            effortHours: 16,
+          },
+          {
+            workstreamId: bobWs.id,
+            name: `${productLabel} — BOB`,
+            description: `__productTask:${product.id}:bob__`,
+            ownerId: product.leadId ?? null,
+            startDate: bobStart,
+            endDate: bobEnd,
+            estimatedHours: 16,
+            effortHours: 16,
+          },
+        ],
       })
-      if (bobWs) {
-        const bobStart = project.startDate ? addWorkingDays(new Date(project.startDate), DW_BOB_OFFSET) : null
-        const bobEnd = project.startDate ? addWorkingDays(new Date(project.startDate), DW_BOB_OFFSET + DW_BOB_DURATION - 1) : null
-        const productLabel = `${product.brand}${product.modelNo ? ` ${product.modelNo}` : ''}`
-        await prisma.task.createMany({
-          data: [
-            {
-              workstreamId: bobWs.id,
-              name: `${productLabel} — A2Mac1`,
-              description: `__productTask:${product.id}:a2mac1__`,
-              ownerId: product.leadId ?? null,
-              startDate: bobStart,
-              endDate: bobEnd,
-              estimatedHours: 16,
-              effortHours: 16,
-            },
-            {
-              workstreamId: bobWs.id,
-              name: `${productLabel} — BOB`,
-              description: `__productTask:${product.id}:bob__`,
-              ownerId: product.leadId ?? null,
-              startDate: bobStart,
-              endDate: bobEnd,
-              estimatedHours: 16,
-              effortHours: 16,
-            },
-          ],
-        })
-      }
     }
 
     return Response.json(product, { status: 201 })

@@ -158,19 +158,22 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
         await prisma.task.createMany({ data: taskRows })
       }
 
-      // For DW projects, sync the per-product BOB & A2Mac1 task with offset dates
-      if (proj?.category === 'Dishwasher') {
-        const bobWs = await prisma.workstream.findFirst({
-          where: { projectId: id, name: 'BOB & A2Mac1' },
-        })
-        if (bobWs) {
+      // Sync per-product BOB & A2Mac1 tasks — auto-create workstream if needed
+      const existingBobWs = await prisma.workstream.findFirst({
+        where: { projectId: id, name: 'BOB & A2Mac1' },
+      })
+      const bobWsOrder2 = existingBobWs ? 0 : await prisma.workstream.count({ where: { projectId: id } })
+      const bobWs = existingBobWs ?? await prisma.workstream.create({
+        data: { projectId: id, name: 'BOB & A2Mac1', order: bobWsOrder2 },
+      })
+      if (bobWs) {
           await prisma.task.deleteMany({
             where: { workstreamId: bobWs.id, description: { contains: `__productTask:${productId}:` } },
           })
           const brand = productRecord?.brand ?? ''
           const modelNo = productRecord?.modelNo ?? ''
-          const bobStart = proj.startDate ? addWorkingDays(new Date(proj.startDate), DW_BOB_OFFSET) : null
-          const bobEnd = proj.startDate ? addWorkingDays(new Date(proj.startDate), DW_BOB_OFFSET + DW_BOB_DURATION - 1) : null
+          const bobStart = proj?.startDate ? addWorkingDays(new Date(proj.startDate), DW_BOB_OFFSET) : null
+          const bobEnd = proj?.startDate ? addWorkingDays(new Date(proj.startDate), DW_BOB_OFFSET + DW_BOB_DURATION - 1) : null
           const productLabel = `${brand}${modelNo ? ` ${modelNo}` : ''}`
           await prisma.task.createMany({
             data: [
@@ -196,7 +199,6 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
               },
             ],
           })
-        }
       }
     }
 

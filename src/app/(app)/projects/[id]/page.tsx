@@ -664,58 +664,28 @@ export default function ProjectDetailPage() {
         </TabsList>
 
         <TabsContent value="workstreams" className="mt-4">
-          {(() => {
-            const PER_PRODUCT_WS_NAMES = ['Product Costing', 'BOB & A2Mac1']
-            const perProductWss = project.workstreams.filter((ws) => PER_PRODUCT_WS_NAMES.includes(ws.name))
-            const productsWithTasks = timelineProducts.filter((p) =>
-              perProductWss.some((ws) => ws.tasks.some((t) => t.description?.includes(`__productTask:${p.id}:`)))
-            )
-            if (productsWithTasks.length > 0) {
-              return (
-                <div className="space-y-6">
-                  <WorkstreamPanel project={project} onRefresh={load} hidePerProduct />
-                  {productsWithTasks.map((p) => (
-                    <div key={p.id}>
-                      <div className="flex items-center gap-3 mb-3">
-                        <div className="h-px flex-1 bg-border" />
-                        <span className="text-sm font-semibold px-3 py-1 rounded-full bg-primary/10 text-primary border border-primary/20">
-                          {p.brand}{p.modelNo ? ` ${p.modelNo}` : ''}
-                        </span>
-                        <div className="h-px flex-1 bg-border" />
-                      </div>
-                      <WorkstreamPanel project={project} onRefresh={load} productId={p.id} onlyPerProduct />
-                    </div>
-                  ))}
-                </div>
-              )
-            }
-            return (
-              <>
-                {timelineProducts.length > 0 && (
-                  <div className="flex items-center border-b border-border overflow-x-auto mb-4">
-                    {timelineProducts.map((p) => (
-                      <button
-                        key={p.id}
-                        onClick={() => setTimelineProductId(p.id)}
-                        className={`px-3 py-2 text-sm whitespace-nowrap border-b-2 -mb-px transition-colors ${
-                          timelineProductId === p.id
-                            ? 'border-blue-500 text-blue-600 dark:text-blue-400 font-medium'
-                            : 'border-transparent text-muted-foreground hover:text-foreground'
-                        }`}
-                      >
-                        {p.brand}{p.modelNo ? ` ${p.modelNo}` : ''}
-                      </button>
-                    ))}
-                  </div>
-                )}
-                <WorkstreamPanel
-                  project={project}
-                  onRefresh={load}
-                  productId={timelineProducts.length > 0 ? (timelineProductId ?? undefined) : undefined}
-                />
-              </>
-            )
-          })()}
+          {timelineProducts.length > 0 && (
+            <div className="flex items-center border-b border-border overflow-x-auto mb-4">
+              {timelineProducts.map((p) => (
+                <button
+                  key={p.id}
+                  onClick={() => setTimelineProductId(p.id)}
+                  className={`px-3 py-2 text-sm whitespace-nowrap border-b-2 -mb-px transition-colors ${
+                    timelineProductId === p.id
+                      ? 'border-blue-500 text-blue-600 dark:text-blue-400 font-medium'
+                      : 'border-transparent text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  {p.brand}{p.modelNo ? ` ${p.modelNo}` : ''}
+                </button>
+              ))}
+            </div>
+          )}
+          <WorkstreamPanel
+            project={project}
+            onRefresh={load}
+            productId={timelineProducts.length > 0 ? (timelineProductId ?? undefined) : undefined}
+          />
         </TabsContent>
 
         <TabsContent value="team" className="mt-4">
