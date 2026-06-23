@@ -68,6 +68,7 @@ interface Meeting {
   startTime: string
   endTime: string
   description?: string
+  tasksShifted?: number
   createdAt: string
 }
 
@@ -340,7 +341,10 @@ export default function RequestsPage() {
       })
       if (!res.ok) throw new Error((await res.json()).error || 'Failed')
       const data = await res.json()
-      toast.success('Meeting logged')
+      const shifted = data.tasksShifted ?? 0
+      toast.success(shifted > 0
+        ? `Meeting logged — ${shifted} task${shifted !== 1 ? 's' : ''} rescheduled (${data.durationHours?.toFixed(1)}h meeting)`
+        : 'Meeting logged')
       setMeetingOpen(false)
       setMeetTitle(''); setMeetDate(''); setMeetStart(''); setMeetEnd(''); setMeetDesc('')
       setMeetings(prev => [data, ...prev])
@@ -1150,7 +1154,15 @@ export default function RequestsPage() {
                         </span>
                       </div>
                       {m.description && <p className="text-sm text-muted-foreground mt-1">{m.description}</p>}
-                      <p className="text-xs text-muted-foreground mt-1">Logged {format(new Date(m.createdAt), 'MMM d, yyyy')}</p>
+                      <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
+                        <span>Logged {format(new Date(m.createdAt), 'MMM d, yyyy')}</span>
+                        {m.tasksShifted != null && m.tasksShifted > 0 && (
+                          <span className="flex items-center gap-1 text-blue-600">
+                            <RefreshCw className="h-3 w-3" />
+                            {m.tasksShifted} task{m.tasksShifted !== 1 ? 's' : ''} rescheduled
+                          </span>
+                        )}
+                      </div>
                     </div>
                     <button
                       onClick={() => deleteMeeting(m.id)}

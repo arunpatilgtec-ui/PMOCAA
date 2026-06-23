@@ -1,6 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getSession } from '@/lib/auth'
+import { addWorkingDays } from '@/lib/date-utils'
+
+function parseMeetingHours(startTime: string, endTime: string): number {
+  const [sh, sm] = startTime.split(':').map(Number)
+  const [eh, em] = endTime.split(':').map(Number)
+  return (eh * 60 + em - sh * 60 - sm) / 60
+}
 
 export async function GET() {
   const user = await getSession()
@@ -25,11 +32,38 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'title, date, startTime and endTime are required' }, { status: 400 })
   }
 
+  const meetingDate = new Date(date)
+  meetingDate.setHours(0, 0, 0, 0)
+
+  // Shift tasks if meeting is 4+ hours (half day or more blocks meaningful work)
+  let tasksShifted = 0
+  const durationHours = parseMeetingHours(startTime, endTime)
+  if (durationHours >= 4) {
+    const tasks = await prisma.task.findMany({
+      where: {
+        ownerId: user.id,
+        startDate: { gte: meetingDate },
+        status: { notIn: ['COMPLETED', 'CANCELLED'] },
+      },
+      select: { id: true, startDate: true, endDate: true },
+    })
+    for (const task of tasks) {
+      if (!task.startDate) continue
+      const newStart = addWorkingDays(task.startDate, 1)
+      const newEnd = task.endDate ? addWorkingDays(task.endDate, 1) : null
+      await prisma.task.update({
+        where: { id: task.id },
+        data: { startDate: newStart, endDate: newEnd ?? undefined },
+      })
+      tasksShifted++
+    }
+  }
+
   const meeting = await prisma.meeting.create({
     data: {
       userId: user.id,
       title,
-      date: new Date(date),
+      date: meetingDate,
       startTime,
       endTime,
       description: description || null,
@@ -37,7 +71,7 @@ export async function POST(req: NextRequest) {
     include: { user: { select: { id: true, name: true } } },
   })
 
-  return NextResponse.json(meeting)
+  return NextResponse.json({ ...meeting, durationHours, tasksShifted })
 }
 
 export async function DELETE(req: NextRequest) {
