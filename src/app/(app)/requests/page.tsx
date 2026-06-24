@@ -1322,8 +1322,8 @@ export default function RequestsPage() {
       </Dialog>
 
       {/* ── Submit Request Dialog ── */}
-      <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-        <DialogContent className="max-w-lg" onInteractOutside={(e) => e.preventDefault()}>
+      <Dialog open={createOpen} onOpenChange={setCreateOpen} disablePointerDismissal>
+        <DialogContent className="max-w-lg">
           <DialogHeader><DialogTitle>Submit New Request</DialogTitle></DialogHeader>
           <form onSubmit={sForm.handleSubmit(onSubmitRequest)} className="space-y-4">
             <div className="space-y-1.5">
