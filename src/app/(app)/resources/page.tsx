@@ -11,10 +11,11 @@ import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Textarea } from '@/components/ui/textarea'
 import {
   AlertTriangle, Users, Briefcase, Clock, Search,
   ClipboardCheck, UserPlus, CalendarDays, Layers,
-  ChevronLeft, ChevronRight, LayoutGrid, BarChart2,
+  ChevronLeft, ChevronRight, LayoutGrid, BarChart2, Video,
 } from 'lucide-react'
 import { AssignWorkDialog } from '@/components/assign-work-dialog'
 
@@ -333,10 +334,140 @@ function ResourceGanttView() {
 
 // ─── Employee detail dialog ───────────────────────────────────────────────────
 
-function EmployeeDetailDialog({ resource, open, onOpenChange }: {
+// ─── Log Meeting Dialog ───────────────────────────────────────────────────────
+
+function LogMeetingDialog({ target, open, onOpenChange, onLogged }: {
+  target: { id: string; name: string } | null
+  open: boolean
+  onOpenChange: (v: boolean) => void
+  onLogged: () => void
+}) {
+  const today = new Date().toISOString().slice(0, 10)
+  const [title,       setTitle]       = useState('')
+  const [date,        setDate]        = useState(today)
+  const [startTime,   setStartTime]   = useState('09:00')
+  const [endTime,     setEndTime]     = useState('10:00')
+  const [description, setDescription] = useState('')
+  const [submitting,  setSubmitting]  = useState(false)
+  const [result,      setResult]      = useState<{ tasksShifted: number; durationHours: number } | null>(null)
+  const [error,       setError]       = useState('')
+
+  useEffect(() => {
+    if (open && target) {
+      setTitle(`Meeting with ${target.name}`)
+      setDate(today)
+      setStartTime('09:00')
+      setEndTime('10:00')
+      setDescription('')
+      setError('')
+      setResult(null)
+    }
+  }, [open, target])
+
+  async function submit() {
+    if (!target) return
+    setSubmitting(true)
+    setError('')
+    try {
+      const res = await fetch('/api/meetings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title, date, startTime, endTime, description: description || null, targetUserId: target.id }),
+      })
+      if (!res.ok) { const e = await res.json(); throw new Error(e.error || 'Failed') }
+      const data = await res.json()
+      setResult({ tasksShifted: data.tasksShifted, durationHours: data.durationHours })
+      onLogged()
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Failed to log meeting')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  const firstName = target?.name.split(' ')[0] ?? ''
+
+  return (
+    <Dialog open={open} onOpenChange={v => { onOpenChange(v); if (!v) setResult(null) }}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Video className="h-4 w-4 text-blue-500" />
+            Log Meeting {target ? `— ${target.name}` : ''}
+          </DialogTitle>
+        </DialogHeader>
+
+        {result ? (
+          <div className="space-y-3 py-2">
+            <p className="text-sm text-green-600 font-medium">Meeting logged successfully.</p>
+            {result.tasksShifted > 0 && (
+              <p className="text-xs text-muted-foreground">
+                {result.durationHours}h meeting — {result.tasksShifted} of {firstName}&apos;s tasks shifted forward by 1 working day.
+              </p>
+            )}
+            <div className="flex justify-end">
+              <Button onClick={() => onOpenChange(false)}>Done</Button>
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            <div>
+              <label className="text-sm font-medium">Meeting Title</label>
+              <Input value={title} onChange={e => setTitle(e.target.value)} className="mt-1" />
+            </div>
+            <div>
+              <label className="text-sm font-medium">Date</label>
+              <Input type="date" value={date} onChange={e => setDate(e.target.value)} className="mt-1" />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-sm font-medium">Start Time</label>
+                <Input type="time" value={startTime} onChange={e => setStartTime(e.target.value)} className="mt-1" />
+              </div>
+              <div>
+                <label className="text-sm font-medium">End Time</label>
+                <Input type="time" value={endTime} onChange={e => setEndTime(e.target.value)} className="mt-1" />
+              </div>
+            </div>
+            <div>
+              <label className="text-sm font-medium">
+                Notes <span className="text-muted-foreground font-normal">(optional)</span>
+              </label>
+              <Textarea
+                value={description}
+                onChange={e => setDescription(e.target.value)}
+                rows={3}
+                placeholder="Agenda, decisions, follow-ups…"
+                className="mt-1 resize-none"
+              />
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Meetings of 4+ hours automatically shift {firstName}&apos;s tasks forward by one working day.
+            </p>
+            {error && <p className="text-xs text-destructive">{error}</p>}
+            <div className="flex justify-end gap-2 pt-1">
+              <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+              <Button
+                onClick={submit}
+                disabled={submitting || !title.trim() || !date || !startTime || !endTime}
+              >
+                {submitting ? 'Logging…' : 'Log Meeting'}
+              </Button>
+            </div>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+// ─── Employee Detail Dialog ───────────────────────────────────────────────────
+
+function EmployeeDetailDialog({ resource, open, onOpenChange, onLogMeeting }: {
   resource: Resource | null
   open: boolean
   onOpenChange: (v: boolean) => void
+  onLogMeeting: (r: Resource) => void
 }) {
   if (!resource) return null
 
@@ -364,13 +495,22 @@ function EmployeeDetailDialog({ resource, open, onOpenChange }: {
                 {resource.name.split(' ').map(n => n[0]).join('').slice(0, 2)}
               </AvatarFallback>
             </Avatar>
-            <div>
+            <div className="flex-1 min-w-0">
               <span className="text-base">{resource.name}</span>
               <p className="text-xs font-normal text-muted-foreground">
                 {resource.title || ROLE_LABELS[resource.role]}
                 {resource.department && ` · ${resource.department}`}
               </p>
             </div>
+            <Button
+              size="sm"
+              variant="outline"
+              className="shrink-0 text-xs h-7"
+              onClick={() => onLogMeeting(resource)}
+            >
+              <Video className="mr-1.5 h-3.5 w-3.5 text-blue-500" />
+              Log Meeting
+            </Button>
           </DialogTitle>
         </DialogHeader>
 
@@ -557,6 +697,9 @@ export default function ResourcesPage() {
   const [assignOpen,   setAssignOpen]   = useState(false)
   const [assignTarget, setAssignTarget] = useState<{ id: string; name: string } | null>(null)
 
+  const [meetingOpen,   setMeetingOpen]   = useState(false)
+  const [meetingTarget, setMeetingTarget] = useState<{ id: string; name: string } | null>(null)
+
   // Only ADMIN / MANAGER / PLANNER can access this page
   const canAccess = user && ['ADMIN', 'MANAGER', 'PLANNER'].includes(user.role)
   const canAssign = canAccess
@@ -610,6 +753,12 @@ export default function ResourcesPage() {
     e.stopPropagation()
     setAssignTarget({ id: r.id, name: r.name })
     setAssignOpen(true)
+  }
+
+  function openMeeting(r: Resource, e?: React.MouseEvent) {
+    e?.stopPropagation()
+    setMeetingTarget({ id: r.id, name: r.name })
+    setMeetingOpen(true)
   }
 
   function openDetail(r: Resource) {
@@ -789,12 +938,18 @@ export default function ResourcesPage() {
 
                     <p className="text-xs text-blue-500 text-center">Click to view task details</p>
 
-                    {canAssign && (
-                      <Button size="sm" variant="outline" className="w-full h-7 text-xs" onClick={e => openAssign(r, e)}>
-                        <ClipboardCheck className="mr-1.5 h-3.5 w-3.5 text-blue-600" />
-                        Assign Work to {r.name.split(' ')[0]}
+                    <div className="flex gap-1.5">
+                      {canAssign && (
+                        <Button size="sm" variant="outline" className="flex-1 h-7 text-xs" onClick={e => openAssign(r, e)}>
+                          <ClipboardCheck className="mr-1 h-3.5 w-3.5 text-blue-600" />
+                          Assign Work
+                        </Button>
+                      )}
+                      <Button size="sm" variant="outline" className="flex-1 h-7 text-xs" onClick={e => openMeeting(r, e)}>
+                        <Video className="mr-1 h-3.5 w-3.5 text-blue-500" />
+                        Log Meeting
                       </Button>
-                    )}
+                    </div>
                   </CardContent>
                 </Card>
               ))}
@@ -810,6 +965,7 @@ export default function ResourcesPage() {
         resource={detailResource}
         open={detailOpen}
         onOpenChange={v => { setDetailOpen(v); if (!v) setDetailResource(null) }}
+        onLogMeeting={r => { setDetailOpen(false); openMeeting(r) }}
       />
 
       <AssignWorkDialog
@@ -818,6 +974,13 @@ export default function ResourcesPage() {
         prefillUserId={assignTarget?.id}
         prefillName={assignTarget?.name}
         onAssigned={load}
+      />
+
+      <LogMeetingDialog
+        target={meetingTarget}
+        open={meetingOpen}
+        onOpenChange={v => { setMeetingOpen(v); if (!v) setMeetingTarget(null) }}
+        onLogged={load}
       />
     </div>
   )

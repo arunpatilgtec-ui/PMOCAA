@@ -26,11 +26,15 @@ export async function POST(req: NextRequest) {
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const body = await req.json()
-  const { title, date, startTime, endTime, description } = body
+  const { title, date, startTime, endTime, description, targetUserId } = body
 
   if (!title || !date || !startTime || !endTime) {
     return NextResponse.json({ error: 'title, date, startTime and endTime are required' }, { status: 400 })
   }
+
+  // targetUserId lets any user log a meeting for a specific resource (e.g. from Resource Planning page).
+  // Falls back to the session user (logging for yourself).
+  const meetingUserId = targetUserId || user.id
 
   const meetingDate = new Date(date)
   meetingDate.setHours(0, 0, 0, 0)
@@ -41,7 +45,7 @@ export async function POST(req: NextRequest) {
   if (durationHours >= 4) {
     const tasks = await prisma.task.findMany({
       where: {
-        ownerId: user.id,
+        ownerId: meetingUserId,
         startDate: { gte: meetingDate },
         status: { notIn: ['COMPLETED', 'CANCELLED'] },
       },
@@ -61,7 +65,7 @@ export async function POST(req: NextRequest) {
 
   const meeting = await prisma.meeting.create({
     data: {
-      userId: user.id,
+      userId: meetingUserId,
       title,
       date: meetingDate,
       startTime,
