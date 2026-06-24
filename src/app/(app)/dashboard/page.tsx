@@ -91,7 +91,8 @@ export default function DashboardPage() {
   const [pendingApprovals, setPendingApprovals] = useState(0)
   const [loading, setLoading] = useState(true)
 
-  const isResource = user?.role === 'RESOURCE'
+  const isResource  = user?.role === 'RESOURCE'
+  const canManage   = !!user && ['ADMIN', 'MANAGER', 'PLANNER'].includes(user.role)
   const hour = new Date().getHours()
   const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening'
 
@@ -106,7 +107,7 @@ export default function DashboardPage() {
           const [proj, tasks] = await Promise.all([projRes.json(), taskRes.json()])
           setProjects(Array.isArray(proj) ? proj : [])
           setMyTasks(Array.isArray(tasks) ? tasks : [])
-        } else {
+        } else if (canManage) {
           const [projRes, resRes, changesRes] = await Promise.all([
             fetch('/api/projects'),
             fetch('/api/resources'),
@@ -120,6 +121,10 @@ export default function DashboardPage() {
           setProjects(Array.isArray(proj) ? proj : [])
           setResources(Array.isArray(res) ? res : [])
           setPendingApprovals(Array.isArray(changes) ? changes.length : 0)
+        } else {
+          // PROJECT_LEAD, WORKSTREAM_LEAD, LEADERSHIP — projects only, no resource data
+          const proj = await fetch('/api/projects').then(r => r.json())
+          setProjects(Array.isArray(proj) ? proj : [])
         }
       } catch (err) {
         console.error(err)
@@ -149,12 +154,19 @@ export default function DashboardPage() {
         { label: 'In Review',   value: reviewTasks.length,     icon: Eye,          href: '/kanban',   iconBg: 'bg-violet-50 dark:bg-violet-950/40', iconColor: 'text-violet-600 dark:text-violet-400' },
         { label: 'Completed',   value: completedTasks.length,  icon: CheckCircle2, href: '/kanban',   iconBg: 'bg-emerald-50 dark:bg-emerald-950/40', iconColor: 'text-emerald-600 dark:text-emerald-400' },
       ]
-    : [
-        { label: 'Active Projects',      value: activeProjects.length,      icon: FolderKanban,  href: '/projects',  iconBg: 'bg-blue-50 dark:bg-blue-950/40',     iconColor: 'text-blue-600 dark:text-blue-400' },
-        { label: 'Delayed Projects',     value: delayedProjects.length,     icon: AlertTriangle, href: '/projects',  iconBg: 'bg-red-50 dark:bg-red-950/40',       iconColor: 'text-red-600 dark:text-red-400' },
-        { label: 'Pending Approvals',    value: pendingApprovals,           icon: Clock,         href: '/approvals', iconBg: 'bg-amber-50 dark:bg-amber-950/40',   iconColor: 'text-amber-600 dark:text-amber-400' },
-        { label: 'Overloaded Resources', value: overloadedResources.length, icon: Users,         href: '/resources', iconBg: 'bg-violet-50 dark:bg-violet-950/40', iconColor: 'text-violet-600 dark:text-violet-400' },
-      ]
+    : canManage
+      ? [
+          { label: 'Active Projects',      value: activeProjects.length,      icon: FolderKanban,  href: '/projects',  iconBg: 'bg-blue-50 dark:bg-blue-950/40',     iconColor: 'text-blue-600 dark:text-blue-400' },
+          { label: 'Delayed Projects',     value: delayedProjects.length,     icon: AlertTriangle, href: '/projects',  iconBg: 'bg-red-50 dark:bg-red-950/40',       iconColor: 'text-red-600 dark:text-red-400' },
+          { label: 'Pending Approvals',    value: pendingApprovals,           icon: Clock,         href: '/approvals', iconBg: 'bg-amber-50 dark:bg-amber-950/40',   iconColor: 'text-amber-600 dark:text-amber-400' },
+          { label: 'Overloaded Resources', value: overloadedResources.length, icon: Users,         href: '/resources', iconBg: 'bg-violet-50 dark:bg-violet-950/40', iconColor: 'text-violet-600 dark:text-violet-400' },
+        ]
+      : [
+          { label: 'Active Projects',  value: activeProjects.length,  icon: FolderKanban,  href: '/projects', iconBg: 'bg-blue-50 dark:bg-blue-950/40',   iconColor: 'text-blue-600 dark:text-blue-400' },
+          { label: 'Delayed Projects', value: delayedProjects.length, icon: AlertTriangle, href: '/projects', iconBg: 'bg-red-50 dark:bg-red-950/40',     iconColor: 'text-red-600 dark:text-red-400' },
+          { label: 'In Progress',      value: activeProjects.filter(p => p.status === 'ACTIVE').length, icon: PlayCircle, href: '/projects', iconBg: 'bg-amber-50 dark:bg-amber-950/40', iconColor: 'text-amber-600 dark:text-amber-400' },
+          { label: 'Completed',        value: projects.filter(p => p.status === 'COMPLETED').length,    icon: CheckCircle2, href: '/projects', iconBg: 'bg-emerald-50 dark:bg-emerald-950/40', iconColor: 'text-emerald-600 dark:text-emerald-400' },
+        ]
 
   if (loading) {
     return (
@@ -375,7 +387,7 @@ export default function DashboardPage() {
             </Card>
           </motion.div>
 
-          {!isResource && (
+          {canManage && (
             <motion.div variants={item}>
               <Card>
                 <CardHeader className="pb-3 flex flex-row items-center justify-between">
