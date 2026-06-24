@@ -671,8 +671,7 @@ export default function RequestsPage() {
         </div>
       </div>
 
-      {user?.role !== 'RESOURCE' && (
-        <div className="flex gap-1 border-b">
+      <div className="flex gap-1 border-b">
           <button
             onClick={() => setActiveTab('requests')}
             className={`flex items-center gap-2 px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
@@ -684,22 +683,24 @@ export default function RequestsPage() {
             <ClipboardList className="h-4 w-4" />
             Work Requests
           </button>
-          <button
-            onClick={() => setActiveTab('assigned')}
-            className={`flex items-center gap-2 px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-              activeTab === 'assigned'
-                ? 'border-primary text-primary'
-                : 'border-transparent text-muted-foreground hover:text-foreground'
-            }`}
-          >
-            <Users className="h-4 w-4" />
-            Assigned by Me
-            {assignedTasks.length > 0 && (
-              <span className="bg-blue-100 text-blue-700 text-xs rounded-full px-1.5 py-0.5 leading-none">
-                {assignedTasks.length}
-              </span>
-            )}
-          </button>
+          {user?.role !== 'RESOURCE' && (
+            <button
+              onClick={() => setActiveTab('assigned')}
+              className={`flex items-center gap-2 px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+                activeTab === 'assigned'
+                  ? 'border-primary text-primary'
+                  : 'border-transparent text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              <Users className="h-4 w-4" />
+              Assigned by Me
+              {assignedTasks.length > 0 && (
+                <span className="bg-blue-100 text-blue-700 text-xs rounded-full px-1.5 py-0.5 leading-none">
+                  {assignedTasks.length}
+                </span>
+              )}
+            </button>
+          )}
           {canStrategic && (
             <button
               onClick={() => setActiveTab('strategic')}
@@ -751,7 +752,6 @@ export default function RequestsPage() {
             )}
           </button>
         </div>
-      )}
 
       {/* ── WORK REQUESTS TAB ── */}
       {activeTab === 'requests' && (
