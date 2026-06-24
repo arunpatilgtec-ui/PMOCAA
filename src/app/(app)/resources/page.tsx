@@ -15,7 +15,7 @@ import { Textarea } from '@/components/ui/textarea'
 import {
   AlertTriangle, Users, Briefcase, Clock, Search,
   ClipboardCheck, UserPlus, CalendarDays, Layers,
-  ChevronLeft, ChevronRight, LayoutGrid, BarChart2, Video,
+  ChevronLeft, ChevronRight, LayoutGrid, BarChart2, Video, Palmtree,
 } from 'lucide-react'
 import { AssignWorkDialog } from '@/components/assign-work-dialog'
 
@@ -64,6 +64,8 @@ interface Resource {
   activeTasks: number
   department?: string; title?: string
   dailyHoursMap: Record<string, number>
+  leaveDates?: string[]
+  isOnLeaveToday?: boolean
   allocations: Array<{
     allocationPct: number
     project: { id: string; name: string; status: string }
@@ -233,11 +235,12 @@ function ResourceGanttView() {
         </div>
 
         {/* Legend */}
-        <div className="ml-auto flex items-center gap-2 text-xs text-muted-foreground">
+        <div className="ml-auto flex items-center gap-2 text-xs text-muted-foreground flex-wrap">
           <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-green-200 inline-block" /> &lt;60%</span>
           <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-amber-200 inline-block" /> 60–85%</span>
           <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-orange-400 inline-block" /> 85–100%</span>
           <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-red-500 inline-block" /> Over</span>
+          <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-purple-200 inline-block" /> On Leave</span>
         </div>
       </div>
 
@@ -291,11 +294,18 @@ function ResourceGanttView() {
                     ? workingDays.map(day => {
                       const key = day.toISOString().slice(0, 10)
                       const h = Math.round((r.dailyHoursMap[key] ?? 0) * 10) / 10
+                      const onLeave = (r.leaveDates ?? []).includes(key)
                       return (
                         <td key={key} className="px-1 py-1 text-center">
-                          <div className={`rounded px-1 py-1 text-xs ${cellBg(h, r.dailyCapacityHours)}`}>
-                            {h > 0 ? `${h}h` : '—'}
-                          </div>
+                          {onLeave ? (
+                            <div className="rounded px-1 py-1 text-xs bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300">
+                              Leave
+                            </div>
+                          ) : (
+                            <div className={`rounded px-1 py-1 text-xs ${cellBg(h, r.dailyCapacityHours)}`}>
+                              {h > 0 ? `${h}h` : '—'}
+                            </div>
+                          )}
                         </td>
                       )
                     })
@@ -307,12 +317,20 @@ function ResourceGanttView() {
                       const rounded = Math.round(total * 10) / 10
                       const cap = r.weeklyCapacityHours
                       const pct = cap > 0 ? Math.round(total / cap * 100) : 0
+                      const leaveDaysInWeek = wk.days.filter(d =>
+                        (r.leaveDates ?? []).includes(d.toISOString().slice(0, 10))
+                      ).length
                       return (
                         <td key={i} className="px-1 py-1 text-center">
                           <div className={`rounded px-1 py-1 text-xs ${cellBg(total, cap)}`}>
                             <div>{rounded > 0 ? `${rounded}h` : '—'}</div>
                             {rounded > 0 && <div className="text-[10px] opacity-80">{pct}%</div>}
                           </div>
+                          {leaveDaysInWeek > 0 && (
+                            <div className="text-[10px] text-purple-600 dark:text-purple-400 mt-0.5">
+                              {leaveDaysInWeek}d leave
+                            </div>
+                          )}
                         </td>
                       )
                     })
@@ -860,9 +878,14 @@ export default function ResourcesPage() {
                         </AvatarFallback>
                       </Avatar>
                       <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-1.5">
+                        <div className="flex items-center gap-1.5 flex-wrap">
                           <p className="font-semibold text-sm truncate">{r.name}</p>
                           {r.isOverloaded && <AlertTriangle className="h-3.5 w-3.5 text-red-500 shrink-0" />}
+                          {r.isOnLeaveToday && (
+                            <span className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded-full bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300 border border-purple-200 dark:border-purple-700 shrink-0">
+                              <Palmtree className="h-2.5 w-2.5" /> On Leave
+                            </span>
+                          )}
                         </div>
                         <p className="text-xs text-muted-foreground">{r.title || ROLE_LABELS[r.role]}</p>
                         {r.department && <p className="text-xs text-muted-foreground">{r.department}</p>}

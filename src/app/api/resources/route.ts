@@ -157,9 +157,19 @@ export async function GET(req: NextRequest) {
             endDate: true,
           },
         },
+        leaves: {
+          where: {
+            endDate:   { gte: rangeStart },
+            startDate: { lte: rangeEnd },
+          },
+          select: { startDate: true, endDate: true },
+        },
       },
       orderBy: { name: 'asc' },
     })
+
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
 
     const withUtilization = users.map((user) => {
       // Limits scaled by this person's capacity setting
@@ -235,6 +245,27 @@ export async function GET(req: NextRequest) {
           .reduce((s, r) => s + (r.estimatedHours || 0), 0) * 10
       ) / 10
 
+      // Leave days (working days within the requested range where user is on leave)
+      const leaveDates: string[] = []
+      for (const leave of user.leaves) {
+        const ls = new Date(leave.startDate); ls.setHours(0, 0, 0, 0)
+        const le = new Date(leave.endDate);   le.setHours(23, 59, 59, 999)
+        const start = new Date(Math.max(ls.getTime(), rangeStart.getTime()))
+        const end   = new Date(Math.min(le.getTime(), rangeEnd.getTime()))
+        const curr  = new Date(start); curr.setHours(0, 0, 0, 0)
+        while (curr <= end) {
+          const dow = curr.getDay()
+          if (dow !== 0 && dow !== 6) leaveDates.push(curr.toISOString().slice(0, 10))
+          curr.setDate(curr.getDate() + 1)
+        }
+      }
+
+      const isOnLeaveToday = user.leaves.some(l => {
+        const ls = new Date(l.startDate); ls.setHours(0, 0, 0, 0)
+        const le = new Date(l.endDate);   le.setHours(23, 59, 59, 999)
+        return today >= ls && today <= le
+      })
+
       return {
         ...user,
         // Hours
@@ -255,6 +286,9 @@ export async function GET(req: NextRequest) {
         isOverloadedDaily,
         overloadReason,
         activeTasks: user.ownedTasks.length,
+        // Leave
+        leaveDates,
+        isOnLeaveToday,
       }
     })
 
