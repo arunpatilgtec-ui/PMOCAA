@@ -563,7 +563,7 @@ function EmployeeDetailDialog({ resource, open, onOpenChange, onLogMeeting }: {
         {/* Weekly bar */}
         <div className="space-y-1">
           <div className="flex justify-between text-xs">
-            <span className="text-muted-foreground">Weekly: {resource.thisWeekHours}h / {resource.weeklyCapacityHours}h (45h cap)</span>
+            <span className="text-muted-foreground">Weekly: {resource.thisWeekHours}h / {resource.weeklyCapacityHours}h</span>
             {resource.isOverloadedWeekly && <span className="text-red-600 font-medium">OVER LIMIT</span>}
           </div>
           <Progress

@@ -3,7 +3,7 @@ import { prisma } from '@/lib/prisma'
 import { requireAuth } from '@/lib/auth'
 
 export const HOURS_PER_DAY = 8   // daily limit per person (at 100% capacity)
-export const HOURS_PER_WEEK = 45  // weekly limit per person (at 100% capacity)
+export const HOURS_PER_WEEK = 40  // weekly limit per person (at 100% capacity)
 
 export function getWeekBounds() {
   const now = new Date()
