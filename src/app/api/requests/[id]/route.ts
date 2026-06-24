@@ -31,7 +31,7 @@ export async function PATCH(req: NextRequest, ctx: RouteContext<'/api/requests/[
       where: { id },
       select: {
         submitterId: true, title: true, description: true,
-        assigneeId: true, estimatedHours: true,
+        assigneeId: true, assignedById: true, estimatedHours: true,
         isRecurring: true, hoursPerDay: true,
         startDate: true, endDate: true,
         status: true, priority: true,
@@ -50,11 +50,48 @@ export async function PATCH(req: NextRequest, ctx: RouteContext<'/api/requests/[
       return Response.json({ error: 'Forbidden' }, { status: 403 })
     }
 
-    // Submitter editing own request — only allow field edits, not status/conversion
+    // Submitter editing own request — only allow field edits, not status/conversion.
+    // If the request was already under review or approved, reset to SUBMITTED so it
+    // goes back through the approval chain. For APPROVED requests, also cancel the
+    // auto-created task so the assignee's bandwidth is freed.
     if (!isManager && isOwnRequest) {
+      const needsResubmit = ['REVIEW', 'APPROVED'].includes(existing.status)
+
+      // Cancel the task created at approval before we overwrite the title
+      if (existing.status === 'APPROVED' && existing.assigneeId) {
+        const directWs = await prisma.workstream.findFirst({
+          where: { project: { name: '__direct_assignments__' } },
+          select: { id: true },
+        })
+        if (directWs) {
+          await prisma.task.deleteMany({
+            where: {
+              workstreamId: directWs.id,
+              ownerId: existing.assigneeId,
+              name: existing.title,
+              status: { notIn: ['COMPLETED', 'CANCELLED'] },
+            },
+          })
+        }
+        // Tell the assignee their task was recalled
+        if (existing.assigneeId !== session.id) {
+          await prisma.notification.create({
+            data: {
+              userId: existing.assigneeId,
+              senderId: session.id,
+              type: 'TASK_UPDATED',
+              title: 'Assigned Work Recalled',
+              message: `${existing.submitter.name} edited their request "${existing.title}" — it has been resubmitted for approval and the assigned task has been removed.`,
+              actionUrl: '/requests',
+            },
+          })
+        }
+      }
+
       const updated = await prisma.request.update({
         where: { id },
         data: {
+          ...(needsResubmit && { status: 'SUBMITTED' }),
           ...(data.title !== undefined && { title: data.title }),
           ...(data.description !== undefined && { description: data.description }),
           ...(data.priority !== undefined && { priority: data.priority }),
@@ -68,6 +105,21 @@ export async function PATCH(req: NextRequest, ctx: RouteContext<'/api/requests/[
           ...(data.assignedById !== undefined && { assignedById: data.assignedById || null }),
         },
       })
+
+      // Notify the assigner that they need to re-review
+      if (needsResubmit && existing.assignedById && existing.assignedById !== session.id) {
+        await prisma.notification.create({
+          data: {
+            userId: existing.assignedById,
+            senderId: session.id,
+            type: 'APPROVAL_REQUIRED',
+            title: 'Request Resubmitted for Review',
+            message: `${existing.submitter.name} edited their request "${data.title ?? existing.title}" — please review the updated details.`,
+            actionUrl: '/approvals',
+          },
+        })
+      }
+
       return Response.json(updated)
     }
 

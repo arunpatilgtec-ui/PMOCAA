@@ -212,6 +212,7 @@ export default function RequestsPage() {
   const [editReqRecurring, setEditReqRecurring] = useState(false)
   const [editReqHours,   setEditReqHours]   = useState('')
   const [editReqAssignedById, setEditReqAssignedById] = useState('')
+  const [editReqStatus,  setEditReqStatus]  = useState('')
   const [editSubmitting, setEditSubmitting] = useState(false)
   const [deleteReqId,    setDeleteReqId]    = useState<string | null>(null)
   const [deleteReqBusy,  setDeleteReqBusy]  = useState(false)
@@ -462,6 +463,7 @@ export default function RequestsPage() {
     setEditReqRecurring(req.isRecurring ?? false)
     setEditReqHours(req.isRecurring ? String(req.hoursPerDay || '') : String(req.estimatedHours || ''))
     setEditReqAssignedById(req.assignedBy?.id || '')
+    setEditReqStatus(req.status)
     if (formUsers.length === 0) {
       fetch('/api/users').then(r => r.json()).then(d => setFormUsers(Array.isArray(d) ? d : [])).catch(() => {})
     }
@@ -492,7 +494,8 @@ export default function RequestsPage() {
         }),
       })
       if (!res.ok) throw new Error((await res.json()).error || 'Failed')
-      toast.success('Request updated')
+      const wasResubmitted = ['REVIEW', 'APPROVED'].includes(editReqStatus)
+      toast.success(wasResubmitted ? 'Request updated and resubmitted for approval' : 'Request updated')
       setEditReqId(null)
       load()
     } catch (e: unknown) {
@@ -1441,6 +1444,16 @@ export default function RequestsPage() {
       <Dialog open={!!editReqId} onOpenChange={(o) => { if (!o) setEditReqId(null) }}>
         <DialogContent className="max-w-lg">
           <DialogHeader><DialogTitle>Edit Request</DialogTitle></DialogHeader>
+          {['REVIEW', 'APPROVED'].includes(editReqStatus) && (
+            <div className="rounded-md border border-amber-300 bg-amber-50 dark:bg-amber-950/30 dark:border-amber-700 px-3 py-2 text-sm text-amber-800 dark:text-amber-300 flex items-start gap-2">
+              <span className="mt-0.5">⚠️</span>
+              <span>
+                This request is currently <strong>{editReqStatus === 'APPROVED' ? 'approved' : 'under review'}</strong>.
+                Saving changes will reset it to <strong>Submitted</strong> and send it back to the planner/manager for re-approval.
+                {editReqStatus === 'APPROVED' && ' The assigned task will also be removed.'}
+              </span>
+            </div>
+          )}
           <div className="space-y-4">
             <div className="space-y-1.5">
               <Label>Title *</Label>
