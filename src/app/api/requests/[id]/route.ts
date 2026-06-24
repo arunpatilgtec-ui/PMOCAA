@@ -4,6 +4,20 @@ import { requireAuth } from '@/lib/auth'
 import { getOrCreateDirectWorkstream } from '@/lib/direct-assignments'
 import { applyPriorityShift } from '@/lib/priority-shift'
 
+function countWorkingDays(start: Date, end: Date): number {
+  let count = 0
+  const curr = new Date(start)
+  curr.setHours(0, 0, 0, 0)
+  const endDay = new Date(end)
+  endDay.setHours(23, 59, 59, 999)
+  while (curr <= endDay) {
+    const dow = curr.getDay()
+    if (dow !== 0 && dow !== 6) count++
+    curr.setDate(curr.getDate() + 1)
+  }
+  return Math.max(1, count)
+}
+
 export async function PATCH(req: NextRequest, ctx: RouteContext<'/api/requests/[id]'>) {
   try {
     const session = await requireAuth()
@@ -18,6 +32,7 @@ export async function PATCH(req: NextRequest, ctx: RouteContext<'/api/requests/[
       select: {
         submitterId: true, title: true, description: true,
         assigneeId: true, estimatedHours: true,
+        isRecurring: true, hoursPerDay: true,
         startDate: true, endDate: true,
         status: true, priority: true,
         submitter: { select: { name: true } },
@@ -112,6 +127,14 @@ export async function PATCH(req: NextRequest, ctx: RouteContext<'/api/requests/[
       if (effectiveAssigneeId) {
         try {
           const workstream = await getOrCreateDirectWorkstream(session.id)
+          // For recurring requests, total hours = hoursPerDay × working days in range.
+          // For one-off requests, use estimatedHours; fall back to 8h (one workday) if unset.
+          const taskHours = existing.isRecurring && existing.hoursPerDay
+            ? existing.hoursPerDay * countWorkingDays(
+                existing.startDate ?? new Date(),
+                existing.endDate ?? new Date(),
+              )
+            : existing.estimatedHours || 8
           const task = await prisma.task.create({
             data: {
               name: existing.title,
@@ -123,7 +146,7 @@ export async function PATCH(req: NextRequest, ctx: RouteContext<'/api/requests/[
               approvedById: session.id,
               priority: request.priority,
               status: 'PLANNED',
-              estimatedHours: existing.estimatedHours || 8,
+              estimatedHours: taskHours,
               startDate: existing.startDate ?? null,
               endDate: existing.endDate ?? null,
             },
@@ -133,7 +156,7 @@ export async function PATCH(req: NextRequest, ctx: RouteContext<'/api/requests/[
             {
               id: task.id, name: task.name, priority: request.priority,
               startDate: existing.startDate ?? null, endDate: existing.endDate ?? null,
-              estimatedHours: existing.estimatedHours || 8, ownerId: effectiveAssigneeId,
+              estimatedHours: taskHours, ownerId: effectiveAssigneeId,
             },
             session.id
           ).catch(e => console.error('[REQUESTS APPROVE] priority shift failed:', e))
@@ -149,7 +172,7 @@ export async function PATCH(req: NextRequest, ctx: RouteContext<'/api/requests/[
                 senderId: session.id,
                 type: 'TASK_ASSIGNED',
                 title: 'Work Assigned — Request Approved',
-                message: `${session.name} approved and assigned you: "${existing.title}"${existing.estimatedHours ? ` · ${existing.estimatedHours}h` : ''}${requestedBy}. Open Kanban to start.`,
+                message: `${session.name} approved and assigned you: "${existing.title}" · ${taskHours}h${requestedBy}. Open Kanban to start.`,
                 taskId: task.id,
                 actionUrl: '/kanban',
               },
