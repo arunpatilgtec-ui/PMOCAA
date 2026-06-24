@@ -106,37 +106,6 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       ],
     })
 
-    // Clone template tasks from per-product workstreams (Tear Down, Costing) for this new product
-    const PER_PRODUCT_WS_NAMES = ['Tear Down', 'Costing']
-    const perProductWorkstreams = await prisma.workstream.findMany({
-      where: { projectId: id, name: { in: PER_PRODUCT_WS_NAMES } },
-      include: {
-        tasks: {
-          where: { productId: null }, // only clone template tasks (not already product-specific)
-          orderBy: { order: 'asc' },
-        },
-      },
-    })
-    for (const ws of perProductWorkstreams) {
-      if (ws.tasks.length === 0) continue
-      await prisma.task.createMany({
-        data: ws.tasks.map((t) => ({
-          workstreamId: ws.id,
-          productId: product.id,
-          name: t.name,
-          description: t.description || null,
-          priority: t.priority,
-          status: 'BACKLOG',
-          startDate: t.startDate,   // same scheduled dates as template
-          endDate: t.endDate,
-          estimatedHours: t.estimatedHours,
-          effortHours: 0,
-          order: t.order,
-          tags: t.tags,
-        })),
-      })
-    }
-
     // Auto-create tasks in "Product Costing" workstream for each resource's subsystems
     const subsystemTasks = product.resources.flatMap((r) =>
       r.subsystems.map((sub) => ({ userId: r.userId, sub }))

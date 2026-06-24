@@ -267,8 +267,7 @@ export async function DELETE(_req: NextRequest, ctx: Ctx) {
     if (!(await canManageProduct(session, id))) {
       return Response.json({ error: 'Forbidden' }, { status: 403 })
     }
-    // Delete all tasks belonging to this product (productId field + legacy description tags)
-    await prisma.task.deleteMany({ where: { productId } })
+    // Clean up auto-generated tasks before deleting the product
     const [costingWs, bobWs] = await Promise.all([
       prisma.workstream.findFirst({ where: { projectId: id, name: 'Product Costing' } }),
       prisma.workstream.findFirst({ where: { projectId: id, name: 'BOB & A2Mac1' } }),

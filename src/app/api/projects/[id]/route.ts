@@ -18,7 +18,6 @@ export async function GET(_req: NextRequest, ctx: RouteContext<'/api/projects/[i
             tasks: {
               orderBy: { order: 'asc' },
               include: { owner: { select: { id: true, name: true, avatarUrl: true } } },
-              // productId needed so WorkstreamPanel can filter per-product tasks
             },
           },
         },

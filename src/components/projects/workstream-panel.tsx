@@ -33,7 +33,6 @@ interface Task {
   actualStartDate?: string; actualEndDate?: string
   pctComplete?: number
   effortHours: number; estimatedHours?: number
-  productId?: string | null
   owner?: { id: string; name: string; avatarUrl?: string }
 }
 
@@ -88,7 +87,6 @@ export function WorkstreamPanel({ project, onRefresh, productId, onlyDeliverable
   const [addingWs, setAddingWs] = useState(false)
   const [newWsName, setNewWsName] = useState('')
   const [createTaskWsId, setCreateTaskWsId] = useState<string | null>(null)
-  const [createTaskWsName, setCreateTaskWsName] = useState<string | null>(null)
   const [ownerHistory, setOwnerHistory] = useState<Record<string, OwnerHistoryEntry[]>>({})
   const [showHistory, setShowHistory] = useState<Record<string, boolean>>({})
   const [taskEdits, setTaskEdits] = useState<Record<string, Partial<Task>>>({})
@@ -201,21 +199,16 @@ export function WorkstreamPanel({ project, onRefresh, productId, onlyDeliverable
 
   const now = new Date()
 
-  // Shared workstreams — same tasks for the whole project regardless of product
+  // Workstreams shown in Report tab (onlyDeliverables); hidden from per-product Timeline.
   const CHECKLIST_WS = new Set(['Planning', 'Deliverables', 'Report', 'Reports & Report-out'])
-  // Per-product workstreams — each product has its own independent task instances
-  const PER_PRODUCT_WS = new Set(['Tear Down', 'Costing', 'BOB & A2Mac1', 'Product Costing'])
-
-  // A task belongs to a product if it has productId set (new) OR legacy description tag (old BOB/Costing tasks)
-  const isProductTask = (t: Task, pid: string) =>
-    t.productId === pid || t.description?.includes(`__productTask:${pid}:`)
-
+  // Workstreams whose tasks are filtered per selected product (tagged __productTask:{productId}:)
+  const PER_PRODUCT_WS = new Set(['Product Costing', 'BOB & A2Mac1'])
   const visibleWorkstreams = onlyDeliverables
     ? project.workstreams.filter((ws) => CHECKLIST_WS.has(ws.name))
     : onlyPerProduct && productId
     ? project.workstreams
         .filter((ws) => PER_PRODUCT_WS.has(ws.name))
-        .map((ws) => ({ ...ws, tasks: ws.tasks.filter((t) => isProductTask(t, productId)) }))
+        .map((ws) => ({ ...ws, tasks: ws.tasks.filter((t) => t.description?.includes(`__productTask:${productId}:`)) }))
     : hidePerProduct
     ? project.workstreams.filter((ws) => !CHECKLIST_WS.has(ws.name) && !PER_PRODUCT_WS.has(ws.name))
     : productId
@@ -223,8 +216,8 @@ export function WorkstreamPanel({ project, onRefresh, productId, onlyDeliverable
         .filter((ws) => !CHECKLIST_WS.has(ws.name))
         .map((ws) =>
           PER_PRODUCT_WS.has(ws.name)
-            ? { ...ws, tasks: ws.tasks.filter((t) => isProductTask(t, productId)) }
-            : ws  // shared workstreams (Planning, Reports) show all tasks unchanged
+            ? { ...ws, tasks: ws.tasks.filter((t) => t.description?.includes(`__productTask:${productId}:`)) }
+            : ws
         )
     : project.workstreams.filter((ws) => !CHECKLIST_WS.has(ws.name))
 
@@ -480,7 +473,7 @@ export function WorkstreamPanel({ project, onRefresh, productId, onlyDeliverable
                   <div className="p-3 border-t border-border">
                     <Button
                       variant="ghost" size="sm" className="h-7 text-xs"
-                      onClick={() => { setCreateTaskWsId(ws.id); setCreateTaskWsName(ws.name) }}
+                      onClick={() => setCreateTaskWsId(ws.id)}
                     >
                       <Plus className="mr-1 h-3.5 w-3.5" /> Add Task
                     </Button>
@@ -518,9 +511,8 @@ export function WorkstreamPanel({ project, onRefresh, productId, onlyDeliverable
       {createTaskWsId && (
         <CreateTaskDialog
           open={!!createTaskWsId}
-          onOpenChange={(v) => { if (!v) { setCreateTaskWsId(null); setCreateTaskWsName(null) } }}
+          onOpenChange={(v) => { if (!v) setCreateTaskWsId(null) }}
           workstreamId={createTaskWsId}
-          productId={productId && createTaskWsName && PER_PRODUCT_WS.has(createTaskWsName) ? productId : undefined}
           onCreated={onRefresh}
           allowedUsers={isProjectLead ? project.allocations.map((a) => a.user) : undefined}
         />

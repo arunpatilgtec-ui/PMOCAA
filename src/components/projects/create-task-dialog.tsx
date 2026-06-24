@@ -31,12 +31,11 @@ type FormData = z.infer<typeof schema>
 interface User { id: string; name: string; role: string }
 
 export function CreateTaskDialog({
-  open, onOpenChange, workstreamId, productId, onCreated, allowedUsers,
+  open, onOpenChange, workstreamId, onCreated, allowedUsers,
 }: {
   open: boolean
   onOpenChange: (v: boolean) => void
   workstreamId: string
-  productId?: string
   onCreated: () => void
   allowedUsers?: Array<{ id: string; name: string; role: string }>
 }) {
@@ -68,7 +67,7 @@ export function CreateTaskDialog({
       const res = await fetch('/api/tasks', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...data, workstreamId, ...(productId ? { productId } : {}) }),
+        body: JSON.stringify({ ...data, workstreamId }),
       })
       if (!res.ok) throw new Error((await res.json()).error)
       toast.success('Task created')
