@@ -238,14 +238,41 @@ export async function DELETE(_req: NextRequest, ctx: RouteContext<'/api/requests
 
     const existing = await prisma.request.findUnique({
       where: { id },
-      select: { submitterId: true, status: true },
+      select: {
+        submitterId: true,
+        assignedById: true,
+        assigneeId: true,
+        title: true,
+        status: true,
+      },
     })
     if (!existing) return Response.json({ error: 'Not found' }, { status: 404 })
 
-    const canDelete =
-      existing.submitterId === session.id && existing.status !== 'CONVERTED'
+    const isSubmitter = existing.submitterId === session.id
+    const isAssigner  = existing.assignedById === session.id
+    const isManager   = ['ADMIN', 'MANAGER', 'PLANNER'].includes(session.role)
+    const canDelete   = (isSubmitter || isAssigner || isManager) && existing.status !== 'CONVERTED'
 
     if (!canDelete) return Response.json({ error: 'Forbidden' }, { status: 403 })
+
+    // If the request was approved it created a Task in the direct-assignments workstream.
+    // Delete that task so the assignee's bandwidth is freed immediately.
+    if (existing.status === 'APPROVED' && existing.assigneeId) {
+      const directWs = await prisma.workstream.findFirst({
+        where: { project: { name: '__direct_assignments__' } },
+        select: { id: true },
+      })
+      if (directWs) {
+        await prisma.task.deleteMany({
+          where: {
+            workstreamId: directWs.id,
+            ownerId: existing.assigneeId,
+            name: existing.title,
+            status: { notIn: ['COMPLETED', 'CANCELLED'] },
+          },
+        })
+      }
+    }
 
     await prisma.request.delete({ where: { id } })
     return Response.json({ ok: true })
