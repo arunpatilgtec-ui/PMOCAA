@@ -165,27 +165,19 @@ export async function GET(req: NextRequest) {
       const weeklyCapacityHours = Math.round(HOURS_PER_WEEK * user.capacityPct / 100 * 10) / 10
       const dailyCapacityHours  = Math.round(HOURS_PER_DAY  * user.capacityPct / 100 * 10) / 10
 
-      // Convert pending requests to task-like items for the hours calculation.
-      // Recurring requests use hoursPerDay × working-days in their range so the
-      // per-day rate produced by calcDailyHours equals hoursPerDay exactly.
+      // Compute pending request hours for display only — not included in utilization.
+      // Only APPROVED requests (which create Tasks) count toward utilization via ownedTasks.
       const pendingRequestItems = user.assignedRequests.map((req) => {
         if (req.isRecurring && req.hoursPerDay) {
           const start = req.startDate ?? new Date()
           const end   = req.endDate   ?? new Date(start.getTime() + 90 * 24 * 60 * 60 * 1000)
-          return {
-            estimatedHours: req.hoursPerDay * countWorkingDays(start, end),
-            startDate: req.startDate,
-            endDate: end,
-          }
+          return { estimatedHours: req.hoursPerDay * countWorkingDays(start, end) }
         }
-        return {
-          estimatedHours: req.estimatedHours ?? 0,
-          startDate: req.startDate,
-          endDate: req.endDate,
-        }
+        return { estimatedHours: req.estimatedHours ?? 0 }
       })
 
-      const allWorkItems = [...user.ownedTasks, ...pendingRequestItems]
+      // Only tasks (approved work) drive utilization and gantt hours
+      const allWorkItems = [...user.ownedTasks]
 
       // dailyHoursMap covers the requested range (gantt) or current week (default)
       const dailyHoursMap = calcDailyHours(allWorkItems, rangeStart, rangeEnd)

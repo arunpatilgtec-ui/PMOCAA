@@ -395,7 +395,7 @@ function EmployeeDetailDialog({ resource, open, onOpenChange }: {
             <p className="text-xs text-muted-foreground">weekly</p>
           </div>
           <div className="border rounded-lg p-2">
-            <p className="text-lg font-bold">{Math.round(totalHours + pendingReqHours)}h</p>
+            <p className="text-lg font-bold">{Math.round(totalHours)}h</p>
             <p className="text-xs text-muted-foreground">Total</p>
             <p className="text-xs text-muted-foreground">backlog</p>
           </div>
@@ -487,7 +487,7 @@ function EmployeeDetailDialog({ resource, open, onOpenChange }: {
               <div className="flex items-center gap-2 mb-1.5">
                 <Clock className="h-3.5 w-3.5 text-amber-500" />
                 <span className="text-xs font-semibold text-amber-600 dark:text-amber-400 uppercase tracking-wide">
-                  Pending Requests ({resource.assignedRequests!.length})
+                  Pending Requests ({resource.assignedRequests!.length}) · not counted in utilization
                 </span>
                 <span className="text-xs text-muted-foreground ml-auto">{Math.round(pendingReqHours)}h total</span>
               </div>
@@ -754,12 +754,14 @@ export default function ResourcesPage() {
                             : `Daily limit exceeded (${r.maxDailyHours}h > ${r.dailyCapacityHours}h/day)`}
                         </p>
                       )}
-                      {(r.totalTaskHours > 0 || (r.pendingRequestHours ?? 0) > 0) && (
+                      {r.totalTaskHours > 0 && (
                         <p className="text-xs text-muted-foreground">
-                          {r.totalTaskHours + (r.pendingRequestHours ?? 0)}h total backlog
-                          {(r.pendingRequestHours ?? 0) > 0 && (
-                            <span className="text-amber-600 dark:text-amber-400"> · {r.pendingRequestHours}h in pending requests</span>
-                          )}
+                          {r.totalTaskHours}h total backlog
+                        </p>
+                      )}
+                      {(r.pendingRequestHours ?? 0) > 0 && (
+                        <p className="text-xs text-amber-600 dark:text-amber-400">
+                          {r.pendingRequestHours}h awaiting approval
                         </p>
                       )}
                     </div>
