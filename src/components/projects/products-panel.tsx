@@ -847,7 +847,10 @@ export function ProductsPanel({
                     <div className="space-y-1.5">
                       <Label className="text-xs text-muted-foreground">Costing Responsibility</Label>
                       <div className="flex flex-wrap gap-1.5">
-                        {(subsystems.length > 0 ? subsystems : COSTING_TYPES).map((ct) => (
+                        {(subsystems.length > 0
+                          ? [...new Set([...subsystems, 'Harness', 'PCB'])]
+                          : COSTING_TYPES
+                        ).map((ct) => (
                           <button
                             key={ct} type="button"
                             onClick={() => toggleCostingType(i, ct)}
