@@ -211,6 +211,7 @@ export default function RequestsPage() {
   const [editReqEnd,     setEditReqEnd]     = useState('')
   const [editReqRecurring, setEditReqRecurring] = useState(false)
   const [editReqHours,   setEditReqHours]   = useState('')
+  const [editReqAssignedById, setEditReqAssignedById] = useState('')
   const [editSubmitting, setEditSubmitting] = useState(false)
   const [deleteReqId,    setDeleteReqId]    = useState<string | null>(null)
   const [deleteReqBusy,  setDeleteReqBusy]  = useState(false)
@@ -460,6 +461,7 @@ export default function RequestsPage() {
     setEditReqEnd(req.endDate ? req.endDate.slice(0, 10) : '')
     setEditReqRecurring(req.isRecurring ?? false)
     setEditReqHours(req.isRecurring ? String(req.hoursPerDay || '') : String(req.estimatedHours || ''))
+    setEditReqAssignedById(req.assignedBy?.id || '')
     if (formUsers.length === 0) {
       fetch('/api/users').then(r => r.json()).then(d => setFormUsers(Array.isArray(d) ? d : [])).catch(() => {})
     }
@@ -486,6 +488,7 @@ export default function RequestsPage() {
           isRecurring: editReqRecurring,
           hoursPerDay: editReqRecurring && editReqHours ? parseFloat(editReqHours) : null,
           estimatedHours: !editReqRecurring && editReqHours ? parseFloat(editReqHours) : null,
+          assignedById: editReqAssignedById || null,
         }),
       })
       if (!res.ok) throw new Error((await res.json()).error || 'Failed')
@@ -1320,7 +1323,7 @@ export default function RequestsPage() {
 
       {/* ── Submit Request Dialog ── */}
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-        <DialogContent className="max-w-lg">
+        <DialogContent className="max-w-lg" onInteractOutside={(e) => e.preventDefault()}>
           <DialogHeader><DialogTitle>Submit New Request</DialogTitle></DialogHeader>
           <form onSubmit={sForm.handleSubmit(onSubmitRequest)} className="space-y-4">
             <div className="space-y-1.5">
@@ -1499,14 +1502,34 @@ export default function RequestsPage() {
               </div>
             </div>
             <div className="space-y-1.5">
+              <Label>Assigned by (who gave you this work)</Label>
+              <Select value={editReqAssignedById || 'none'} onValueChange={(v) => setEditReqAssignedById(v === 'none' ? '' : (v ?? ''))}>
+                <SelectTrigger className="w-full"><SelectValue placeholder="Not specified" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Not specified</SelectItem>
+                  {formUsers.map((u) => (
+                    <SelectItem key={u.id} value={u.id}>
+                      {u.name} <span className="text-muted-foreground text-xs">· {u.role.replace('_', ' ')}</span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
               <Label>Notes (optional)</Label>
               <Textarea value={editReqNotes} onChange={e => setEditReqNotes(e.target.value)} rows={2} />
             </div>
-            <div className="flex justify-end gap-2">
-              <Button variant="outline" onClick={() => setEditReqId(null)}>Cancel</Button>
-              <Button onClick={submitEditRequest} disabled={editSubmitting}>
-                {editSubmitting ? 'Saving…' : 'Save Changes'}
+            <div className="flex items-center justify-between gap-2">
+              <Button variant="ghost" className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                onClick={() => { setDeleteReqId(editReqId); setEditReqId(null) }}>
+                <Trash2 className="mr-1.5 h-4 w-4" /> Delete Request
               </Button>
+              <div className="flex gap-2">
+                <Button variant="outline" onClick={() => setEditReqId(null)}>Cancel</Button>
+                <Button onClick={submitEditRequest} disabled={editSubmitting}>
+                  {editSubmitting ? 'Saving…' : 'Save Changes'}
+                </Button>
+              </div>
             </div>
           </div>
         </DialogContent>

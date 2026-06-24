@@ -50,6 +50,7 @@ export async function PATCH(req: NextRequest, ctx: RouteContext<'/api/requests/[
           ...(data.isRecurring !== undefined && { isRecurring: data.isRecurring }),
           ...(data.hoursPerDay !== undefined && { hoursPerDay: data.hoursPerDay ? parseFloat(String(data.hoursPerDay)) : null }),
           ...(data.estimatedHours !== undefined && { estimatedHours: data.estimatedHours ? parseFloat(String(data.estimatedHours)) : null }),
+          ...(data.assignedById !== undefined && { assignedById: data.assignedById || null }),
         },
       })
       return Response.json(updated)
