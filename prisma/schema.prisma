@@ -270,6 +270,7 @@ model Task {
   actualStartDate DateTime?
   actualEndDate   DateTime?
   order           Int        @default(0)
+  productId       String?
   dependsOn       String[]
   tags            String[]
   reworkCount     Int        @default(0)
@@ -281,6 +282,7 @@ model Task {
   owner           User?            @relation("TaskOwner", fields: [ownerId], references: [id], onDelete: SetNull)
   assignedBy      User?            @relation("TaskAssignedBy", fields: [assignedById], references: [id], onDelete: SetNull)
   approvedBy      User?            @relation("TaskApprovedBy", fields: [approvedById], references: [id], onDelete: SetNull)
+  product         Product?         @relation(fields: [productId], references: [id], onDelete: SetNull)
   documents       Document[]
   scheduleChanges ScheduleChange[] @relation("AffectedTask")
   notifications   Notification[]
@@ -440,6 +442,7 @@ model Product {
   lead      User?            @relation("ProductLead", fields: [leadId], references: [id], onDelete: SetNull)
   resources ProductResource[]
   history   ProductHistory[]
+  tasks     Task[]
 
   @@map("products")
 }
