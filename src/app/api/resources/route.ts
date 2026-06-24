@@ -144,6 +144,18 @@ export async function GET(req: NextRequest) {
           },
           orderBy: [{ endDate: 'asc' }, { priority: 'asc' }],
         },
+        assignedRequests: {
+          where: { status: { in: ['SUBMITTED', 'REVIEW'] } },
+          select: {
+            id: true,
+            title: true,
+            estimatedHours: true,
+            hoursPerDay: true,
+            isRecurring: true,
+            startDate: true,
+            endDate: true,
+          },
+        },
       },
       orderBy: { name: 'asc' },
     })
@@ -153,12 +165,34 @@ export async function GET(req: NextRequest) {
       const weeklyCapacityHours = Math.round(HOURS_PER_WEEK * user.capacityPct / 100 * 10) / 10
       const dailyCapacityHours  = Math.round(HOURS_PER_DAY  * user.capacityPct / 100 * 10) / 10
 
+      // Convert pending requests to task-like items for the hours calculation.
+      // Recurring requests use hoursPerDay × working-days in their range so the
+      // per-day rate produced by calcDailyHours equals hoursPerDay exactly.
+      const pendingRequestItems = user.assignedRequests.map((req) => {
+        if (req.isRecurring && req.hoursPerDay) {
+          const start = req.startDate ?? new Date()
+          const end   = req.endDate   ?? new Date(start.getTime() + 90 * 24 * 60 * 60 * 1000)
+          return {
+            estimatedHours: req.hoursPerDay * countWorkingDays(start, end),
+            startDate: req.startDate,
+            endDate: end,
+          }
+        }
+        return {
+          estimatedHours: req.estimatedHours ?? 0,
+          startDate: req.startDate,
+          endDate: req.endDate,
+        }
+      })
+
+      const allWorkItems = [...user.ownedTasks, ...pendingRequestItems]
+
       // dailyHoursMap covers the requested range (gantt) or current week (default)
-      const dailyHoursMap = calcDailyHours(user.ownedTasks, rangeStart, rangeEnd)
+      const dailyHoursMap = calcDailyHours(allWorkItems, rangeStart, rangeEnd)
 
       // Weekly stats always reflect the current week regardless of gantt range
       const currentWeekMap = (fromParam || toParam)
-        ? calcDailyHours(user.ownedTasks, weekStart, weekEnd)
+        ? calcDailyHours(allWorkItems, weekStart, weekEnd)
         : dailyHoursMap
       const dailyValues   = Object.values(currentWeekMap)
 
@@ -189,6 +223,10 @@ export async function GET(req: NextRequest) {
           .reduce((s, t) => s + (t.estimatedHours || 0), 0) * 10
       ) / 10
 
+      const pendingRequestHours = Math.round(
+        pendingRequestItems.reduce((s, r) => s + (r.estimatedHours || 0), 0) * 10
+      ) / 10
+
       return {
         ...user,
         // Hours
@@ -198,6 +236,7 @@ export async function GET(req: NextRequest) {
         dailyCapacityHours,
         totalTaskHours,
         directTaskHours,
+        pendingRequestHours,
         dailyHoursMap,
         // Utilization
         utilizationPct,
