@@ -140,10 +140,10 @@ function MyUtilizationReport({ userId }: { userId: string }) {
   const totalHours   = Math.round(Object.values(dailyMap).reduce((s, h) => s + h, 0) * 10) / 10
   const workingDays  = Object.keys(dailyMap).length
   const avgDaily     = workingDays > 0 ? Math.round(totalHours / workingDays * 10) / 10 : 0
-  const utilPct      = weeklyCap > 0 && (period === 'week')
+  const utilPct      = period === 'week' && weeklyCap > 0
     ? Math.round(totalHours / weeklyCap * 100)
-    : dailyCap > 0 && period === 'day'
-      ? Math.round((dailyMap[specificDay] ?? 0) / dailyCap * 100)
+    : period === 'day' && dailyCap > 0
+      ? Math.round(totalHours / dailyCap * 100)
       : 0
 
   // Tasks overlapping the date range
@@ -190,7 +190,6 @@ function MyUtilizationReport({ userId }: { userId: string }) {
             value={specificDay}
             onChange={e => setDay(e.target.value)}
             className="w-40 h-8 text-sm"
-            max={todayStr}
           />
         )}
       </div>
