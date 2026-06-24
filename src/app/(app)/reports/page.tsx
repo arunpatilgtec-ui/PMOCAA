@@ -135,7 +135,8 @@ function MyUtilizationReport({ userId }: { userId: string }) {
 
   const bars   = period === 'week' || period === 'day' ? dailyBars : weeklyBars
   const barCap = period === 'week' || period === 'day' ? dailyCap : weeklyCap
-  const maxVal = Math.max(...bars.map(b => b.total), barCap, 1)
+  // Scale to actual data so bars fill the chart height and colors are visible
+  const maxVal = Math.max(...bars.map(b => b.total), 0.001)
 
   const totalHours   = Math.round(Object.values(dailyMap).reduce((s, h) => s + h, 0) * 10) / 10
   const workingDays  = Object.keys(dailyMap).length
@@ -249,7 +250,8 @@ function MyUtilizationReport({ userId }: { userId: string }) {
                   <div className="flex items-end gap-2 min-w-max pb-1" style={{ height: 160 }}>
                     {bars.map((bar, i) => {
                       const pct = (bar.total / maxVal) * 100
-                      const capPct = (barCap / maxVal) * 100
+                      // Clamp at 95% so the capacity line is always visible inside the chart
+                      const capPct = Math.min((barCap / maxVal) * 100, 95)
                       return (
                         <div key={i} className="flex flex-col items-center gap-1" style={{ minWidth: period === '3m' || period === '6m' ? 36 : 60 }}>
                           <span className="text-[10px] text-muted-foreground">{bar.total > 0 ? `${bar.total}h` : ''}</span>
@@ -259,11 +261,13 @@ function MyUtilizationReport({ userId }: { userId: string }) {
                               className="absolute w-full border-t-2 border-dashed border-blue-300 opacity-60"
                               style={{ bottom: `${capPct}%` }}
                             />
-                            {/* Bar */}
-                            <div
-                              className={`w-full rounded-t transition-all ${bar.total > 0 ? barColor(bar.total, barCap) : 'bg-muted'}`}
-                              style={{ height: bar.total > 0 ? `${Math.max(pct, 2)}%` : '4px' }}
-                            />
+                            {/* Bar — only render when there are hours so 0h days are visually clean */}
+                            {bar.total > 0 && (
+                              <div
+                                className={`w-full rounded-t transition-all ${barColor(bar.total, barCap)}`}
+                                style={{ height: `${Math.max(pct, 8)}%` }}
+                              />
+                            )}
                           </div>
                           <span className="text-[10px] text-muted-foreground text-center leading-tight" style={{ maxWidth: 56 }}>
                             {bar.label}
