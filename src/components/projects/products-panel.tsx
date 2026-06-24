@@ -611,7 +611,7 @@ export function ProductsPanel({
 
     setForm((f) => {
       const filled = f.resources.map((r, i) => ({ r, i })).filter(({ r }) => r.userId)
-      const mechanical = filled.filter(({ r }) => r.costingTypes.includes('MECHANICAL'))
+      const mechanical = filled.filter(({ r }) => r.costingTypes.length > 0)
       const targets = mechanical.length > 0 ? mechanical : filled
       const n = targets.length
       const chunkSize = Math.floor(subsystems.length / n)
@@ -846,8 +846,8 @@ export function ProductsPanel({
 
                     <div className="space-y-1.5">
                       <Label className="text-xs text-muted-foreground">Costing Responsibility</Label>
-                      <div className="flex gap-2">
-                        {COSTING_TYPES.map((ct) => (
+                      <div className="flex flex-wrap gap-1.5">
+                        {(subsystems.length > 0 ? subsystems : COSTING_TYPES).map((ct) => (
                           <button
                             key={ct} type="button"
                             onClick={() => toggleCostingType(i, ct)}
@@ -857,7 +857,7 @@ export function ProductsPanel({
                                 : 'border-border hover:border-orange-400 text-muted-foreground hover:text-foreground'
                             }`}
                           >
-                            {COSTING_LABELS[ct]}
+                            {COSTING_LABELS[ct] || ct}
                           </button>
                         ))}
                       </div>
