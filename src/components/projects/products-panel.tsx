@@ -67,7 +67,7 @@ const SUBSYSTEMS_BY_CATEGORY: Record<string, string[]> = {
   Cooking: ['Chassis', 'Cooktop', 'Accessories', 'Cavity', 'Controls', 'Drawer', 'UI Console', 'Door'],
   Dishwasher: ['Racks', 'Water Delivery', 'Door & Aesthetics', 'Control System', 'Wash System', 'Tub & Chassis'],
   Laundry: ['Aesthetics', 'Structures', 'Performance Enablers', 'SES'],
-  KASA: ['Packaging', 'Steam & Milk Frother', 'Aesthetics & Cabinet', 'Brewing System', 'Grinding System', 'Heating System', 'Controls'],
+  KASA: ['Packaging', 'Steam & Milk Frother Asm', 'Aesthetics & Cabinet', 'Brewing System', 'Grinding System', 'Heating System', 'Filling & Distribution System', 'Controls'],
   'Food Disposer': ['Accessories', 'Aesthetic', 'Structure', 'Water & Heating', 'Control'],
 }
 
@@ -243,32 +243,35 @@ function ProductDetailView({
         </CardContent>
       </Card>
 
-      {/* Subsystem Assignments */}
-      {product.resources.some((r) => r.subsystems.length > 0) && (
+      {/* Subsystem Assignments — show every category subsystem, assigned or not */}
+      {subsystems.length > 0 && (
         <div className="space-y-2">
           <div className="flex items-center gap-2">
             <h3 className="text-sm font-semibold">Subsystem Assignments</h3>
-            <Badge variant="secondary" className="text-xs">
-              {product.resources.reduce((s, r) => s + r.subsystems.length, 0)}
-            </Badge>
+            <Badge variant="secondary" className="text-xs">{subsystems.length}</Badge>
           </div>
           <div className="rounded-lg border border-border divide-y divide-border">
-            {product.resources.flatMap((r) =>
-              r.subsystems.map((sub) => ({ sub, user: r.user }))
-            ).map(({ sub, user }, i) => (
-              <div key={i} className="flex items-center gap-3 px-3 py-2.5">
-                <div className="h-2 w-2 rounded-full shrink-0 bg-blue-500" />
-                <div className="flex-1 min-w-0">
-                  <span className="text-sm font-medium">{sub}</span>
-                </div>
-                <div className="flex items-center gap-1.5 shrink-0">
-                  <div className="h-5 w-5 rounded-full bg-blue-100 dark:bg-blue-900 flex items-center justify-center text-[9px] font-bold text-blue-700 dark:text-blue-300">
-                    {user.name.split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase()}
+            {subsystems.map((sub) => {
+              const assigned = product.resources.find((r) => r.subsystems.includes(sub))
+              return (
+                <div key={sub} className="flex items-center gap-3 px-3 py-2.5">
+                  <div className="h-2 w-2 rounded-full shrink-0 bg-blue-500" />
+                  <div className="flex-1 min-w-0">
+                    <span className="text-sm font-medium">{sub}</span>
                   </div>
-                  <span className="text-xs text-muted-foreground hidden sm:inline">{user.name.split(' ')[0]}</span>
+                  {assigned ? (
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <div className="h-5 w-5 rounded-full bg-blue-100 dark:bg-blue-900 flex items-center justify-center text-[9px] font-bold text-blue-700 dark:text-blue-300">
+                        {assigned.user.name.split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase()}
+                      </div>
+                      <span className="text-xs text-muted-foreground hidden sm:inline">{assigned.user.name.split(' ')[0]}</span>
+                    </div>
+                  ) : (
+                    <span className="text-xs text-muted-foreground italic">Unassigned</span>
+                  )}
                 </div>
-              </div>
-            ))}
+              )
+            })}
           </div>
         </div>
       )}
