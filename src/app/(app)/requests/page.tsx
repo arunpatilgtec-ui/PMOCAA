@@ -237,6 +237,16 @@ export default function RequestsPage() {
   const [editSrDesc,     setEditSrDesc]     = useState('')
   const [editSrStart,    setEditSrStart]    = useState('')
   const [editSrBusy,     setEditSrBusy]     = useState(false)
+  // Edit individual strategic task (subtask)
+  const [editStSrId,     setEditStSrId]     = useState<string | null>(null)
+  const [editStTask,     setEditStTask]     = useState<StrategicTaskData | null>(null)
+  const [editStTitle,    setEditStTitle]    = useState('')
+  const [editStRecurring,setEditStRecurring]= useState(false)
+  const [editStHours,    setEditStHours]    = useState('')
+  const [editStStart,    setEditStStart]    = useState('')
+  const [editStEnd,      setEditStEnd]      = useState('')
+  const [editStAssignee, setEditStAssignee] = useState('')
+  const [editStBusy,     setEditStBusy]     = useState(false)
   const [deleteSrId,     setDeleteSrId]     = useState<string | null>(null)
   const [deleteSrBusy,   setDeleteSrBusy]   = useState(false)
 
@@ -605,6 +615,46 @@ export default function RequestsPage() {
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : 'Failed to update')
     } finally { setEditSrBusy(false) }
+  }
+
+  function openEditTask(srId: string, task: StrategicTaskData) {
+    setEditStSrId(srId)
+    setEditStTask(task)
+    setEditStTitle(task.title)
+    setEditStRecurring(task.isRecurring)
+    setEditStHours(task.isRecurring ? String(task.hoursPerDay ?? '') : String(task.estimatedHours ?? ''))
+    setEditStStart(task.startDate?.slice(0, 10) ?? '')
+    setEditStEnd(task.endDate?.slice(0, 10) ?? '')
+    setEditStAssignee(task.assignee?.id ?? '')
+    if (formUsers.length === 0) {
+      fetch('/api/users').then(r => r.json()).then(d => setFormUsers(Array.isArray(d) ? d : [])).catch(() => {})
+    }
+  }
+
+  async function submitEditTask() {
+    if (!editStSrId || !editStTask || !editStTitle.trim()) { toast.error('Title is required'); return }
+    setEditStBusy(true)
+    try {
+      const res = await fetch(`/api/strategic-requests/${editStSrId}/tasks/${editStTask.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: editStTitle,
+          isRecurring: editStRecurring,
+          hoursPerDay: editStRecurring && editStHours ? parseFloat(editStHours) : null,
+          estimatedHours: !editStRecurring && editStHours ? parseFloat(editStHours) : null,
+          startDate: editStStart || null,
+          endDate: editStEnd || null,
+          assigneeId: editStAssignee || null,
+        }),
+      })
+      if (!res.ok) throw new Error((await res.json()).error || 'Failed')
+      toast.success('Task updated')
+      setEditStSrId(null)
+      loadSr()
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'Failed to update task')
+    } finally { setEditStBusy(false) }
   }
 
   async function confirmDeleteSr() {
@@ -1094,6 +1144,14 @@ export default function RequestsPage() {
                                     {task.startDate && format(new Date(task.startDate), 'MMM d')}
                                     {task.endDate && ` – ${format(new Date(task.endDate), 'MMM d')}`}
                                   </span>
+                                )}
+                                {canEditSr && (
+                                  <button
+                                    className="text-muted-foreground hover:text-foreground shrink-0"
+                                    onClick={() => openEditTask(sr.id, task)}
+                                  >
+                                    <Pencil className="h-3 w-3" />
+                                  </button>
                                 )}
                               </div>
                             ))}
@@ -1735,6 +1793,55 @@ export default function RequestsPage() {
               <Button variant="outline" onClick={() => setEditSrId(null)}>Cancel</Button>
               <Button onClick={submitEditSr} disabled={editSrBusy}>
                 {editSrBusy ? 'Saving…' : 'Save Changes'}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Edit Strategic Task (subtask) ── */}
+      <Dialog open={!!editStSrId} onOpenChange={(o) => { if (!o) setEditStSrId(null) }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader><DialogTitle>Edit Task</DialogTitle></DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-1.5">
+              <Label>Title *</Label>
+              <Input value={editStTitle} onChange={e => setEditStTitle(e.target.value)} />
+            </div>
+            <div className="flex items-center gap-2">
+              <input type="checkbox" id="editStRecurring" checked={editStRecurring}
+                onChange={e => setEditStRecurring(e.target.checked)} className="h-4 w-4" />
+              <Label htmlFor="editStRecurring">Recurring</Label>
+            </div>
+            <div className="space-y-1.5">
+              <Label>{editStRecurring ? 'Hours per Day' : 'Estimated Hours'}</Label>
+              <Input type="number" min="0" step="0.5" value={editStHours}
+                onChange={e => setEditStHours(e.target.value)} />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label>Start Date</Label>
+                <Input type="date" value={editStStart} onChange={e => setEditStStart(e.target.value)} />
+              </div>
+              <div className="space-y-1.5">
+                <Label>End Date</Label>
+                <Input type="date" value={editStEnd} onChange={e => setEditStEnd(e.target.value)} />
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label>Assignee</Label>
+              <select className="w-full border rounded px-2 py-1.5 text-sm bg-background"
+                value={editStAssignee} onChange={e => setEditStAssignee(e.target.value)}>
+                <option value="">Unassigned</option>
+                {formUsers.map(u => (
+                  <option key={u.id} value={u.id}>{u.name}</option>
+                ))}
+              </select>
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setEditStSrId(null)}>Cancel</Button>
+              <Button onClick={submitEditTask} disabled={editStBusy}>
+                {editStBusy ? 'Saving…' : 'Save Changes'}
               </Button>
             </div>
           </div>
