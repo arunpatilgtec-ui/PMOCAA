@@ -78,7 +78,7 @@ const SUBSYSTEMS_BY_CATEGORY: Record<string, string[]> = {
   Cooking: ['Chassis', 'Cooktop', 'Accessories', 'Cavity', 'Controls', 'Drawer', 'UI Console', 'Door'],
   Dishwasher: ['Racks', 'Water Delivery', 'Door & Aesthetics', 'Control System', 'Wash System', 'Tub & Chassis'],
   Laundry: ['Aesthetics', 'Structures', 'Performance Enablers', 'SES'],
-  KASA: ['Steam & Milk Frother', 'Aesthetics & Cabinet', 'Brewing System', 'Grinding System', 'Heating System', 'Controls'],
+  KASA: ['Packaging', 'Steam & Milk Frother', 'Aesthetics & Cabinet', 'Brewing System', 'Grinding System', 'Heating System', 'Controls'],
   'Food Disposer': ['Accessories', 'Aesthetic', 'Structure', 'Water & Heating', 'Control'],
 }
 
