@@ -121,42 +121,12 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
         })
       }
 
-      // Sync auto-generated tasks: delete old, recreate from current assignment
+      // Fetch project dates and product record needed for BOB task dates
       const proj = await prisma.project.findUnique({
         where: { id },
-        select: { startDate: true, endDate: true, category: true },
-      })
-      const existingWs = await prisma.workstream.findFirst({
-        where: { projectId: id, name: 'Product Costing' },
-      })
-      const wsOrder = existingWs ? 0 : await prisma.workstream.count({ where: { projectId: id } })
-      const costingWs = existingWs ?? await prisma.workstream.create({
-        data: { projectId: id, name: 'Product Costing', order: wsOrder },
-      })
-      await prisma.task.deleteMany({
-        where: { workstreamId: costingWs.id, description: { contains: `__productTask:${productId}:` } },
-      })
-      const updatedResources = await prisma.productResource.findMany({
-        where: { productId },
-        select: { userId: true, subsystems: true },
+        select: { startDate: true, endDate: true },
       })
       const productRecord = await prisma.product.findUnique({ where: { id: productId }, select: { brand: true, modelNo: true } })
-      const taskRows = updatedResources.flatMap((r) =>
-        r.subsystems.map((sub) => ({
-          workstreamId: costingWs.id,
-          name: `${productRecord?.brand ?? ''} — ${sub}`,
-          description: `__productTask:${productId}:${r.userId}__`,
-          ownerId: r.userId,
-          assignedById: session.id,
-          startDate: proj?.startDate ?? null,
-          endDate: proj?.endDate ?? null,
-          effortHours: 8,
-          estimatedHours: 8,
-        }))
-      )
-      if (taskRows.length > 0) {
-        await prisma.task.createMany({ data: taskRows })
-      }
 
       // Sync per-product BOB & A2Mac1 tasks — auto-create workstream if needed
       const existingBobWs = await prisma.workstream.findFirst({

@@ -56,17 +56,6 @@ interface ProductFormState {
   resources: Array<{ userId: string; subsystems: string[]; costingTypes: string[] }>
 }
 
-interface ProductTask {
-  id: string
-  name: string
-  description?: string
-  status: string
-  priority: string
-  startDate?: string
-  endDate?: string
-  pctComplete?: number
-  owner?: { id: string; name: string }
-}
 
 // ── Subsystem sets per category ──────────────────────────────────────────────
 
@@ -85,22 +74,6 @@ const SUBSYSTEMS_BY_CATEGORY: Record<string, string[]> = {
 const COSTING_TYPES = ['MECHANICAL', 'HARNESS', 'PCB'] as const
 const COSTING_LABELS: Record<string, string> = { MECHANICAL: 'Mechanical', HARNESS: 'Harness', PCB: 'PCB' }
 
-const STATUS_COLORS: Record<string, string> = {
-  BACKLOG: 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400',
-  PLANNED: 'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300',
-  IN_PROGRESS: 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900 dark:text-yellow-300',
-  REVIEW: 'bg-purple-100 text-purple-700 dark:bg-purple-900 dark:text-purple-300',
-  REWORK: 'bg-orange-100 text-orange-700 dark:bg-orange-900 dark:text-orange-300',
-  COMPLETED: 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300',
-  CANCELLED: 'bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300',
-}
-
-const PRIORITY_DOT: Record<string, string> = {
-  LOW: 'bg-slate-400',
-  MEDIUM: 'bg-blue-500',
-  HIGH: 'bg-orange-500',
-  CRITICAL: 'bg-red-500',
-}
 
 function emptyForm(): ProductFormState {
   return { brand: '', modelNo: '', leadId: '', resourceCount: '', resources: [] }
@@ -201,8 +174,6 @@ function ProductHistoryPanel({ productId, projectId }: { productId: string; proj
 function ProductDetailView({
   product,
   projectId,
-  tasks,
-  tasksLoading,
   subsystems,
   canManage,
   onEdit,
@@ -211,18 +182,12 @@ function ProductDetailView({
 }: {
   product: Product
   projectId: string
-  tasks: ProductTask[]
-  tasksLoading: boolean
   subsystems: string[]
   canManage: boolean
   onEdit: (p: Product, e: React.MouseEvent) => void
   onDelete: (p: Product) => void
   deletingId: string | null
 }) {
-  const now = new Date()
-  const avgPct = tasks.length > 0
-    ? Math.round(tasks.reduce((s, t) => s + (t.pctComplete ?? 0), 0) / tasks.length)
-    : null
 
   return (
     <div className="space-y-4">
@@ -278,65 +243,35 @@ function ProductDetailView({
         </CardContent>
       </Card>
 
-      {/* Subsystem Tasks */}
-      <div className="space-y-2">
-        <div className="flex items-center gap-2">
-          <h3 className="text-sm font-semibold">Subsystem Tasks</h3>
-          {!tasksLoading && (
-            <Badge variant="secondary" className="text-xs">{tasks.length}</Badge>
-          )}
-        </div>
-
-        {tasksLoading ? (
-          <p className="text-xs text-muted-foreground py-3">Loading tasks…</p>
-        ) : tasks.length === 0 ? (
-          <div className="text-center py-8 text-muted-foreground border-2 border-dashed rounded-lg">
-            <p className="text-sm">No tasks yet</p>
-            <p className="text-xs mt-0.5">Assign resources with subsystems to generate tasks automatically</p>
+      {/* Subsystem Assignments */}
+      {product.resources.some((r) => r.subsystems.length > 0) && (
+        <div className="space-y-2">
+          <div className="flex items-center gap-2">
+            <h3 className="text-sm font-semibold">Subsystem Assignments</h3>
+            <Badge variant="secondary" className="text-xs">
+              {product.resources.reduce((s, r) => s + r.subsystems.length, 0)}
+            </Badge>
           </div>
-        ) : (
           <div className="rounded-lg border border-border divide-y divide-border">
-            {tasks.map((task) => {
-              const isLate = task.endDate &&
-                new Date(task.endDate) < now &&
-                !['COMPLETED', 'CANCELLED'].includes(task.status)
-              const subName = task.name.includes(' — ') ? task.name.split(' — ').slice(1).join(' — ') : task.name
-              return (
-                <div key={task.id} className="flex items-center gap-3 px-3 py-2.5">
-                  <div className={`h-2 w-2 rounded-full shrink-0 ${PRIORITY_DOT[task.priority] ?? 'bg-slate-400'}`} />
-                  <div className="flex-1 min-w-0">
-                    <span className="text-sm font-medium">{subName}</span>
-                  </div>
-                  {task.owner && (
-                    <div className="flex items-center gap-1.5 shrink-0">
-                      <div className="h-5 w-5 rounded-full bg-blue-100 dark:bg-blue-900 flex items-center justify-center text-[9px] font-bold text-blue-700 dark:text-blue-300">
-                        {task.owner.name.split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase()}
-                      </div>
-                      <span className="text-xs text-muted-foreground hidden sm:inline">{task.owner.name.split(' ')[0]}</span>
-                    </div>
-                  )}
-                  {task.startDate && task.endDate && (
-                    <span className="text-xs text-muted-foreground shrink-0 tabular-nums hidden md:inline">
-                      {format(new Date(task.startDate), 'MMM d')} – {format(new Date(task.endDate), 'MMM d')}
-                    </span>
-                  )}
-                  <span className={`text-xs px-1.5 py-0.5 rounded shrink-0 ${STATUS_COLORS[task.status] ?? STATUS_COLORS.BACKLOG}`}>
-                    {task.status.replace('_', ' ')}
-                  </span>
-                  {isLate && (
-                    <span className="text-xs px-1.5 py-0.5 rounded bg-red-100 text-red-600 dark:bg-red-900/40 dark:text-red-400 shrink-0">
-                      Late
-                    </span>
-                  )}
-                  {task.pctComplete != null && task.pctComplete > 0 && task.pctComplete < 100 && (
-                    <span className="text-xs text-muted-foreground shrink-0 tabular-nums">{task.pctComplete}%</span>
-                  )}
+            {product.resources.flatMap((r) =>
+              r.subsystems.map((sub) => ({ sub, user: r.user }))
+            ).map(({ sub, user }, i) => (
+              <div key={i} className="flex items-center gap-3 px-3 py-2.5">
+                <div className="h-2 w-2 rounded-full shrink-0 bg-blue-500" />
+                <div className="flex-1 min-w-0">
+                  <span className="text-sm font-medium">{sub}</span>
                 </div>
-              )
-            })}
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <div className="h-5 w-5 rounded-full bg-blue-100 dark:bg-blue-900 flex items-center justify-center text-[9px] font-bold text-blue-700 dark:text-blue-300">
+                    {user.name.split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase()}
+                  </div>
+                  <span className="text-xs text-muted-foreground hidden sm:inline">{user.name.split(' ')[0]}</span>
+                </div>
+              </div>
+            ))}
           </div>
-        )}
-      </div>
+        </div>
+      )}
 
       {/* Resources */}
       {product.resources.length > 0 && (
@@ -430,8 +365,6 @@ export function ProductsPanel({
   const [products, setProducts] = useState<Product[]>([])
   const [loading, setLoading] = useState(true)
   const [selectedProductId, setSelectedProductId] = useState<string | null>(null)
-  const [allTasks, setAllTasks] = useState<ProductTask[]>([])
-  const [tasksLoading, setTasksLoading] = useState(true)
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editingProduct, setEditingProduct] = useState<Product | null>(null)
   const [form, setForm] = useState<ProductFormState>(emptyForm())
@@ -468,22 +401,6 @@ export function ProductsPanel({
   }, [project.id])
 
   useEffect(() => { load() }, [load])
-
-  useEffect(() => {
-    setTasksLoading(true)
-    fetch(`/api/tasks?projectId=${project.id}`)
-      .then((r) => r.json())
-      .then((d) => setAllTasks(Array.isArray(d) ? d : []))
-      .catch(() => {})
-      .finally(() => setTasksLoading(false))
-  }, [project.id])
-
-  function getProductTasks(productId: string): ProductTask[] {
-    return allTasks.filter((t) => {
-      if (!t.description?.includes(`__productTask:${productId}:`)) return false
-      return !t.description.includes(':a2mac1__') && !t.description.includes(':bob__')
-    })
-  }
 
   function openAdd() {
     setEditingProduct(null)
@@ -536,11 +453,6 @@ export function ProductsPanel({
       if (!res.ok) throw new Error((await res.json()).error)
       toast.success(editingProduct ? 'Product updated' : 'Product added')
       setDialogOpen(false)
-      // Refresh tasks after save (subsystem tasks may have changed)
-      fetch(`/api/tasks?projectId=${project.id}`)
-        .then((r) => r.json())
-        .then((d) => setAllTasks(Array.isArray(d) ? d : []))
-        .catch(() => {})
       load()
       onRefresh()
     } catch (e: unknown) {
@@ -554,16 +466,10 @@ export function ProductsPanel({
       const res = await fetch(`/api/projects/${project.id}/products/${p.id}`, { method: 'DELETE' })
       if (!res.ok) throw new Error()
       toast.success('Product removed')
-      // Select adjacent product after deletion
       const idx = products.findIndex((x) => x.id === p.id)
       const next = products[idx + 1] ?? products[idx - 1] ?? null
       setSelectedProductId(next?.id ?? null)
       load()
-      // Refresh tasks after delete
-      fetch(`/api/tasks?projectId=${project.id}`)
-        .then((r) => r.json())
-        .then((d) => setAllTasks(Array.isArray(d) ? d : []))
-        .catch(() => {})
       onRefresh()
     } catch {
       toast.error('Failed to remove product')
@@ -684,8 +590,6 @@ export function ProductsPanel({
           <ProductDetailView
             product={selectedProduct}
             projectId={project.id}
-            tasks={getProductTasks(selectedProduct.id)}
-            tasksLoading={tasksLoading}
             subsystems={subsystems}
             canManage={canManage}
             onEdit={openEdit}
