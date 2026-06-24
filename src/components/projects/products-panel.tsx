@@ -227,19 +227,9 @@ function ProductDetailView({
                 <Badge variant="secondary" className="text-xs h-5">
                   {product.resources.length}{product.resourceCount ? `/${product.resourceCount}` : ''} resource{product.resources.length !== 1 ? 's' : ''}
                 </Badge>
-                {avgPct !== null && (
-                  <Badge variant="outline" className="text-xs h-5">{avgPct}% complete</Badge>
-                )}
               </div>
             </div>
           </div>
-          {avgPct !== null && (
-            <div className="mt-3">
-              <div className="h-1.5 bg-muted rounded-full overflow-hidden">
-                <div className="h-full bg-blue-500 rounded-full transition-all" style={{ width: `${avgPct}%` }} />
-              </div>
-            </div>
-          )}
         </CardContent>
       </Card>
 
