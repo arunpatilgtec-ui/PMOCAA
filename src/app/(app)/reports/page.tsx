@@ -347,14 +347,14 @@ function MyUtilizationReport({ userId }: { userId: string }) {
 
 export default function ReportsPage() {
   const { user } = useAuthStore()
-  const isResource = user?.role === 'RESOURCE'
+  const canManage = ['ADMIN', 'MANAGER', 'PLANNER'].includes(user?.role ?? '')
 
   const [projects,  setProjects]  = useState<Project[]>([])
   const [resources, setResources] = useState<PortfolioResource[]>([])
   const [loading,   setLoading]   = useState(true)
 
   useEffect(() => {
-    if (isResource) { setLoading(false); return }
+    if (!canManage) { setLoading(false); return }
     Promise.all([
       fetch('/api/projects').then(r => r.json()),
       fetch('/api/resources').then(r => r.json()),
@@ -363,10 +363,10 @@ export default function ReportsPage() {
       setResources(Array.isArray(r) ? r : [])
       setLoading(false)
     })
-  }, [isResource])
+  }, [canManage])
 
-  // Resource users get their own personal report
-  if (isResource && user) return <MyUtilizationReport userId={user.id} />
+  // Non-managers (RESOURCE, PROJECT_LEAD, WORKSTREAM_LEAD, LEADERSHIP) get personal utilization
+  if (!canManage && user) return <MyUtilizationReport userId={user.id} />
 
   if (loading) return <div className="p-6"><Skeleton className="h-96 rounded-lg" /></div>
 

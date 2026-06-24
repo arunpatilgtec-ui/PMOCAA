@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useMemo } from 'react'
 import { useAuthStore } from '@/store/auth'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -81,6 +81,115 @@ const container: Variants = {
 const item: Variants = {
   hidden: { opacity: 0, y: 20 },
   show:   { opacity: 1, y: 0, transition: { duration: 0.35, ease: 'easeOut' as const } },
+}
+
+function getMondayOf(d: Date): Date {
+  const day = new Date(d); day.setHours(0, 0, 0, 0)
+  const dow = day.getDay(); day.setDate(day.getDate() + (dow === 0 ? -6 : 1 - dow))
+  return day
+}
+
+function MyUtilWidget({ userId }: { userId: string }) {
+  type Tab = 'day' | 'week' | 'month'
+  const [tab, setTab]             = useState<Tab>('week')
+  const [dailyMap, setDailyMap]   = useState<Record<string, number>>({})
+  const [capacityPct, setCap]     = useState(100)
+  const [loading, setLoading]     = useState(false)
+  const todayStr = new Date().toISOString().slice(0, 10)
+
+  const range = useMemo(() => {
+    const now = new Date(); now.setHours(0, 0, 0, 0)
+    if (tab === 'day') return { from: todayStr, to: todayStr }
+    if (tab === 'week') {
+      const mon = getMondayOf(now)
+      const fri = new Date(mon); fri.setDate(mon.getDate() + 4)
+      return { from: mon.toISOString().slice(0, 10), to: fri.toISOString().slice(0, 10) }
+    }
+    const from = new Date(now.getFullYear(), now.getMonth(), 1)
+    return { from: from.toISOString().slice(0, 10), to: todayStr }
+  }, [tab, todayStr])
+
+  useEffect(() => {
+    setLoading(true)
+    fetch(`/api/resources?from=${range.from}&to=${range.to}`)
+      .then(r => r.json())
+      .then(data => {
+        const me = Array.isArray(data) ? data.find((r: { id: string }) => r.id === userId) : null
+        setDailyMap(me?.dailyHoursMap ?? {})
+        setCap(me?.capacityPct ?? 100)
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false))
+  }, [range, userId])
+
+  const dailyCap  = Math.round(8  * capacityPct / 100 * 10) / 10
+  const weeklyCap = Math.round(40 * capacityPct / 100 * 10) / 10
+
+  const totalHours = Math.round(Object.values(dailyMap).reduce((s, h) => s + h, 0) * 10) / 10
+  const workingDays = Object.keys(dailyMap).length
+
+  const cap = tab === 'day'
+    ? dailyCap
+    : tab === 'week'
+      ? weeklyCap
+      : Math.round(dailyCap * workingDays * 10) / 10
+
+  const pct = cap > 0 ? Math.round(totalHours / cap * 100) : 0
+  const pctColor = pct > 100 ? 'text-red-500' : pct > 85 ? 'text-orange-500' : pct > 60 ? 'text-amber-500' : 'text-green-500'
+  const barBg    = pct > 100 ? '[&>div]:bg-red-500' : pct > 85 ? '[&>div]:bg-orange-400' : pct > 60 ? '[&>div]:bg-amber-400' : '[&>div]:bg-green-400'
+
+  const dailyEntries = Object.entries(dailyMap).sort(([a], [b]) => a.localeCompare(b))
+
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle className="text-sm font-semibold flex items-center gap-2">
+          <TrendingUp className="h-4 w-4 text-primary" /> My Utilization
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        <div className="flex gap-1 mb-3">
+          {(['day', 'week', 'month'] as Tab[]).map(t => (
+            <button key={t} onClick={() => setTab(t)}
+              className={`px-2.5 py-1 rounded-md text-xs transition-colors ${tab === t ? 'bg-primary text-primary-foreground' : 'hover:bg-muted text-muted-foreground'}`}>
+              {t === 'day' ? 'Today' : t === 'week' ? 'This Week' : 'This Month'}
+            </button>
+          ))}
+        </div>
+
+        {loading ? (
+          <div className="space-y-2">
+            <Skeleton className="h-4 rounded" />
+            <Skeleton className="h-14 rounded" />
+          </div>
+        ) : (
+          <>
+            <div className="flex items-baseline justify-between mb-1.5">
+              <span className="text-2xl font-bold">{totalHours}h</span>
+              <span className={`text-sm font-semibold ${pctColor}`}>{pct}%</span>
+            </div>
+            <Progress value={Math.min(pct, 100)} className={`h-2 mb-1.5 ${barBg}`} />
+            <p className="text-xs text-muted-foreground mb-3">{totalHours}h of {cap}h capacity</p>
+
+            {dailyEntries.length > 1 && (
+              <div className="flex items-end gap-0.5 h-10">
+                {dailyEntries.map(([date, hours]) => {
+                  const frac = dailyCap > 0 ? Math.min(hours / dailyCap, 1.3) : 0
+                  const bg   = hours > dailyCap ? 'bg-red-400' : hours > dailyCap * 0.85 ? 'bg-amber-400' : 'bg-green-400'
+                  return (
+                    <div key={date} className="flex-1 flex items-end h-full" title={`${date}: ${Math.round(hours * 10) / 10}h`}>
+                      <div className={`w-full rounded-sm ${bg}`}
+                        style={{ height: `${Math.round(frac * 100)}%`, minHeight: hours > 0 ? '3px' : '0' }} />
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </>
+        )}
+      </CardContent>
+    </Card>
+  )
 }
 
 export default function DashboardPage() {
@@ -386,6 +495,12 @@ export default function DashboardPage() {
               </CardContent>
             </Card>
           </motion.div>
+
+          {user && (
+            <motion.div variants={item}>
+              <MyUtilWidget userId={user.id} />
+            </motion.div>
+          )}
 
           {canManage && (
             <motion.div variants={item}>
