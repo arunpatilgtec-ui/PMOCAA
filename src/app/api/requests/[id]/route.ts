@@ -123,7 +123,7 @@ export async function PATCH(req: NextRequest, ctx: RouteContext<'/api/requests/[
               approvedById: session.id,
               priority: request.priority,
               status: 'PLANNED',
-              estimatedHours: existing.estimatedHours ?? 0,
+              estimatedHours: existing.estimatedHours || 8,
               startDate: existing.startDate ?? null,
               endDate: existing.endDate ?? null,
             },
@@ -133,7 +133,7 @@ export async function PATCH(req: NextRequest, ctx: RouteContext<'/api/requests/[
             {
               id: task.id, name: task.name, priority: request.priority,
               startDate: existing.startDate ?? null, endDate: existing.endDate ?? null,
-              estimatedHours: existing.estimatedHours ?? 0, ownerId: effectiveAssigneeId,
+              estimatedHours: existing.estimatedHours || 8, ownerId: effectiveAssigneeId,
             },
             session.id
           ).catch(e => console.error('[REQUESTS APPROVE] priority shift failed:', e))
