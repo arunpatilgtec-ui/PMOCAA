@@ -1092,7 +1092,7 @@ export default function RequestsPage() {
           ) : (
             srRequests.map(sr => {
               const isOwner = user?.id === sr.submitter.id
-              const canEditSr = isOwner || ['ADMIN', 'PLANNER'].includes(user?.role ?? '')
+              const canEditSr = isOwner || ['ADMIN', 'MANAGER', 'PLANNER'].includes(user?.role ?? '')
               const expanded = srExpandedId === sr.id
               return (
                 <Card key={sr.id}>
@@ -1147,10 +1147,10 @@ export default function RequestsPage() {
                                 )}
                                 {canEditSr && (
                                   <button
-                                    className="text-muted-foreground hover:text-foreground shrink-0"
+                                    className="ml-1 text-blue-500 hover:text-blue-700 shrink-0"
                                     onClick={() => openEditTask(sr.id, task)}
                                   >
-                                    <Pencil className="h-3 w-3" />
+                                    <Pencil className="h-3.5 w-3.5" />
                                   </button>
                                 )}
                               </div>
