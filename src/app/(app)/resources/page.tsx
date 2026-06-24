@@ -54,6 +54,7 @@ interface Resource {
   dailyCapacityHours: number
   totalTaskHours: number
   directTaskHours?: number
+  reviewRequestHours?: number
   pendingRequestHours?: number
   isOverloaded: boolean
   isOverloadedWeekly: boolean
@@ -487,7 +488,7 @@ function EmployeeDetailDialog({ resource, open, onOpenChange }: {
               <div className="flex items-center gap-2 mb-1.5">
                 <Clock className="h-3.5 w-3.5 text-amber-500" />
                 <span className="text-xs font-semibold text-amber-600 dark:text-amber-400 uppercase tracking-wide">
-                  Pending Requests ({resource.assignedRequests!.length}) · not counted in utilization
+                  Pending Requests ({resource.assignedRequests!.length}) · REVIEW counted, SUBMITTED not
                 </span>
                 <span className="text-xs text-muted-foreground ml-auto">{Math.round(pendingReqHours)}h total</span>
               </div>
@@ -754,14 +755,17 @@ export default function ResourcesPage() {
                             : `Daily limit exceeded (${r.maxDailyHours}h > ${r.dailyCapacityHours}h/day)`}
                         </p>
                       )}
-                      {r.totalTaskHours > 0 && (
+                      {(r.totalTaskHours > 0 || (r.reviewRequestHours ?? 0) > 0) && (
                         <p className="text-xs text-muted-foreground">
-                          {r.totalTaskHours}h total backlog
+                          {r.totalTaskHours + (r.reviewRequestHours ?? 0)}h committed
+                          {(r.reviewRequestHours ?? 0) > 0 && (
+                            <span className="text-blue-600 dark:text-blue-400"> · incl. {r.reviewRequestHours}h in review</span>
+                          )}
                         </p>
                       )}
                       {(r.pendingRequestHours ?? 0) > 0 && (
                         <p className="text-xs text-amber-600 dark:text-amber-400">
-                          {r.pendingRequestHours}h awaiting approval
+                          +{r.pendingRequestHours}h submitted (not yet reviewed)
                         </p>
                       )}
                     </div>

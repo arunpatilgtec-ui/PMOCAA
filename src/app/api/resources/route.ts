@@ -149,6 +149,7 @@ export async function GET(req: NextRequest) {
           select: {
             id: true,
             title: true,
+            status: true,
             estimatedHours: true,
             hoursPerDay: true,
             isRecurring: true,
@@ -165,19 +166,26 @@ export async function GET(req: NextRequest) {
       const weeklyCapacityHours = Math.round(HOURS_PER_WEEK * user.capacityPct / 100 * 10) / 10
       const dailyCapacityHours  = Math.round(HOURS_PER_DAY  * user.capacityPct / 100 * 10) / 10
 
-      // Compute pending request hours for display only — not included in utilization.
-      // Only APPROVED requests (which create Tasks) count toward utilization via ownedTasks.
-      const pendingRequestItems = user.assignedRequests.map((req) => {
+      // REVIEW requests count toward utilization (manager is actively processing — very likely approved).
+      // SUBMITTED requests (self-submitted, unreviewed) are display-only — too uncertain to count.
+      // APPROVED requests already exist as Tasks in ownedTasks, so no need to include here.
+      const toWorkItem = (req: typeof user.assignedRequests[number]) => {
         if (req.isRecurring && req.hoursPerDay) {
           const start = req.startDate ?? new Date()
           const end   = req.endDate   ?? new Date(start.getTime() + 90 * 24 * 60 * 60 * 1000)
-          return { estimatedHours: req.hoursPerDay * countWorkingDays(start, end) }
+          return { estimatedHours: req.hoursPerDay * countWorkingDays(start, end), startDate: req.startDate, endDate: end }
         }
-        return { estimatedHours: req.estimatedHours ?? 0 }
-      })
+        return { estimatedHours: req.estimatedHours ?? 0, startDate: req.startDate, endDate: req.endDate }
+      }
 
-      // Only tasks (approved work) drive utilization and gantt hours
-      const allWorkItems = [...user.ownedTasks]
+      const reviewRequestItems = user.assignedRequests
+        .filter(r => r.status === 'REVIEW')
+        .map(toWorkItem)
+
+      const pendingRequestItems = user.assignedRequests.map(toWorkItem)
+
+      // Tasks (approved) + REVIEW requests drive utilization and gantt hours
+      const allWorkItems = [...user.ownedTasks, ...reviewRequestItems]
 
       // dailyHoursMap covers the requested range (gantt) or current week (default)
       const dailyHoursMap = calcDailyHours(allWorkItems, rangeStart, rangeEnd)
@@ -215,8 +223,16 @@ export async function GET(req: NextRequest) {
           .reduce((s, t) => s + (t.estimatedHours || 0), 0) * 10
       ) / 10
 
+      // reviewRequestHours: counted in utilization (REVIEW status — manager is processing)
+      const reviewRequestHours = Math.round(
+        reviewRequestItems.reduce((s, r) => s + (r.estimatedHours || 0), 0) * 10
+      ) / 10
+
+      // submittedRequestHours: display-only (SUBMITTED — not yet reviewed, too uncertain)
       const pendingRequestHours = Math.round(
-        pendingRequestItems.reduce((s, r) => s + (r.estimatedHours || 0), 0) * 10
+        pendingRequestItems
+          .filter((_, i) => user.assignedRequests[i]?.status === 'SUBMITTED')
+          .reduce((s, r) => s + (r.estimatedHours || 0), 0) * 10
       ) / 10
 
       return {
@@ -228,6 +244,7 @@ export async function GET(req: NextRequest) {
         dailyCapacityHours,
         totalTaskHours,
         directTaskHours,
+        reviewRequestHours,
         pendingRequestHours,
         dailyHoursMap,
         // Utilization
