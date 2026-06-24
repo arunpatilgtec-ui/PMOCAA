@@ -102,6 +102,7 @@ export default function GanttPage() {
   const [editSaving, setEditSaving] = useState(false)
   const [userSearch, setUserSearch] = useState('')
   const [isDragging, setIsDragging] = useState(false)
+  const [tasksInvalidated, setTasksInvalidated] = useState(0)
 
   const chartScrollRef = useRef<HTMLDivElement>(null)
 
@@ -162,7 +163,16 @@ export default function GanttPage() {
     load()
     const interval = setInterval(load, 30000)
     return () => { cancelled = true; clearInterval(interval) }
-  }, [selectedProject])
+  }, [selectedProject, tasksInvalidated])
+
+  // Immediately refresh when a request is deleted on another tab/page
+  useEffect(() => {
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === 'tasks-invalidated') setTasksInvalidated(n => n + 1)
+    }
+    window.addEventListener('storage', onStorage)
+    return () => window.removeEventListener('storage', onStorage)
+  }, [])
 
   // Auto-scroll to today when chart first loads
   useEffect(() => {

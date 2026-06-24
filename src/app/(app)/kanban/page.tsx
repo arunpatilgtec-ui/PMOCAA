@@ -184,6 +184,15 @@ export default function KanbanPage() {
     return () => document.removeEventListener('visibilitychange', onVisible)
   }, [])
 
+  // Immediately refresh when a request is deleted on another tab/page
+  useEffect(() => {
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === 'tasks-invalidated') loadRef.current?.()
+    }
+    window.addEventListener('storage', onStorage)
+    return () => window.removeEventListener('storage', onStorage)
+  }, [])
+
   const filteredTasks = tasks.filter((t) => {
     if (projectFilter && projectFilter !== 'ALL' && t.workstream.project.id !== projectFilter) return false
     if (ownerFilter === 'ME' && t.owner?.id !== user?.id) return false

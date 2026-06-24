@@ -521,6 +521,8 @@ export default function RequestsPage() {
       if (!res.ok) throw new Error((await res.json()).error || 'Failed')
       toast.success('Request deleted')
       setDeleteReqId(null)
+      // Signal Kanban/Gantt on other tabs to immediately refresh
+      localStorage.setItem('tasks-invalidated', String(Date.now()))
       load()
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : 'Failed to delete')
