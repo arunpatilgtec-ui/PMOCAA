@@ -348,8 +348,12 @@ export async function GET(req: NextRequest) {
         : isOverloadedWeekly ? 'weekly'
         : null
 
+      const strategicTaskHours = Math.round(
+        userStrategicItems.reduce((s, t) => s + (t.estimatedHours || 0), 0) * 10
+      ) / 10
+
       const totalTaskHours = Math.round(
-        user.ownedTasks.reduce((s, t) => s + (t.estimatedHours || 0), 0) * 10
+        (user.ownedTasks.reduce((s, t) => s + (t.estimatedHours || 0), 0) + strategicTaskHours) * 10
       ) / 10
 
       const directTaskHours = Math.round(
@@ -411,7 +415,7 @@ export async function GET(req: NextRequest) {
         isOverloadedWeekly,
         isOverloadedDaily,
         overloadReason,
-        activeTasks: user.ownedTasks.length,
+        activeTasks: user.ownedTasks.length + (strategicByUser.get(user.id)?.length ?? 0),
         // Leave
         leaveDates,
         isOnLeaveToday,
