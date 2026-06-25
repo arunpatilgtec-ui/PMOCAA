@@ -152,10 +152,10 @@ export function SidebarNav({
                   'flex items-center gap-3 px-2.5 py-2 rounded-lg text-sm transition-all duration-150',
                   isActive
                     ? 'bg-sidebar-accent text-sidebar-foreground font-medium shadow-sm'
-                    : 'text-sidebar-foreground/60 hover:bg-sidebar-accent/60 hover:text-sidebar-foreground'
+                    : 'text-sidebar-foreground/85 hover:bg-sidebar-accent/60 hover:text-sidebar-foreground'
                 )}
               >
-                <Icon className={cn('h-4 w-4 shrink-0', isActive ? 'text-sidebar-primary' : 'text-sidebar-foreground/40')} />
+                <Icon className={cn('h-4 w-4 shrink-0', isActive ? 'text-sidebar-primary' : 'text-sidebar-foreground/70')} />
                 {!collapsed && (
                   <>
                     <span className="flex-1 truncate">
@@ -187,7 +187,7 @@ export function SidebarNav({
           <div className={cn('flex items-center', collapsed ? 'justify-center' : 'px-1')}>
             <ThemeToggle />
             {!collapsed && (
-              <span className="ml-1 text-xs text-sidebar-foreground/40 select-none">
+              <span className="ml-1 text-xs text-sidebar-foreground/75 select-none">
                 Toggle theme
               </span>
             )}
@@ -205,7 +205,7 @@ export function SidebarNav({
                 <>
                   <div className="flex-1 min-w-0">
                     <p className="text-xs font-semibold text-sidebar-foreground truncate">{user.name}</p>
-                    <p className="text-xs text-sidebar-foreground/45 truncate capitalize">
+                    <p className="text-xs text-sidebar-foreground/70 truncate capitalize">
                       {user.role.toLowerCase().replace(/_/g, ' ')}
                     </p>
                   </div>
