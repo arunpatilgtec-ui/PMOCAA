@@ -53,7 +53,7 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center relative overflow-hidden bg-[oklch(0.10_0.04_262)]">
+    <div className="dark min-h-screen flex items-center justify-center relative overflow-hidden bg-[oklch(0.10_0.04_262)]">
       {/* Animated background blobs */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
         <div className="absolute -top-40 -left-40 w-96 h-96 rounded-full bg-gradient-to-br from-blue-600/30 to-indigo-700/20 blur-3xl animate-pulse" style={{ animationDuration: '4s' }} />
@@ -110,7 +110,7 @@ export default function LoginPage() {
               <Input
                 id="email"
                 type="email"
-                placeholder="you@company.com"
+                placeholder="you@gtec.com"
                 className="bg-white/5 border-white/10 text-white placeholder:text-white/30 focus:border-blue-500 focus:ring-blue-500/30"
                 {...register('email')}
               />
@@ -149,10 +149,8 @@ export default function LoginPage() {
             </Button>
           </form>
 
-          <div className="mt-5 p-3 bg-white/5 rounded-xl text-xs text-white/40 space-y-1 border border-white/5">
-            <p className="font-medium text-white/60">Demo credentials</p>
-            <p>admin@pmo.internal / admin123</p>
-            <p>manager@pmo.internal / manager123</p>
+          <div className="mt-5 p-3 bg-white/5 rounded-xl text-xs text-white/60 border border-white/5">
+            <p>Enter your GTEC email ID. Temporary password for all users is <span className="font-semibold text-white">temp123</span></p>
           </div>
         </motion.div>
 
