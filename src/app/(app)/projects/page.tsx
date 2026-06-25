@@ -13,7 +13,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Skeleton } from '@/components/ui/skeleton'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import {
-  Plus, Search, FolderKanban, Calendar, Users, AlertCircle
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
+} from '@/components/ui/dialog'
+import { Label } from '@/components/ui/label'
+import {
+  Plus, Search, FolderKanban, Calendar, Users, AlertCircle, Copy,
 } from 'lucide-react'
 import { format, isPast } from 'date-fns'
 import { CreateProjectDialog } from '@/components/projects/create-project-dialog'
@@ -26,6 +30,13 @@ interface Project {
   workstreams: Array<{ tasks: Array<{ id: string; status: string }> }>
   allocations: Array<{ user: { id: string; name: string } }>
   _count: { workstreams: number }
+}
+
+interface DuplicatedProduct {
+  id: string
+  brand: string
+  modelNo: string
+  order: number
 }
 
 const STATUS_COLORS: Record<string, string> = {
@@ -52,6 +63,78 @@ export default function ProjectsPage() {
   const [statusFilter, setStatusFilter] = useState<string | null>('ALL')
   const [typeFilter, setTypeFilter] = useState<string | null>('ALL')
   const [createOpen, setCreateOpen] = useState(false)
+
+  // Duplicate project — Step 1: name + date
+  const [dupSource, setDupSource] = useState<Project | null>(null)
+  const [dupName, setDupName] = useState('')
+  const [dupDate, setDupDate] = useState('')
+  const [dupLoading, setDupLoading] = useState(false)
+
+  // Duplicate project — Step 2: rename products
+  const [dupProducts, setDupProducts] = useState<DuplicatedProduct[]>([])
+  const [dupProjectId, setDupProjectId] = useState<string | null>(null)
+  const [dupProductEdits, setDupProductEdits] = useState<Record<string, { brand: string; modelNo: string }>>({})
+  const [dupProductSaving, setDupProductSaving] = useState(false)
+
+  function openDuplicate(e: React.MouseEvent, project: Project) {
+    e.preventDefault()
+    e.stopPropagation()
+    setDupSource(project)
+    setDupName(`Copy of ${project.name}`)
+    setDupDate(project.startDate.slice(0, 10))
+    setDupLoading(false)
+  }
+
+  async function submitDuplicate() {
+    if (!dupSource || !dupName.trim() || !dupDate) return
+    setDupLoading(true)
+    try {
+      const res = await fetch(`/api/projects/${dupSource.id}/duplicate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: dupName.trim(), startDate: dupDate }),
+      })
+      if (!res.ok) throw new Error()
+      const newProj = await res.json()
+      setDupSource(null)
+      setDupProjectId(newProj.id)
+      const products: DuplicatedProduct[] = newProj.products ?? []
+      setDupProducts(products)
+      setDupProductEdits(
+        Object.fromEntries(products.map((p: DuplicatedProduct) => [p.id, { brand: p.brand, modelNo: p.modelNo }]))
+      )
+      load()
+    } catch {
+      alert('Failed to duplicate project')
+    } finally {
+      setDupLoading(false)
+    }
+  }
+
+  async function saveDupProducts() {
+    if (!dupProjectId) return
+    setDupProductSaving(true)
+    try {
+      await Promise.all(
+        dupProducts.map((p) => {
+          const edits = dupProductEdits[p.id]
+          if (!edits) return Promise.resolve()
+          return fetch(`/api/projects/${dupProjectId}/products/${p.id}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ brand: edits.brand, modelNo: edits.modelNo }),
+          })
+        })
+      )
+      router.push(`/projects/${dupProjectId}`)
+      setDupProjectId(null)
+      setDupProducts([])
+    } catch {
+      alert('Failed to save product names')
+    } finally {
+      setDupProductSaving(false)
+    }
+  }
 
   // Portfolio vs My Projects toggle (only PLANNER has choice; others are fixed)
   const isPlanner = user?.role === 'PLANNER' || user?.role === 'ADMIN'
@@ -183,6 +266,8 @@ export default function ProjectsPage() {
             const delayed = isPast(new Date(p.endDate)) && p.status !== 'COMPLETED' && p.status !== 'CANCELLED'
             const taskCount = p.workstreams.flatMap((w) => w.tasks).length
 
+            const canDuplicate = user && ['ADMIN', 'MANAGER', 'PLANNER'].includes(user.role)
+
             return (
               <Link key={p.id} href={`/projects/${p.id}`}>
                 <Card className="hover:shadow-md transition-all cursor-pointer border border-border hover:border-primary/30 h-full">
@@ -190,6 +275,15 @@ export default function ProjectsPage() {
                     <div className="flex items-start justify-between gap-2">
                       <h3 className="font-semibold text-sm leading-tight line-clamp-2">{p.name}</h3>
                       <div className="flex items-center gap-1 shrink-0">
+                        {canDuplicate && (
+                          <button
+                            onClick={(e) => openDuplicate(e, p)}
+                            className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+                            title="Duplicate project"
+                          >
+                            <Copy className="h-3.5 w-3.5" />
+                          </button>
+                        )}
                         {delayed && <AlertCircle className="h-3.5 w-3.5 text-red-500" />}
                         <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${STATUS_COLORS[p.status]}`}>
                           {p.status.replace('_', ' ')}
@@ -263,6 +357,113 @@ export default function ProjectsPage() {
           if (projectId) router.push(`/projects/${projectId}`)
         }}
       />
+
+      {/* Step 1: name + start date */}
+      <Dialog open={!!dupSource} onOpenChange={(open) => { if (!open) setDupSource(null) }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Copy className="h-4 w-4" />
+              Duplicate Project
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-1.5">
+              <Label htmlFor="dup-name">New project name</Label>
+              <Input
+                id="dup-name"
+                value={dupName}
+                onChange={(e) => setDupName(e.target.value)}
+                placeholder="Project name"
+                autoFocus
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="dup-date">New start date</Label>
+              <Input
+                id="dup-date"
+                type="date"
+                value={dupDate}
+                onChange={(e) => setDupDate(e.target.value)}
+              />
+              <p className="text-xs text-muted-foreground">
+                Task dates will shift proportionally from this new start date.
+                All task progress will be reset to zero.
+              </p>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDupSource(null)}>Cancel</Button>
+            <Button
+              onClick={submitDuplicate}
+              disabled={dupLoading || !dupName.trim() || !dupDate}
+            >
+              {dupLoading ? 'Creating…' : 'Create Duplicate'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Step 2: rename products in the new project */}
+      <Dialog open={!!dupProjectId} onOpenChange={(open) => {
+        if (!open) { setDupProjectId(null); setDupProducts([]) }
+      }}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Rename Products in New Project</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 py-2 max-h-96 overflow-y-auto">
+            {dupProducts.length === 0 ? (
+              <p className="text-sm text-muted-foreground text-center py-4">
+                No products in this project.
+              </p>
+            ) : (
+              dupProducts.map((product) => {
+                const edits = dupProductEdits[product.id] ?? { brand: product.brand, modelNo: product.modelNo }
+                return (
+                  <div key={product.id} className="grid grid-cols-2 gap-2 items-center border rounded-lg p-3">
+                    <div className="space-y-1">
+                      <Label className="text-xs text-muted-foreground">Brand</Label>
+                      <Input
+                        value={edits.brand}
+                        onChange={(e) => setDupProductEdits((prev) => ({
+                          ...prev,
+                          [product.id]: { ...edits, brand: e.target.value },
+                        }))}
+                        placeholder="Brand"
+                        className="h-8 text-sm"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs text-muted-foreground">Model No.</Label>
+                      <Input
+                        value={edits.modelNo}
+                        onChange={(e) => setDupProductEdits((prev) => ({
+                          ...prev,
+                          [product.id]: { ...edits, modelNo: e.target.value },
+                        }))}
+                        placeholder="Model No."
+                        className="h-8 text-sm"
+                      />
+                    </div>
+                  </div>
+                )
+              })
+            )}
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => { router.push(`/projects/${dupProjectId!}`); setDupProjectId(null); setDupProducts([]) }}
+            >
+              Skip
+            </Button>
+            <Button onClick={saveDupProducts} disabled={dupProductSaving}>
+              {dupProductSaving ? 'Saving…' : 'Save & Open Project'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
