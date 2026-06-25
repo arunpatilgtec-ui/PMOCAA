@@ -3,12 +3,19 @@ import { prisma } from '@/lib/prisma'
 import { getSession } from '@/lib/auth'
 import { addWorkingDays, countWorkingDays } from '@/lib/date-utils'
 
-export async function GET() {
+const CAN_MANAGE = ['ADMIN', 'MANAGER', 'PLANNER']
+
+export async function GET(req: NextRequest) {
   const user = await getSession()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
+  const isManager = CAN_MANAGE.includes(user.role)
+  const targetId = isManager
+    ? (req.nextUrl.searchParams.get('userId') || user.id)
+    : user.id
+
   const leaves = await prisma.leave.findMany({
-    where: { userId: user.id },
+    where: { userId: targetId },
     orderBy: { startDate: 'desc' },
     include: { user: { select: { id: true, name: true } } },
   })
@@ -20,7 +27,10 @@ export async function POST(req: NextRequest) {
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const body = await req.json()
-  const { type = 'VACATION', startDate, endDate, reason } = body
+  const { type = 'VACATION', startDate, endDate, reason, userId: targetId } = body
+
+  const isManager = CAN_MANAGE.includes(user.role)
+  const targetUserId = isManager && targetId ? targetId : user.id
 
   if (!startDate || !endDate) {
     return NextResponse.json({ error: 'startDate and endDate are required' }, { status: 400 })
@@ -35,10 +45,10 @@ export async function POST(req: NextRequest) {
   // Count working days in the leave period
   const leaveDays = countWorkingDays(start, end)
 
-  // Find all incomplete tasks owned by this user that start on or after the leave start
+  // Find all incomplete tasks owned by the target user that start on or after the leave start
   const tasks = await prisma.task.findMany({
     where: {
-      ownerId: user.id,
+      ownerId: targetUserId,
       startDate: { gte: start },
       status: { notIn: ['COMPLETED', 'CANCELLED'] },
     },
@@ -61,7 +71,7 @@ export async function POST(req: NextRequest) {
   // Create the leave record
   const leave = await prisma.leave.create({
     data: {
-      userId: user.id,
+      userId: targetUserId,
       type,
       startDate: start,
       endDate: end,

@@ -189,6 +189,9 @@ export default function RequestsPage() {
   const [leaveEnd,       setLeaveEnd]       = useState('')
   const [leaveReason,    setLeaveReason]    = useState('')
   const [leaveSubmit,    setLeaveSubmit]    = useState(false)
+  // For ADMIN/MANAGER/PLANNER: apply leave on behalf of another user
+  const [leaveForId,     setLeaveForId]     = useState<string>('')
+  const [leaveUsers,     setLeaveUsers]     = useState<{id:string;name:string}[]>([])
 
   // Meeting state
   const [meetings,       setMeetings]       = useState<Meeting[]>([])
@@ -312,29 +315,44 @@ export default function RequestsPage() {
     if (activeTab === 'strategic') loadSr()
   }, [activeTab])
 
+  const canManageLeave = user && ['ADMIN', 'MANAGER', 'PLANNER'].includes(user.role)
+
   useEffect(() => {
     if (activeTab !== 'leave') return
+    // Load user list once for managers
+    if (canManageLeave && leaveUsers.length === 0) {
+      fetch('/api/resources')
+        .then(r => r.json())
+        .then((d: {id:string;name:string}[]) => {
+          if (Array.isArray(d)) setLeaveUsers(d.map(u => ({ id: u.id, name: u.name })))
+        })
+        .catch(() => {})
+    }
+    const url = canManageLeave && leaveForId ? `/api/leave?userId=${leaveForId}` : '/api/leave'
     setLeavesLoad(true)
-    fetch('/api/leave')
+    fetch(url)
       .then(r => r.json())
       .then(d => setLeaves(Array.isArray(d) ? d : []))
       .catch(() => {})
       .finally(() => setLeavesLoad(false))
-  }, [activeTab])
+  }, [activeTab, leaveForId])
 
   async function submitLeave() {
     if (!leaveStart || !leaveEnd) { toast.error('Select start and end dates'); return }
     if (new Date(leaveEnd) < new Date(leaveStart)) { toast.error('End date must be after start date'); return }
     setLeaveSubmit(true)
     try {
+      const body: Record<string, unknown> = { type: leaveType, startDate: leaveStart, endDate: leaveEnd, reason: leaveReason || undefined }
+      if (canManageLeave && leaveForId) body.userId = leaveForId
       const res = await fetch('/api/leave', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type: leaveType, startDate: leaveStart, endDate: leaveEnd, reason: leaveReason || undefined }),
+        body: JSON.stringify(body),
       })
       if (!res.ok) throw new Error((await res.json()).error || 'Failed')
       const data = await res.json()
-      toast.success(`Leave applied — ${data.tasksShifted} task${data.tasksShifted !== 1 ? 's' : ''} rescheduled`)
+      const forName = leaveForId ? leaveUsers.find(u => u.id === leaveForId)?.name : null
+      toast.success(`Leave applied${forName ? ` for ${forName}` : ''} — ${data.tasksShifted} task${data.tasksShifted !== 1 ? 's' : ''} rescheduled`)
       setLeaveOpen(false)
       setLeaveStart(''); setLeaveEnd(''); setLeaveReason(''); setLeaveType('VACATION')
       setLeaves(prev => [data, ...prev])
@@ -1329,7 +1347,20 @@ export default function RequestsPage() {
       {/* ── LEAVE TAB ── */}
       {activeTab === 'leave' && (
         <div className="space-y-3">
-          <div className="flex justify-end">
+          <div className="flex items-center justify-between gap-3">
+            {canManageLeave && leaveUsers.length > 0 ? (
+              <Select value={leaveForId || '__self__'} onValueChange={v => setLeaveForId(v === '__self__' ? '' : v)}>
+                <SelectTrigger className="w-48 h-8 text-sm">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__self__">My Leave</SelectItem>
+                  {leaveUsers.filter(u => u.id !== user?.id).map(u => (
+                    <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            ) : <div />}
             <Button size="sm" onClick={() => setLeaveOpen(true)}>
               <Palmtree className="mr-1 h-4 w-4" /> Apply for Leave
             </Button>
@@ -1367,6 +1398,9 @@ export default function RequestsPage() {
                         </div>
                         {lv.reason && <p className="text-sm text-muted-foreground mt-1">{lv.reason}</p>}
                         <div className="flex items-center gap-3 mt-1.5 text-xs text-muted-foreground">
+                          {lv.user && lv.user.id !== user?.id && (
+                            <span className="font-medium text-foreground">{lv.user.name}</span>
+                          )}
                           <span>Applied {format(new Date(lv.createdAt), 'MMM d, yyyy')}</span>
                           {lv.tasksShifted > 0 && (
                             <span className="flex items-center gap-1 text-blue-600">
@@ -1388,8 +1422,24 @@ export default function RequestsPage() {
       {/* ── Apply Leave Dialog ── */}
       <Dialog open={leaveOpen} onOpenChange={setLeaveOpen}>
         <DialogContent className="max-w-md">
-          <DialogHeader><DialogTitle>Apply for Leave</DialogTitle></DialogHeader>
+          <DialogHeader>
+            <DialogTitle>Apply for Leave</DialogTitle>
+          </DialogHeader>
           <div className="space-y-4">
+            {canManageLeave && (
+              <div className="space-y-1.5">
+                <Label>Employee</Label>
+                <Select value={leaveForId || '__self__'} onValueChange={v => setLeaveForId(v === '__self__' ? '' : v)}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__self__">Myself</SelectItem>
+                    {leaveUsers.filter(u => u.id !== user?.id).map(u => (
+                      <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
             <div className="space-y-1.5">
               <Label>Leave Type</Label>
               <Select value={leaveType} onValueChange={v => setLeaveType(v ?? leaveType)}>
@@ -1417,7 +1467,7 @@ export default function RequestsPage() {
               <Textarea placeholder="Brief reason…" rows={2} value={leaveReason} onChange={e => setLeaveReason(e.target.value)} />
             </div>
             <p className="text-xs text-muted-foreground bg-blue-50 dark:bg-blue-950 rounded-md p-2">
-              Your tasks scheduled during or after this leave will be automatically shifted forward by the number of working days taken.
+              Tasks scheduled during or after this leave will be automatically shifted forward by the number of working days taken.
             </p>
             <div className="flex justify-end gap-2">
               <Button variant="outline" onClick={() => setLeaveOpen(false)}>Cancel</Button>
