@@ -43,6 +43,7 @@ export async function POST(req: NextRequest) {
         title: data.title,
         description: data.description || null,
         startDate: new Date(data.startDate),
+        endDate: data.endDate ? new Date(data.endDate) : null,
         submitterId: session.id,
       },
       include: {

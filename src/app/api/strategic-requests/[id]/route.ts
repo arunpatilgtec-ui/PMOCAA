@@ -22,6 +22,7 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
         ...(data.title !== undefined && { title: data.title }),
         ...(data.description !== undefined && { description: data.description || null }),
         ...(data.startDate !== undefined && { startDate: new Date(data.startDate) }),
+        ...(data.endDate !== undefined && { endDate: data.endDate ? new Date(data.endDate) : null }),
         ...(data.status !== undefined && { status: data.status }),
       },
       include: {

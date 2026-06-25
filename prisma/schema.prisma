@@ -481,6 +481,7 @@ model StrategicRequest {
   title       String
   description String?
   startDate   DateTime
+  endDate     DateTime?
   status      StrategicStatus @default(ACTIVE)
   submitterId String
   createdAt   DateTime        @default(now())

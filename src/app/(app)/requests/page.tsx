@@ -87,6 +87,7 @@ interface StrategicRequest {
   title: string
   description?: string
   startDate: string
+  endDate?: string
   status: string
   submitter: { id: string; name: string }
   tasks: StrategicTaskData[]
@@ -228,6 +229,7 @@ export default function RequestsPage() {
   const [srTitle,        setSrTitle]        = useState('')
   const [srDesc,         setSrDesc]         = useState('')
   const [srStart,        setSrStart]        = useState('')
+  const [srEnd,          setSrEnd]          = useState('')
   // Assign tasks under SR
   const [srSelectedId,   setSrSelectedId]   = useState('')
   const [srTaskRows,     setSrTaskRows]     = useState<SRTaskRow[]>([newTaskRow()])
@@ -236,6 +238,7 @@ export default function RequestsPage() {
   const [editSrTitle,    setEditSrTitle]    = useState('')
   const [editSrDesc,     setEditSrDesc]     = useState('')
   const [editSrStart,    setEditSrStart]    = useState('')
+  const [editSrEnd,      setEditSrEnd]      = useState('')
   const [editSrBusy,     setEditSrBusy]     = useState(false)
   // Edit individual strategic task (subtask)
   const [editStSrId,     setEditStSrId]     = useState<string | null>(null)
@@ -535,6 +538,7 @@ export default function RequestsPage() {
     setSrTitle('')
     setSrDesc('')
     setSrStart('')
+    setSrEnd('')
     setSrSelectedId('')
     setSrTaskRows([newTaskRow()])
     setSrOpen(true)
@@ -552,7 +556,7 @@ export default function RequestsPage() {
       const res = await fetch('/api/strategic-requests', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title: srTitle, description: srDesc, startDate: srStart }),
+        body: JSON.stringify({ title: srTitle, description: srDesc, startDate: srStart, endDate: srEnd || undefined }),
       })
       if (!res.ok) throw new Error((await res.json()).error || 'Failed')
       toast.success('Strategic request created')
@@ -599,6 +603,7 @@ export default function RequestsPage() {
     setEditSrTitle(sr.title)
     setEditSrDesc(sr.description || '')
     setEditSrStart(sr.startDate.slice(0, 10))
+    setEditSrEnd(sr.endDate ? sr.endDate.slice(0, 10) : '')
   }
 
   async function submitEditSr() {
@@ -608,7 +613,7 @@ export default function RequestsPage() {
       const res = await fetch(`/api/strategic-requests/${editSrId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title: editSrTitle, description: editSrDesc, startDate: editSrStart }),
+        body: JSON.stringify({ title: editSrTitle, description: editSrDesc, startDate: editSrStart, endDate: editSrEnd || null }),
       })
       if (!res.ok) throw new Error((await res.json()).error || 'Failed')
       toast.success('Strategic request updated')
@@ -1121,16 +1126,20 @@ export default function RequestsPage() {
                           <span>By {sr.submitter.name}</span>
                           <span className="flex items-center gap-1">
                             <Calendar className="h-3 w-3" />
-                            Start: {format(new Date(sr.startDate), 'MMM d, yyyy')}
+                            {format(new Date(sr.startDate), 'MMM d, yyyy')}
+                            {sr.endDate && ` – ${format(new Date(sr.endDate), 'MMM d, yyyy')}`}
                           </span>
-                          <span>{format(new Date(sr.createdAt), 'MMM d, yyyy')}</span>
                         </div>
 
                         {/* Tasks list */}
                         {expanded && sr.tasks.length > 0 && (
-                          <div className="mt-3 space-y-1.5 border-t pt-3">
+                          <div className="mt-3 space-y-1 border-t pt-3">
                             {sr.tasks.map(task => (
-                              <div key={task.id} className="flex items-center gap-2 text-xs">
+                              <div
+                                key={task.id}
+                                className={`flex items-center gap-2 text-xs rounded px-2 py-1.5 group ${canEditSr ? 'cursor-pointer hover:bg-muted/60' : ''}`}
+                                onClick={() => canEditSr && openEditTask(sr.id, task)}
+                              >
                                 <div className="h-1.5 w-1.5 rounded-full bg-purple-400 shrink-0" />
                                 <span className="font-medium flex-1">{task.title}</span>
                                 {task.assignee && (
@@ -1148,12 +1157,7 @@ export default function RequestsPage() {
                                   </span>
                                 )}
                                 {canEditSr && (
-                                  <button
-                                    className="ml-1 text-blue-500 hover:text-blue-700 shrink-0"
-                                    onClick={() => openEditTask(sr.id, task)}
-                                  >
-                                    <Pencil className="h-3.5 w-3.5" />
-                                  </button>
+                                  <Pencil className="h-3 w-3 text-muted-foreground opacity-0 group-hover:opacity-100 shrink-0" />
                                 )}
                               </div>
                             ))}
@@ -1651,9 +1655,15 @@ export default function RequestsPage() {
                 <Label>Title *</Label>
                 <Input placeholder="e.g. Q3 Efficiency Initiative" value={srTitle} onChange={e => setSrTitle(e.target.value)} />
               </div>
-              <div className="space-y-1.5">
-                <Label>Start Date *</Label>
-                <Input type="date" value={srStart} onChange={e => setSrStart(e.target.value)} />
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label>Start Date *</Label>
+                  <Input type="date" value={srStart} onChange={e => setSrStart(e.target.value)} />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>End Date</Label>
+                  <Input type="date" value={srEnd} onChange={e => setSrEnd(e.target.value)} />
+                </div>
               </div>
               <div className="space-y-1.5">
                 <Label>Description</Label>
@@ -1783,9 +1793,15 @@ export default function RequestsPage() {
               <Label>Title *</Label>
               <Input value={editSrTitle} onChange={e => setEditSrTitle(e.target.value)} />
             </div>
-            <div className="space-y-1.5">
-              <Label>Start Date</Label>
-              <Input type="date" value={editSrStart} onChange={e => setEditSrStart(e.target.value)} />
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label>Start Date</Label>
+                <Input type="date" value={editSrStart} onChange={e => setEditSrStart(e.target.value)} />
+              </div>
+              <div className="space-y-1.5">
+                <Label>End Date</Label>
+                <Input type="date" value={editSrEnd} onChange={e => setEditSrEnd(e.target.value)} />
+              </div>
             </div>
             <div className="space-y-1.5">
               <Label>Description</Label>
