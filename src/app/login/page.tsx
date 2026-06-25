@@ -110,7 +110,7 @@ export default function LoginPage() {
               <Input
                 id="email"
                 type="email"
-                placeholder="you@gtec.com"
+                placeholder="yourGTECid@whirlpool.com"
                 className="bg-white/5 border-white/10 text-white placeholder:text-white/30 focus:border-blue-500 focus:ring-blue-500/30"
                 {...register('email')}
               />
@@ -150,7 +150,7 @@ export default function LoginPage() {
           </form>
 
           <div className="mt-5 p-3 bg-white/5 rounded-xl text-xs text-white/60 border border-white/5">
-            <p>Enter your GTEC email ID. Temporary password for all users is <span className="font-semibold text-white">temp123</span></p>
+            <p><span className="font-semibold text-white">yourGTECid@whirlpool.com</span> / <span className="font-semibold text-white">temp123</span></p>
           </div>
         </motion.div>
 
