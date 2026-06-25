@@ -138,6 +138,12 @@ export default function KanbanPage() {
   const [reworkNote, setReworkNote] = useState('')
   const [reworkLoading, setReworkLoading] = useState(false)
 
+  // Submit-for-review dialog state
+  const [reviewOpen, setReviewOpen] = useState(false)
+  const [reviewTarget, setReviewTarget] = useState<Task | null>(null)
+  const [reviewNote, setReviewNote] = useState('')
+  const [reviewLoading, setReviewLoading] = useState(false)
+
   // Task detail dialog state
   const [detailOpen, setDetailOpen] = useState(false)
   const [detailFull, setDetailFull] = useState<FullTask | null>(null)
@@ -295,6 +301,27 @@ export default function KanbanPage() {
       toast.error('Failed to update assignee')
     } finally {
       setSavingAssignee(false)
+    }
+  }
+
+  function openReviewDialog(task: Task) {
+    setReviewTarget(task)
+    setReviewNote('')
+    setReviewOpen(true)
+  }
+
+  async function submitReview() {
+    if (!reviewTarget || !reviewNote.trim()) return
+    setReviewLoading(true)
+    try {
+      await patchStatus(reviewTarget.id, 'REVIEW', { reviewNote: reviewNote.trim() })
+      setReviewOpen(false)
+      setReviewTarget(null)
+      toast.success('Task submitted for review')
+    } catch {
+      toast.error('Failed to submit task for review')
+    } finally {
+      setReviewLoading(false)
     }
   }
 
@@ -500,9 +527,7 @@ export default function KanbanPage() {
                                       className="h-6 text-xs w-full text-green-700 border-green-400 hover:bg-green-50 dark:text-green-400 dark:border-green-700 dark:hover:bg-green-950"
                                       onClick={(e) => {
                                         e.stopPropagation()
-                                        patchStatus(task.id, 'REVIEW').catch(() =>
-                                          toast.error('Failed to submit for review')
-                                        )
+                                        openReviewDialog(task)
                                       }}
                                     >
                                       Submit for Review
@@ -852,6 +877,56 @@ export default function KanbanPage() {
               </div>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Submit-for-review dialog */}
+      <Dialog open={reviewOpen} onOpenChange={(v) => { if (!reviewLoading) setReviewOpen(v) }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Submit for Review</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            {reviewTarget && (
+              <p className="text-sm text-muted-foreground">
+                Task: <span className="font-medium text-foreground">{reviewTarget.name}</span>
+              </p>
+            )}
+            {reviewTarget?.endDate && new Date(reviewTarget.endDate) < new Date() && (
+              <div className="rounded-md bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800 px-3 py-2 text-xs text-red-700 dark:text-red-400">
+                ⚠ This task is past its deadline
+                ({Math.round((Date.now() - new Date(reviewTarget.endDate).getTime()) / (24 * 60 * 60 * 1000))}d overdue).
+                Please explain the delay below.
+              </div>
+            )}
+            <div className="space-y-1">
+              <label className="text-sm font-medium">
+                Comments / Delay reason <span className="text-destructive">*</span>
+              </label>
+              <Textarea
+                placeholder="Describe what was completed and any reason for delay…"
+                value={reviewNote}
+                onChange={(e) => setReviewNote(e.target.value)}
+                className="min-h-[100px] resize-none"
+                autoFocus
+              />
+              {reviewNote.trim() === '' && (
+                <p className="text-xs text-muted-foreground">Required — the reviewer will see this note.</p>
+              )}
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setReviewOpen(false)} disabled={reviewLoading}>
+              Cancel
+            </Button>
+            <Button
+              className="bg-green-600 hover:bg-green-700 text-white"
+              onClick={submitReview}
+              disabled={reviewLoading || reviewNote.trim() === ''}
+            >
+              {reviewLoading ? 'Submitting…' : 'Submit for Review'}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 

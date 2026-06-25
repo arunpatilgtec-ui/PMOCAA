@@ -77,7 +77,7 @@ export async function PATCH(req: NextRequest, ctx: RouteContext<'/api/tasks/[id]
           toStatus: data.status,
           changedAt: new Date(),
           durationMinutes,
-          note: data.reworkNote || null,
+          note: data.reviewNote || data.reworkNote || null,
           changedById: session.id,
         },
       })
@@ -165,7 +165,7 @@ export async function PATCH(req: NextRequest, ctx: RouteContext<'/api/tasks/[id]
             data: {
               type: 'TASK_UPDATED',
               title: 'Task Ready for Review',
-              message: `${session.name} submitted "${task.name}" for review.`,
+              message: `${session.name} submitted "${task.name}" for review.${data.reviewNote ? ` Note: ${data.reviewNote}` : ''}`,
               userId: notifyId,
               senderId: session.id,
               taskId: task.id,
