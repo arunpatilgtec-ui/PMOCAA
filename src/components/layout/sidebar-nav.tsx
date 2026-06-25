@@ -23,6 +23,7 @@ import {
   UserCog,
   ListOrdered,
   CalendarRange,
+  Layers,
 } from 'lucide-react'
 import { useState } from 'react'
 import { Badge } from '@/components/ui/badge'
@@ -42,7 +43,8 @@ const navItems: NavItem[] = [
   { label: 'Requests',      href: '/requests',      icon: ClipboardList },
   { label: 'Kanban',        href: '/kanban',        icon: SquareKanban },
   { label: 'Gantt',         href: '/gantt',         icon: GitBranch },
-  { label: 'Timeline',      href: '/timeline',      icon: CalendarRange, roles: ['ADMIN', 'MANAGER', 'PLANNER', 'LEADERSHIP', 'PROJECT_LEAD', 'WORKSTREAM_LEAD'] },
+  { label: 'Timeline',      href: '/timeline',      icon: CalendarRange, roles: ['RESOURCE', 'PROJECT_LEAD', 'WORKSTREAM_LEAD', 'PLANNER', 'LEADERSHIP'] },
+  { label: 'All Projects',  href: '/all-projects',  icon: Layers,        roles: ['ADMIN', 'MANAGER', 'PLANNER'] },
   { label: 'Queue',         href: '/queue',         icon: ListOrdered },
   { label: 'Resources',     href: '/resources',     icon: Users,         roles: ['ADMIN', 'MANAGER', 'PLANNER', 'PROJECT_LEAD', 'WORKSTREAM_LEAD', 'LEADERSHIP'] },
   { label: 'Approvals',     href: '/approvals',     icon: CheckSquare,   roles: ['ADMIN', 'MANAGER', 'PLANNER'] },
