@@ -51,14 +51,25 @@ export async function PATCH(req: NextRequest, ctx: RouteContext<'/api/requests/[
     }
 
     // Submitter editing own request — only allow field edits, not status/conversion.
-    // If the request was already under review or approved, reset to SUBMITTED so it
-    // goes back through the approval chain. For APPROVED requests, also cancel the
-    // auto-created task so the assignee's bandwidth is freed.
+    // If only the assignee changed on an APPROVED request, transfer the live task instead
+    // of deleting it (avoids the manager needing to re-approve just to reassign).
     if (!isManager && isOwnRequest) {
-      const needsResubmit = ['REVIEW', 'APPROVED'].includes(existing.status)
+      const newAssigneeId: string | null = data.assigneeId !== undefined
+        ? (data.assigneeId || null)
+        : existing.assigneeId
+      const assigneeChanging = data.assigneeId !== undefined && data.assigneeId !== existing.assigneeId
 
-      // Cancel the task created at approval before we overwrite the title
-      if (existing.status === 'APPROVED' && existing.assigneeId) {
+      // Detect whether anything OTHER than assignee/assignedBy is changing
+      const substantiveChange = data.title !== undefined || data.description !== undefined ||
+        data.priority !== undefined || data.type !== undefined ||
+        data.startDate !== undefined || data.endDate !== undefined ||
+        data.isRecurring !== undefined || data.hoursPerDay !== undefined ||
+        data.estimatedHours !== undefined
+
+      const needsResubmit = substantiveChange && ['REVIEW', 'APPROVED'].includes(existing.status)
+
+      if (needsResubmit && existing.status === 'APPROVED' && existing.assigneeId) {
+        // Substantive change: pull back the task so manager re-approves
         const directWs = await prisma.workstream.findFirst({
           where: { project: { name: '__direct_assignments__' } },
           select: { id: true },
@@ -73,7 +84,6 @@ export async function PATCH(req: NextRequest, ctx: RouteContext<'/api/requests/[
             },
           })
         }
-        // Tell the assignee their task was recalled
         if (existing.assigneeId !== session.id) {
           await prisma.notification.create({
             data: {
@@ -86,6 +96,50 @@ export async function PATCH(req: NextRequest, ctx: RouteContext<'/api/requests/[
             },
           })
         }
+      } else if (assigneeChanging && existing.status === 'APPROVED' && !substantiveChange) {
+        // Only the assignee changed on an APPROVED request: transfer the live task
+        const directWs = await prisma.workstream.findFirst({
+          where: { project: { name: '__direct_assignments__' } },
+          select: { id: true },
+        })
+        if (directWs) {
+          await prisma.task.updateMany({
+            where: {
+              workstreamId: directWs.id,
+              ownerId: existing.assigneeId,
+              name: existing.title,
+              status: { notIn: ['COMPLETED', 'CANCELLED'] },
+            },
+            data: { ownerId: newAssigneeId },
+          })
+        }
+        // Notify old assignee task was reassigned
+        if (existing.assigneeId && existing.assigneeId !== session.id && existing.assigneeId !== newAssigneeId) {
+          await prisma.notification.create({
+            data: {
+              userId: existing.assigneeId,
+              senderId: session.id,
+              type: 'TASK_UPDATED',
+              title: 'Work Reassigned',
+              message: `"${existing.title}" has been reassigned to someone else.`,
+              actionUrl: '/kanban',
+            },
+          })
+        }
+        // Notify new assignee
+        if (newAssigneeId && newAssigneeId !== session.id) {
+          await prisma.notification.create({
+            data: {
+              userId: newAssigneeId,
+              senderId: session.id,
+              type: 'TASK_ASSIGNED',
+              title: 'Work Assigned to You',
+              message: `${existing.submitter.name} assigned you to: "${existing.title}". Open Kanban to start.`,
+              actionUrl: '/kanban',
+            },
+          })
+        }
+        // Signal other tabs to refresh (so Gantt/Kanban/Resources update immediately)
       }
 
       const updated = await prisma.request.update({
@@ -103,6 +157,11 @@ export async function PATCH(req: NextRequest, ctx: RouteContext<'/api/requests/[
           ...(data.hoursPerDay !== undefined && { hoursPerDay: data.hoursPerDay ? parseFloat(String(data.hoursPerDay)) : null }),
           ...(data.estimatedHours !== undefined && { estimatedHours: data.estimatedHours ? parseFloat(String(data.estimatedHours)) : null }),
           ...(data.assignedById !== undefined && { assignedById: data.assignedById || null }),
+          ...(data.assigneeId !== undefined && { assigneeId: data.assigneeId || null }),
+        },
+        include: {
+          assignee: { select: { id: true, name: true } },
+          assignedBy: { select: { id: true, name: true } },
         },
       })
 
@@ -168,8 +227,13 @@ export async function PATCH(req: NextRequest, ctx: RouteContext<'/api/requests/[
         ...(data.status !== undefined && { status: data.status }),
         ...(data.priority !== undefined && { priority: data.priority }),
         ...(data.assigneeId !== undefined && { assigneeId: data.assigneeId || null }),
+        ...(data.assignedById !== undefined && { assignedById: data.assignedById || null }),
         ...(data.notes !== undefined && { notes: data.notes }),
         ...(data.estimatedHours !== undefined && { estimatedHours: data.estimatedHours ? parseFloat(data.estimatedHours) : null }),
+      },
+      include: {
+        assignee: { select: { id: true, name: true } },
+        assignedBy: { select: { id: true, name: true } },
       },
     })
 

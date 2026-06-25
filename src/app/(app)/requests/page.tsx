@@ -213,6 +213,7 @@ export default function RequestsPage() {
   const [editReqRecurring, setEditReqRecurring] = useState(false)
   const [editReqHours,   setEditReqHours]   = useState('')
   const [editReqAssignedById, setEditReqAssignedById] = useState('')
+  const [editReqAssigneeId,  setEditReqAssigneeId]  = useState('')
   const [editReqStatus,  setEditReqStatus]  = useState('')
   const [editSubmitting, setEditSubmitting] = useState(false)
   const [deleteReqId,    setDeleteReqId]    = useState<string | null>(null)
@@ -476,6 +477,7 @@ export default function RequestsPage() {
     setEditReqRecurring(req.isRecurring ?? false)
     setEditReqHours(req.isRecurring ? String(req.hoursPerDay || '') : String(req.estimatedHours || ''))
     setEditReqAssignedById(req.assignedBy?.id || '')
+    setEditReqAssigneeId(req.assignee?.id || '')
     setEditReqStatus(req.status)
     if (formUsers.length === 0) {
       fetch('/api/users').then(r => r.json()).then(d => setFormUsers(Array.isArray(d) ? d : [])).catch(() => {})
@@ -504,6 +506,7 @@ export default function RequestsPage() {
           hoursPerDay: editReqRecurring && editReqHours ? parseFloat(editReqHours) : null,
           estimatedHours: !editReqRecurring && editReqHours ? parseFloat(editReqHours) : null,
           assignedById: editReqAssignedById || null,
+          assigneeId: editReqAssigneeId || null,
         }),
       })
       if (!res.ok) throw new Error((await res.json()).error || 'Failed')
@@ -1578,19 +1581,35 @@ export default function RequestsPage() {
                 <Input type="date" value={editReqEnd} onChange={e => setEditReqEnd(e.target.value)} />
               </div>
             </div>
-            <div className="space-y-1.5">
-              <Label>Assigned by (who gave you this work)</Label>
-              <Select value={editReqAssignedById || 'none'} onValueChange={(v) => setEditReqAssignedById(v === 'none' ? '' : (v ?? ''))}>
-                <SelectTrigger className="w-full"><SelectValue placeholder="Not specified" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">Not specified</SelectItem>
-                  {formUsers.map((u) => (
-                    <SelectItem key={u.id} value={u.id}>
-                      {u.name} <span className="text-muted-foreground text-xs">· {u.role.replace('_', ' ')}</span>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label>Assigned by (who gave you this work)</Label>
+                <Select value={editReqAssignedById || 'none'} onValueChange={(v) => setEditReqAssignedById(v === 'none' ? '' : (v ?? ''))}>
+                  <SelectTrigger className="w-full"><SelectValue placeholder="Not specified" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Not specified</SelectItem>
+                    {formUsers.map((u) => (
+                      <SelectItem key={u.id} value={u.id}>
+                        {u.name} <span className="text-muted-foreground text-xs">· {u.role.replace('_', ' ')}</span>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label>Assigned to (who will do the work)</Label>
+                <Select value={editReqAssigneeId || 'none'} onValueChange={(v) => setEditReqAssigneeId(v === 'none' ? '' : (v ?? ''))}>
+                  <SelectTrigger className="w-full"><SelectValue placeholder="Not specified" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Not specified</SelectItem>
+                    {formUsers.map((u) => (
+                      <SelectItem key={u.id} value={u.id}>
+                        {u.name} <span className="text-muted-foreground text-xs">· {u.role.replace('_', ' ')}</span>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
             <div className="space-y-1.5">
               <Label>Notes (optional)</Label>
