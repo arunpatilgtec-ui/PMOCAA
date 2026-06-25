@@ -136,15 +136,16 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
       const bobWs = existingBobWs ?? await prisma.workstream.create({
         data: { projectId: id, name: 'BOB & A2Mac1', order: bobWsOrder2 },
       })
+      const brand = productRecord?.brand ?? ''
+      const modelNo = productRecord?.modelNo ?? ''
+      const productLabel = `${brand}${modelNo ? ` ${modelNo}` : ''}`
+
       if (bobWs) {
           await prisma.task.deleteMany({
             where: { workstreamId: bobWs.id, description: { contains: `__productTask:${productId}:` } },
           })
-          const brand = productRecord?.brand ?? ''
-          const modelNo = productRecord?.modelNo ?? ''
           const bobStart = proj?.startDate ? addWorkingDays(new Date(proj.startDate), DW_BOB_OFFSET) : null
           const bobEnd = proj?.startDate ? addWorkingDays(new Date(proj.startDate), DW_BOB_OFFSET + DW_BOB_DURATION - 1) : null
-          const productLabel = `${brand}${modelNo ? ` ${modelNo}` : ''}`
           await prisma.task.createMany({
             data: [
               {
@@ -169,6 +170,44 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
               },
             ],
           })
+      }
+
+      // Sync per-product costing tasks — one task per (user × costingType),
+      // visible in Kanban/Gantt/Utilization just like BOB tasks.
+      const existingCostingWs = await prisma.workstream.findFirst({
+        where: { projectId: id, name: { in: ['Costing', 'Product Costing'] } },
+      })
+      const costingWsForSync = existingCostingWs ?? await prisma.workstream.create({
+        data: {
+          projectId: id,
+          name: 'Costing',
+          order: await prisma.workstream.count({ where: { projectId: id } }),
+        },
+      })
+
+      // Remove stale per-product costing tasks for this product
+      await prisma.task.deleteMany({
+        where: {
+          workstreamId: costingWsForSync.id,
+          description: { contains: `__productTask:${productId}:costing:` },
+        },
+      })
+
+      // Re-create: one task per assigned user per costingType
+      const costingTaskRows = newResources.flatMap((nr) =>
+        (nr.costingTypes ?? []).map((ct) => ({
+          workstreamId: costingWsForSync.id,
+          name: `${productLabel} — ${ct}`,
+          description: `__productTask:${productId}:costing:${ct}__`,
+          ownerId: nr.userId,
+          startDate: proj?.startDate ?? null,
+          endDate: proj?.endDate ?? null,
+          estimatedHours: 8,
+          effortHours: 8,
+        }))
+      )
+      if (costingTaskRows.length > 0) {
+        await prisma.task.createMany({ data: costingTaskRows })
       }
     }
 
@@ -238,13 +277,17 @@ export async function DELETE(_req: NextRequest, ctx: Ctx) {
       return Response.json({ error: 'Forbidden' }, { status: 403 })
     }
     // Clean up auto-generated tasks before deleting the product
-    const [costingWs, bobWs] = await Promise.all([
+    const [costingWs, costingWs2, bobWs] = await Promise.all([
       prisma.workstream.findFirst({ where: { projectId: id, name: 'Product Costing' } }),
+      prisma.workstream.findFirst({ where: { projectId: id, name: 'Costing' } }),
       prisma.workstream.findFirst({ where: { projectId: id, name: 'BOB & A2Mac1' } }),
     ])
     await Promise.all([
       costingWs && prisma.task.deleteMany({
         where: { workstreamId: costingWs.id, description: { contains: `__productTask:${productId}:` } },
+      }),
+      costingWs2 && prisma.task.deleteMany({
+        where: { workstreamId: costingWs2.id, description: { contains: `__productTask:${productId}:` } },
       }),
       bobWs && prisma.task.deleteMany({
         where: { workstreamId: bobWs.id, description: { contains: `__productTask:${productId}:` } },
