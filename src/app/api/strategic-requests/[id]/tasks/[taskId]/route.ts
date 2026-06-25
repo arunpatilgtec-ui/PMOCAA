@@ -16,18 +16,19 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
     })
     if (!sr) return Response.json({ error: 'Not found' }, { status: 404 })
 
-    const canEdit =
-      sr.submitterId === session.id ||
-      ['ADMIN', 'MANAGER', 'PLANNER'].includes(session.role)
-    if (!canEdit) return Response.json({ error: 'Forbidden' }, { status: 403 })
-
     const data = await req.json()
 
-    // Fetch existing task to detect assignee change
+    // Fetch existing task to detect assignee change and check ownership
     const existing = await prisma.strategicTask.findUnique({
       where: { id: taskId, strategicRequestId: id },
       select: { assigneeId: true, title: true },
     })
+
+    const canEdit =
+      sr.submitterId === session.id ||
+      existing?.assigneeId === session.id ||
+      ['ADMIN', 'MANAGER', 'PLANNER'].includes(session.role)
+    if (!canEdit) return Response.json({ error: 'Forbidden' }, { status: 403 })
 
     const task = await prisma.strategicTask.update({
       where: { id: taskId, strategicRequestId: id },
