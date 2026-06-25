@@ -79,6 +79,8 @@ interface Task {
   workstream: { id: string; name: string; project: { id: string; name: string } }
   _isStrategic?: boolean
   _srId?: string
+  _submitterName?: string | null
+  _submitterId?: string | null
 }
 
 interface Project { id: string; name: string }
@@ -236,7 +238,6 @@ export default function KanbanPage() {
     const newStatus = destination.droppableId
     const task = tasks.find((t) => t.id === draggableId)
     if (!task || task.status === newStatus) return
-    if (task._isStrategic) return  // Strategic tasks are not draggable
 
     // Optimistic update
     setTasks((prev) =>
@@ -244,11 +245,20 @@ export default function KanbanPage() {
     )
 
     try {
-      const res = await fetch(`/api/tasks/${draggableId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: newStatus, order: destination.index }),
-      })
+      let res: Response
+      if (task._isStrategic && task._srId) {
+        res = await fetch(`/api/strategic-requests/${task._srId}/tasks/${task.id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status: newStatus }),
+        })
+      } else {
+        res = await fetch(`/api/tasks/${draggableId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status: newStatus, order: destination.index }),
+        })
+      }
       if (!res.ok) throw new Error()
       await load()
     } catch {
@@ -418,7 +428,7 @@ export default function KanbanPage() {
                         }`}
                       >
                         {colTasks.map((task, index) => (
-                          <Draggable key={task.id} draggableId={task.id} index={index} isDragDisabled={!!task._isStrategic}>
+                          <Draggable key={task.id} draggableId={task.id} index={index}>
                             {(drag, dragSnapshot) => (
                               <div
                                 ref={drag.innerRef}
@@ -431,7 +441,7 @@ export default function KanbanPage() {
                                 <div className="flex items-start gap-2">
                                   <div
                                     {...drag.dragHandleProps}
-                                    className={`mt-0.5 text-muted-foreground ${task._isStrategic ? 'invisible w-0 overflow-hidden' : ''}`}
+                                    className="mt-0.5 text-muted-foreground"
                                     onClick={(e) => e.stopPropagation()}
                                   >
                                     <GripVertical className="h-3.5 w-3.5" />
@@ -836,47 +846,111 @@ export default function KanbanPage() {
 
       {/* Strategic task detail dialog */}
       <Dialog open={!!strategicDetailTask} onOpenChange={(o) => { if (!o) setStrategicDetailTask(null) }}>
-        <DialogContent className="sm:max-w-sm">
+        <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <span className="text-purple-600">★</span> Strategic Task
+            <DialogTitle className="flex items-center gap-2 pr-6">
+              <span className="text-purple-500">★</span>
+              <span className="leading-snug">{strategicDetailTask?.name}</span>
             </DialogTitle>
           </DialogHeader>
-          {strategicDetailTask && (
-            <div className="space-y-3 py-1">
-              <div>
-                <p className="text-sm font-semibold leading-snug">{strategicDetailTask.name}</p>
-                <p className="text-xs text-muted-foreground mt-0.5">{strategicDetailTask.workstream.name}</p>
-              </div>
-              {strategicDetailTask.owner && (
-                <div className="flex items-center gap-2 text-sm">
-                  <User2 className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                  <span>{strategicDetailTask.owner.name}</span>
-                </div>
-              )}
-              {(strategicDetailTask.startDate || strategicDetailTask.endDate) && (
-                <div className="flex items-center gap-2 text-sm">
-                  <Calendar className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                  <span>
-                    {strategicDetailTask.startDate && format(new Date(strategicDetailTask.startDate), 'MMM d')}
-                    {strategicDetailTask.startDate && strategicDetailTask.endDate && ' – '}
-                    {strategicDetailTask.endDate && format(new Date(strategicDetailTask.endDate), 'MMM d, yyyy')}
+          {strategicDetailTask && (() => {
+            const STATUS_COLORS_MAP: Record<string, string> = {
+              BACKLOG: 'bg-slate-100 text-slate-700', PLANNED: 'bg-blue-100 text-blue-700',
+              IN_PROGRESS: 'bg-yellow-100 text-yellow-800', REVIEW: 'bg-purple-100 text-purple-700',
+              REWORK: 'bg-red-100 text-red-700', COMPLETED: 'bg-green-100 text-green-700',
+              CANCELLED: 'bg-gray-100 text-gray-500',
+            }
+            const STATUS_LABELS: Record<string, string> = {
+              BACKLOG: 'Backlog', PLANNED: 'Planned', IN_PROGRESS: 'In Progress',
+              REVIEW: 'Review', REWORK: 'Rework', COMPLETED: 'Completed', CANCELLED: 'Cancelled',
+            }
+            return (
+              <div className="space-y-4 py-1">
+                {/* Status + Strategic badge */}
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${STATUS_COLORS_MAP[strategicDetailTask.status] ?? 'bg-purple-100 text-purple-700'}`}>
+                    {STATUS_LABELS[strategicDetailTask.status] ?? strategicDetailTask.status}
+                  </span>
+                  <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300">
+                    Strategic
                   </span>
                 </div>
-              )}
-              {strategicDetailTask.estimatedHours > 0 && (
-                <div className="flex items-center gap-2 text-sm">
-                  <Clock className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                  <span>{strategicDetailTask.estimatedHours}h estimated</span>
+
+                {/* Strategic Request name */}
+                <p className="text-xs text-muted-foreground">
+                  Request: <span className="font-medium text-foreground">{strategicDetailTask.workstream.name}</span>
+                </p>
+
+                {/* Assignment */}
+                <div className="rounded-lg border bg-muted/30 p-3 space-y-3">
+                  <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Assignment</h3>
+
+                  {strategicDetailTask._submitterName && (
+                    <div className="flex items-center gap-2">
+                      <User2 className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                      <span className="text-xs text-muted-foreground w-20 shrink-0">Assigned by</span>
+                      <div className="flex items-center gap-1.5">
+                        <Avatar className="h-5 w-5">
+                          <AvatarFallback className="text-[10px]">
+                            {strategicDetailTask._submitterName.split(' ').map((n: string) => n[0]).join('').slice(0, 2)}
+                          </AvatarFallback>
+                        </Avatar>
+                        <span className="text-sm font-medium">{strategicDetailTask._submitterName}</span>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="flex items-center gap-2">
+                    <User2 className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                    <span className="text-xs text-muted-foreground w-20 shrink-0">Assigned to</span>
+                    {strategicDetailTask.owner ? (
+                      <div className="flex items-center gap-1.5">
+                        <Avatar className="h-5 w-5">
+                          <AvatarFallback className="text-[10px]">
+                            {strategicDetailTask.owner.name.split(' ').map((n: string) => n[0]).join('').slice(0, 2)}
+                          </AvatarFallback>
+                        </Avatar>
+                        <span className="text-sm font-medium">{strategicDetailTask.owner.name}</span>
+                      </div>
+                    ) : (
+                      <span className="text-sm text-muted-foreground">Unassigned</span>
+                    )}
+                  </div>
                 </div>
-              )}
-              <div className="pt-1 border-t border-border">
-                <a href="/requests" className="text-xs text-blue-600 hover:underline dark:text-blue-400">
-                  → Manage in Strategic Requests
-                </a>
+
+                {/* Schedule & Hours */}
+                <div className="rounded-lg border bg-muted/30 p-3 space-y-2">
+                  <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Schedule & Hours</h3>
+                  <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-sm">
+                    {strategicDetailTask.startDate && (
+                      <>
+                        <span className="text-muted-foreground text-xs">Start</span>
+                        <span>{format(new Date(strategicDetailTask.startDate), 'MMM d, yyyy')}</span>
+                      </>
+                    )}
+                    {strategicDetailTask.endDate && (
+                      <>
+                        <span className="text-muted-foreground text-xs">Due</span>
+                        <span>{format(new Date(strategicDetailTask.endDate), 'MMM d, yyyy')}</span>
+                      </>
+                    )}
+                    {strategicDetailTask.estimatedHours > 0 && (
+                      <>
+                        <span className="text-muted-foreground text-xs">Estimated</span>
+                        <span>{strategicDetailTask.estimatedHours}h</span>
+                      </>
+                    )}
+                  </div>
+                </div>
+
+                <div className="pt-1 border-t border-border">
+                  <a href="/requests" className="text-xs text-blue-600 hover:underline dark:text-blue-400">
+                    → Manage in Strategic Requests
+                  </a>
+                </div>
               </div>
-            </div>
-          )}
+            )
+          })()}
         </DialogContent>
       </Dialog>
 

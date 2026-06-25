@@ -496,6 +496,7 @@ model StrategicRequest {
 model StrategicTask {
   id                 String   @id @default(cuid())
   title              String
+  status             String?
   isRecurring        Boolean  @default(false)
   hoursPerDay        Float?
   estimatedHours     Float?

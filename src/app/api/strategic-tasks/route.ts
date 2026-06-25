@@ -18,7 +18,13 @@ export async function GET() {
       where: canSeeAll ? {} : { assigneeId: session.id },
       include: {
         assignee: { select: { id: true, name: true, avatarUrl: true } },
-        strategicRequest: { select: { id: true, title: true } },
+        strategicRequest: {
+          select: {
+            id: true,
+            title: true,
+            submitter: { select: { id: true, name: true } },
+          },
+        },
       },
       orderBy: { startDate: 'asc' },
     })
@@ -28,7 +34,7 @@ export async function GET() {
       return {
         id: t.id,
         name: t.title,
-        status: inferStatus(t.startDate, t.endDate),
+        status: t.status ?? inferStatus(t.startDate, t.endDate),
         priority: 'MEDIUM',
         startDate: t.startDate?.toISOString(),
         endDate: t.endDate?.toISOString(),
@@ -48,6 +54,8 @@ export async function GET() {
         },
         _isStrategic: true as const,
         _srId: t.strategicRequestId,
+        _submitterName: t.strategicRequest.submitter?.name ?? null,
+        _submitterId: t.strategicRequest.submitter?.id ?? null,
       }
     })
 

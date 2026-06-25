@@ -33,6 +33,7 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
       where: { id: taskId, strategicRequestId: id },
       data: {
         ...(data.title      !== undefined && { title:          data.title }),
+        ...(data.status     !== undefined && { status:         data.status }),
         ...(data.isRecurring !== undefined && { isRecurring:   data.isRecurring }),
         ...(data.hoursPerDay !== undefined && {
           hoursPerDay: data.hoursPerDay ? parseFloat(String(data.hoursPerDay)) : null,
