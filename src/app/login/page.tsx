@@ -149,8 +149,9 @@ export default function LoginPage() {
             </Button>
           </form>
 
-          <div className="mt-5 p-3 bg-white/5 rounded-xl text-xs text-white/60 border border-white/5">
-            <p><span className="font-semibold text-white">yourGTECid@whirlpool.com</span> / <span className="font-semibold text-white">temp123</span></p>
+          <div className="mt-5 p-3 bg-white/5 rounded-xl text-xs text-white/60 space-y-1 border border-white/5">
+            <p className="font-medium text-white/80">Demo credentials</p>
+            <p>yourGTECid@whirlpool.com / temp123</p>
           </div>
         </motion.div>
 
