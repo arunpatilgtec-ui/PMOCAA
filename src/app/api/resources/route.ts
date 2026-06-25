@@ -241,16 +241,20 @@ export async function GET(req: NextRequest) {
       completedByUser.get(ct.ownerId)!.push(ct)
     }
 
-    // Strategic tasks for all active users (counted in utilization)
+    // Strategic tasks for all active users (counted in utilization + shown in detail)
     const strategicTasksAll = await prisma.strategicTask.findMany({
       where: { assigneeId: { in: users.map(u => u.id) } },
       select: {
+        id: true,
+        title: true,
+        status: true,
         assigneeId: true,
         estimatedHours: true,
         hoursPerDay: true,
         isRecurring: true,
         startDate: true,
         endDate: true,
+        strategicRequest: { select: { id: true, title: true } },
       },
     })
     const strategicByUser = new Map<string, typeof strategicTasksAll>()
@@ -411,6 +415,26 @@ export async function GET(req: NextRequest) {
         // Leave
         leaveDates,
         isOnLeaveToday,
+        // Strategic tasks for detail dialog
+        strategicTasks: (strategicByUser.get(user.id) ?? []).map(st => {
+          let estimatedHours: number
+          if (st.isRecurring && st.hoursPerDay) {
+            const s = st.startDate ?? new Date()
+            const e = st.endDate ?? new Date(s.getTime() + 90 * 24 * 60 * 60 * 1000)
+            estimatedHours = st.hoursPerDay * countWorkingDays(s, e)
+          } else {
+            estimatedHours = st.estimatedHours ?? 0
+          }
+          return {
+            id: st.id,
+            name: st.title,
+            requestTitle: st.strategicRequest.title,
+            status: st.status ?? 'PLANNED',
+            estimatedHours,
+            startDate: st.startDate?.toISOString() ?? null,
+            endDate: st.endDate?.toISOString() ?? null,
+          }
+        }),
         // Completed tasks (last 60 days) for detail dialog badges
         completedTasks: userCompletedTasks.map(ct => ({
           id: ct.id,

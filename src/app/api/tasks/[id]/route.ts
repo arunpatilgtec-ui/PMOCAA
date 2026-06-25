@@ -50,17 +50,19 @@ export async function PATCH(req: NextRequest, ctx: RouteContext<'/api/tasks/[id]
     const existing = await prisma.task.findUniqueOrThrow({ where: { id } })
     const statusChanged = data.status !== undefined && data.status !== existing.status
 
-    // Determine project-level permissions (one DB call for PROJECT_LEAD checks)
+    // Determine project/workstream-level permissions (one DB call covers all lead checks)
     let isProjectLead = false
-    if (session.role === 'PROJECT_LEAD') {
+    let isWorkstreamLead = false
+    if (['PROJECT_LEAD', 'WORKSTREAM_LEAD'].includes(session.role)) {
       const ws = await prisma.workstream.findUnique({
         where: { id: existing.workstreamId },
-        select: { project: { select: { leadId: true } } },
+        select: { leadId: true, project: { select: { leadId: true } } },
       })
-      isProjectLead = ws?.project.leadId === session.id
+      if (session.role === 'PROJECT_LEAD') isProjectLead = ws?.project.leadId === session.id
+      if (session.role === 'WORKSTREAM_LEAD') isWorkstreamLead = ws?.leadId === session.id
     }
-    const canAssign = ['ADMIN', 'PLANNER'].includes(session.role) || isProjectLead
-    const canEditDates = ['ADMIN', 'MANAGER', 'PLANNER'].includes(session.role) || isProjectLead
+    const canAssign = ['ADMIN', 'MANAGER', 'PLANNER'].includes(session.role) || isProjectLead || isWorkstreamLead
+    const canEditDates = ['ADMIN', 'MANAGER', 'PLANNER'].includes(session.role) || isProjectLead || isWorkstreamLead
 
     // Only count ownerId as "changed" if the caller is actually allowed to reassign
     const ownerChanged = canAssign && data.ownerId !== undefined && data.ownerId !== existing.ownerId

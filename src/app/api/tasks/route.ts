@@ -122,7 +122,8 @@ export async function POST(req: NextRequest) {
         description: data.description,
         workstreamId: data.workstreamId,
         ownerId: data.ownerId || null,
-        assignedById: data.assignedById || null,
+        // Auto-attribute: if someone else is being assigned, record who did the assigning
+        assignedById: data.assignedById || (data.ownerId && data.ownerId !== session.id ? session.id : null),
         status: data.status || 'BACKLOG',
         priority: data.priority || 'MEDIUM',
         startDate: data.startDate ? new Date(data.startDate) : null,

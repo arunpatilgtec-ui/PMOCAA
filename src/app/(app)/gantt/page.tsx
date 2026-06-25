@@ -162,10 +162,9 @@ export default function GanttPage() {
         const [taskRes, projRes, srRes] = await Promise.all([
           fetch(`/api/tasks${!isAll ? `?projectId=${selectedProject}` : ''}`),
           fetch('/api/projects'),
-          isAll ? fetch('/api/strategic-tasks') : Promise.resolve(null),
+          fetch('/api/strategic-tasks'),
         ])
-        const [taskData, projData] = await Promise.all([taskRes.json(), projRes.json()])
-        const srData = srRes ? await srRes.json() : []
+        const [taskData, projData, srData] = await Promise.all([taskRes.json(), projRes.json(), srRes.json()])
         if (cancelled) return
         const srTasks = Array.isArray(srData) ? srData : []
         const taskArr = [...(Array.isArray(taskData) ? taskData : []), ...srTasks]

@@ -158,7 +158,7 @@ export default function KanbanPage() {
   const [strategicDetailTask, setStrategicDetailTask] = useState<Task | null>(null)
 
   const canEditAssignee = !!(user && (
-    ['ADMIN', 'PLANNER'].includes(user.role) ||
+    ['ADMIN', 'MANAGER', 'PLANNER'].includes(user.role) ||
     (user.role === 'PROJECT_LEAD' && detailFull?.workstream?.project?.leadId === user.id)
   ))
 

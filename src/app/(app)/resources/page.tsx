@@ -14,7 +14,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Textarea } from '@/components/ui/textarea'
 import {
   AlertTriangle, Users, Briefcase, Clock, Search,
-  ClipboardCheck, UserPlus, CalendarDays, Layers,
+  ClipboardCheck, UserPlus, CalendarDays, Layers, Target,
   ChevronLeft, ChevronRight, LayoutGrid, BarChart2, Video, Palmtree,
 } from 'lucide-react'
 import { AssignWorkDialog } from '@/components/assign-work-dialog'
@@ -69,6 +69,16 @@ interface PendingRequest {
   status: string
 }
 
+interface StrategicTask {
+  id: string
+  name: string
+  requestTitle: string
+  status: string
+  estimatedHours: number
+  startDate: string | null
+  endDate: string | null
+}
+
 interface Resource {
   id: string; name: string; email: string; role: string
   capacityPct: number
@@ -92,6 +102,7 @@ interface Resource {
   leaveDates?: string[]
   isOnLeaveToday?: boolean
   completedTasks?: CompletedTask[]
+  strategicTasks?: StrategicTask[]
   allocations: Array<{
     allocationPct: number
     project: { id: string; name: string; status: string }
@@ -671,6 +682,42 @@ function EmployeeDetailDialog({ resource, open, onOpenChange, onLogMeeting }: {
                 </div>
               </div>
             ))
+          )}
+
+          {/* Strategic tasks */}
+          {(resource.strategicTasks?.length ?? 0) > 0 && (
+            <div>
+              <div className="flex items-center gap-2 mb-1.5">
+                <Target className="h-3.5 w-3.5 text-purple-500" />
+                <span className="text-xs font-semibold text-purple-600 dark:text-purple-400 uppercase tracking-wide">
+                  Strategic Tasks ({resource.strategicTasks!.length})
+                </span>
+                <span className="text-xs text-muted-foreground ml-auto">
+                  {resource.strategicTasks!.reduce((s, t) => s + (t.estimatedHours || 0), 0)}h total
+                </span>
+              </div>
+              <div className="space-y-1.5">
+                {resource.strategicTasks!.map(st => (
+                  <div key={st.id} className="border border-purple-200 dark:border-purple-900 rounded-lg px-3 py-2 flex items-center gap-3">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate">{st.name}</p>
+                      <p className="text-xs text-muted-foreground truncate">
+                        {st.requestTitle}
+                        {st.startDate && ` · ${fmtDate(st.startDate)} – ${fmtDate(st.endDate)}`}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <span className={`text-xs px-1.5 py-0.5 rounded ${STATUS_COLORS[st.status] ?? 'bg-slate-100 text-slate-600'}`}>
+                        {st.status.replace('_', ' ')}
+                      </span>
+                      <span className="text-xs font-semibold text-purple-600 w-10 text-right">
+                        {st.estimatedHours > 0 ? `${st.estimatedHours}h` : '—'}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
           )}
 
           {/* Pending requests */}
