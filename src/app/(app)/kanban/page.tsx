@@ -473,6 +473,24 @@ export default function KanbanPage() {
                                   </div>
                                 )}
 
+                                {/* Early / late badge — only on completed non-strategic tasks */}
+                                {task.status === 'COMPLETED' && !task._isStrategic && task.endDate && (() => {
+                                  const diffDays = Math.round(
+                                    (new Date(task.statusChangedAt).getTime() - new Date(task.endDate).getTime())
+                                    / (24 * 60 * 60 * 1000)
+                                  )
+                                  if (diffDays === 0) return null
+                                  return (
+                                    <div className={`mt-1 text-[10px] px-1.5 py-0.5 rounded font-medium inline-block ${
+                                      diffDays < 0
+                                        ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
+                                        : 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
+                                    }`}>
+                                      {diffDays < 0 ? `✓ ${Math.abs(diffDays)}d early` : `⚠ ${diffDays}d late`}
+                                    </div>
+                                  )
+                                })()}
+
                                 {/* Action buttons — only for regular (non-strategic) tasks */}
                                 {!task._isStrategic && task.status === 'IN_PROGRESS' && task.ownerId === user?.id && (
                                   <div className="mt-2" onClick={(e) => e.stopPropagation()}>

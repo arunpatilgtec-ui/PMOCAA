@@ -33,6 +33,52 @@ function countWorkingDays(start: Date, end: Date): number {
   return Math.max(1, count)
 }
 
+// Returns regular + delayed daily hours for COMPLETED tasks.
+// Regular = days within the originally planned endDate.
+// Delayed = days after endDate but before statusChangedAt (actual finish).
+function calcCompletedHours(
+  tasks: Array<{
+    estimatedHours: number | null
+    startDate: Date | null
+    endDate: Date | null
+    statusChangedAt: Date | null
+  }>,
+  rangeStart: Date,
+  rangeEnd: Date
+): { regular: Record<string, number>; delayed: Record<string, number> } {
+  const regular: Record<string, number> = {}
+  const delayed: Record<string, number> = {}
+  for (const task of tasks) {
+    if (!task.statusChangedAt) continue
+    const hrs = task.estimatedHours ?? 0
+    if (hrs === 0) continue
+    // Work window = startDate → statusChangedAt (the actual time span)
+    const workStart = task.startDate ?? new Date(task.statusChangedAt.getTime() - 7 * 24 * 60 * 60 * 1000)
+    const workEnd   = task.statusChangedAt
+    const overlapStart = new Date(Math.max(workStart.getTime(), rangeStart.getTime()))
+    const overlapEnd   = new Date(Math.min(workEnd.getTime(),   rangeEnd.getTime()))
+    if (overlapStart > overlapEnd) continue
+    const totalDays = countWorkingDays(workStart, workEnd)
+    const hpd = hrs / totalDays
+    const curr = new Date(overlapStart)
+    curr.setHours(0, 0, 0, 0)
+    while (curr <= overlapEnd) {
+      const dow = curr.getDay()
+      if (dow !== 0 && dow !== 6) {
+        const key = curr.toISOString().slice(0, 10)
+        // Day is "delayed" if it falls after the original planned endDate
+        if (task.endDate && curr > task.endDate) {
+          delayed[key] = (delayed[key] ?? 0) + hpd
+        } else {
+          regular[key] = (regular[key] ?? 0) + hpd
+        }
+      }
+      curr.setDate(curr.getDate() + 1)
+    }
+  }
+  return { regular, delayed }
+}
+
 // Returns a map of ISO-date → hours for every working day in the current week
 export function calcDailyHours(
   tasks: Array<{ estimatedHours: number; startDate: Date | null; endDate: Date | null }>,
@@ -168,6 +214,33 @@ export async function GET(req: NextRequest) {
       orderBy: { name: 'asc' },
     })
 
+    // Completed tasks in the last 60 days — hours spread over actual work window
+    const sixtyDaysAgo = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000)
+    const completedTasksAll = await prisma.task.findMany({
+      where: {
+        status: 'COMPLETED',
+        ownerId: { in: users.map(u => u.id) },
+        statusChangedAt: { gte: sixtyDaysAgo },
+      },
+      select: {
+        id: true,
+        name: true,
+        priority: true,
+        estimatedHours: true,
+        startDate: true,
+        endDate: true,
+        statusChangedAt: true,
+        ownerId: true,
+        workstream: { select: { id: true, name: true, project: { select: { id: true, name: true } } } },
+      },
+    })
+    const completedByUser = new Map<string, typeof completedTasksAll>()
+    for (const ct of completedTasksAll) {
+      if (!ct.ownerId) continue
+      if (!completedByUser.has(ct.ownerId)) completedByUser.set(ct.ownerId, [])
+      completedByUser.get(ct.ownerId)!.push(ct)
+    }
+
     // Strategic tasks for all active users (counted in utilization)
     const strategicTasksAll = await prisma.strategicTask.findMany({
       where: { assigneeId: { in: users.map(u => u.id) } },
@@ -232,11 +305,27 @@ export async function GET(req: NextRequest) {
       // dailyHoursMap covers the requested range (gantt) or current week (default)
       const dailyHoursMap = calcDailyHours(allWorkItems, rangeStart, rangeEnd)
 
+      // Merge completed task hours into dailyHoursMap (actual work window, capped at statusChangedAt)
+      const userCompletedTasks = completedByUser.get(user.id) ?? []
+      const { regular: cmpR, delayed: cmpD } = calcCompletedHours(userCompletedTasks, rangeStart, rangeEnd)
+      for (const [date, h] of Object.entries(cmpR)) dailyHoursMap[date] = (dailyHoursMap[date] ?? 0) + h
+      const delayedDailyHoursMap: Record<string, number> = {}
+      for (const [date, h] of Object.entries(cmpD)) {
+        delayedDailyHoursMap[date] = h
+        dailyHoursMap[date] = (dailyHoursMap[date] ?? 0) + h
+      }
+
       // Weekly stats always reflect the current week regardless of gantt range
-      const currentWeekMap = (fromParam || toParam)
-        ? calcDailyHours(allWorkItems, weekStart, weekEnd)
-        : dailyHoursMap
-      const dailyValues   = Object.values(currentWeekMap)
+      let currentWeekMap: Record<string, number>
+      if (fromParam || toParam) {
+        currentWeekMap = calcDailyHours(allWorkItems, weekStart, weekEnd)
+        const { regular: cwR, delayed: cwD } = calcCompletedHours(userCompletedTasks, weekStart, weekEnd)
+        for (const [date, h] of Object.entries(cwR)) currentWeekMap[date] = (currentWeekMap[date] ?? 0) + h
+        for (const [date, h] of Object.entries(cwD)) currentWeekMap[date] = (currentWeekMap[date] ?? 0) + h
+      } else {
+        currentWeekMap = dailyHoursMap
+      }
+      const dailyValues = Object.values(currentWeekMap)
 
       const thisWeekHours = Math.round(dailyValues.reduce((s, h) => s + h, 0) * 10) / 10
       const maxDailyHours = Math.round(Math.max(0, ...dailyValues) * 10) / 10
@@ -310,6 +399,7 @@ export async function GET(req: NextRequest) {
         reviewRequestHours,
         pendingRequestHours,
         dailyHoursMap,
+        delayedDailyHoursMap,
         // Utilization
         utilizationPct,
         // Overload flags
@@ -321,6 +411,17 @@ export async function GET(req: NextRequest) {
         // Leave
         leaveDates,
         isOnLeaveToday,
+        // Completed tasks (last 60 days) for detail dialog badges
+        completedTasks: userCompletedTasks.map(ct => ({
+          id: ct.id,
+          name: ct.name,
+          priority: ct.priority,
+          estimatedHours: ct.estimatedHours ?? 0,
+          startDate: ct.startDate?.toISOString() ?? null,
+          endDate: ct.endDate?.toISOString() ?? null,
+          statusChangedAt: ct.statusChangedAt?.toISOString() ?? null,
+          workstream: ct.workstream,
+        })),
       }
     })
 

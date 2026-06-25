@@ -1,0 +1,8 @@
+{
+  "crons": [
+    {
+      "path": "/api/cron/auto-backlog",
+      "schedule": "0 0 * * *"
+    }
+  ]
+}

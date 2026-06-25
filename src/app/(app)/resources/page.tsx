@@ -34,6 +34,30 @@ interface AssignedTask {
   }
 }
 
+interface CompletedTask {
+  id: string
+  name: string
+  priority: string
+  estimatedHours: number
+  startDate: string | null
+  endDate: string | null
+  statusChangedAt: string | null
+  workstream: {
+    id: string
+    name: string
+    project: { id: string; name: string }
+  }
+}
+
+function completionBadge(endDate: string | null, statusChangedAt: string | null) {
+  if (!endDate || !statusChangedAt) return null
+  const diffDays = Math.round(
+    (new Date(statusChangedAt).getTime() - new Date(endDate).getTime()) / (24 * 60 * 60 * 1000)
+  )
+  if (diffDays <= 0) return { label: `${Math.abs(diffDays)}d early`, cls: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' }
+  return { label: `${diffDays}d late`, cls: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400' }
+}
+
 interface PendingRequest {
   id: string
   title: string
@@ -64,8 +88,10 @@ interface Resource {
   activeTasks: number
   department?: string; title?: string
   dailyHoursMap: Record<string, number>
+  delayedDailyHoursMap?: Record<string, number>
   leaveDates?: string[]
   isOnLeaveToday?: boolean
+  completedTasks?: CompletedTask[]
   allocations: Array<{
     allocationPct: number
     project: { id: string; name: string; status: string }
@@ -241,6 +267,7 @@ function ResourceGanttView() {
           <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-orange-400 inline-block" /> 85–100%</span>
           <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-red-500 inline-block" /> Over</span>
           <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-purple-200 inline-block" /> On Leave</span>
+          <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-red-200 ring-1 ring-red-400 inline-block" /> Delayed work</span>
         </div>
       </div>
 
@@ -294,12 +321,18 @@ function ResourceGanttView() {
                     ? workingDays.map(day => {
                       const key = day.toISOString().slice(0, 10)
                       const h = Math.round((r.dailyHoursMap[key] ?? 0) * 10) / 10
+                      const delayedH = Math.round((r.delayedDailyHoursMap?.[key] ?? 0) * 10) / 10
                       const onLeave = (r.leaveDates ?? []).includes(key)
                       return (
                         <td key={key} className="px-1 py-1 text-center">
                           {onLeave ? (
                             <div className="rounded px-1 py-1 text-xs bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300">
                               Leave
+                            </div>
+                          ) : delayedH > 0 ? (
+                            <div className="rounded px-1 py-1 text-xs bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300 ring-1 ring-red-400" title={`${delayedH}h delayed past deadline`}>
+                              {h > 0 ? `${h}h` : '—'}
+                              <div className="text-[9px] opacity-75">+{delayedH}h late</div>
                             </div>
                           ) : (
                             <div className={`rounded px-1 py-1 text-xs ${cellBg(h, r.dailyCapacityHours)}`}>
@@ -669,6 +702,46 @@ function EmployeeDetailDialog({ resource, open, onOpenChange, onLogMeeting }: {
                     </span>
                   </div>
                 ))}
+              </div>
+            </div>
+          )}
+
+          {/* Completed tasks (last 60 days) with early/late badge */}
+          {(resource.completedTasks?.length ?? 0) > 0 && (
+            <div>
+              <div className="flex items-center gap-2 mb-1.5">
+                <ClipboardCheck className="h-3.5 w-3.5 text-green-600" />
+                <span className="text-xs font-semibold text-green-700 dark:text-green-400 uppercase tracking-wide">
+                  Completed Recently ({resource.completedTasks!.length})
+                </span>
+              </div>
+              <div className="space-y-1.5">
+                {resource.completedTasks!.map(ct => {
+                  const badge = completionBadge(ct.endDate, ct.statusChangedAt)
+                  return (
+                    <div key={ct.id} className="border border-green-200 dark:border-green-900 rounded-lg px-3 py-2 flex items-center gap-3">
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium truncate">{ct.name}</p>
+                        <p className="text-xs text-muted-foreground truncate">
+                          {ct.workstream.project.name === '__direct_assignments__'
+                            ? 'Direct Assignment'
+                            : `${ct.workstream.project.name} · ${ct.workstream.name}`}
+                          {ct.statusChangedAt && ` · completed ${fmtDate(ct.statusChangedAt)}`}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        {badge && (
+                          <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${badge.cls}`}>
+                            {badge.label}
+                          </span>
+                        )}
+                        <span className="text-xs font-semibold text-green-600 w-10 text-right">
+                          {ct.estimatedHours > 0 ? `${ct.estimatedHours}h` : '—'}
+                        </span>
+                      </div>
+                    </div>
+                  )
+                })}
               </div>
             </div>
           )}
