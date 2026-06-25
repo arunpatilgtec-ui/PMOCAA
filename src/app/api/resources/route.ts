@@ -168,6 +168,25 @@ export async function GET(req: NextRequest) {
       orderBy: { name: 'asc' },
     })
 
+    // Strategic tasks for all active users (counted in utilization)
+    const strategicTasksAll = await prisma.strategicTask.findMany({
+      where: { assigneeId: { in: users.map(u => u.id) } },
+      select: {
+        assigneeId: true,
+        estimatedHours: true,
+        hoursPerDay: true,
+        isRecurring: true,
+        startDate: true,
+        endDate: true,
+      },
+    })
+    const strategicByUser = new Map<string, typeof strategicTasksAll>()
+    for (const st of strategicTasksAll) {
+      if (!st.assigneeId) continue
+      if (!strategicByUser.has(st.assigneeId)) strategicByUser.set(st.assigneeId, [])
+      strategicByUser.get(st.assigneeId)!.push(st)
+    }
+
     const today = new Date()
     today.setHours(0, 0, 0, 0)
 
@@ -194,8 +213,21 @@ export async function GET(req: NextRequest) {
 
       const pendingRequestItems = user.assignedRequests.map(toWorkItem)
 
-      // Tasks (approved) + REVIEW requests drive utilization and gantt hours
-      const allWorkItems = [...user.ownedTasks, ...reviewRequestItems]
+      // Strategic tasks also count toward utilization
+      const userStrategicItems = (strategicByUser.get(user.id) ?? []).map(st => {
+        let estimatedHours: number
+        if (st.isRecurring && st.hoursPerDay) {
+          const s = st.startDate ?? new Date()
+          const e = st.endDate ?? new Date(s.getTime() + 90 * 24 * 60 * 60 * 1000)
+          estimatedHours = st.hoursPerDay * countWorkingDays(s, e)
+        } else {
+          estimatedHours = st.estimatedHours ?? 0
+        }
+        return { estimatedHours, startDate: st.startDate, endDate: st.endDate }
+      })
+
+      // Tasks (approved) + REVIEW requests + strategic tasks drive utilization
+      const allWorkItems = [...user.ownedTasks, ...reviewRequestItems, ...userStrategicItems]
 
       // dailyHoursMap covers the requested range (gantt) or current week (default)
       const dailyHoursMap = calcDailyHours(allWorkItems, rangeStart, rangeEnd)

@@ -77,6 +77,8 @@ interface Task {
   statusChangedAt: string
   owner?: { id: string; name: string; avatarUrl?: string }
   workstream: { id: string; name: string; project: { id: string; name: string } }
+  _isStrategic?: boolean
+  _srId?: string
 }
 
 interface Project { id: string; name: string }
@@ -144,6 +146,9 @@ export default function KanbanPage() {
   const [editAssigneeId, setEditAssigneeId] = useState<string | null>(null)
   const [savingAssignee, setSavingAssignee] = useState(false)
 
+  // Strategic task detail (simple read-only view)
+  const [strategicDetailTask, setStrategicDetailTask] = useState<Task | null>(null)
+
   const canEditAssignee = !!(user && (
     ['ADMIN', 'PLANNER'].includes(user.role) ||
     (user.role === 'PROJECT_LEAD' && detailFull?.workstream?.project?.leadId === user.id)
@@ -154,12 +159,17 @@ export default function KanbanPage() {
 
   const load = useCallback(async () => {
     try {
-      const [taskRes, projRes] = await Promise.all([
+      const [taskRes, projRes, srRes] = await Promise.all([
         fetch('/api/tasks'),
         fetch('/api/projects'),
+        fetch('/api/strategic-tasks'),
       ])
-      const [taskData, projData] = await Promise.all([taskRes.json(), projRes.json()])
-      setTasks(Array.isArray(taskData) ? taskData : [])
+      const [taskData, projData, srData] = await Promise.all([taskRes.json(), projRes.json(), srRes.json()])
+      const allTasks = [
+        ...(Array.isArray(taskData) ? taskData : []),
+        ...(Array.isArray(srData) ? srData : []),
+      ]
+      setTasks(allTasks)
       setProjects(Array.isArray(projData) ? projData : [])
     } finally {
       setLoading(false)
@@ -220,6 +230,7 @@ export default function KanbanPage() {
     const newStatus = destination.droppableId
     const task = tasks.find((t) => t.id === draggableId)
     if (!task || task.status === newStatus) return
+    if (task._isStrategic) return  // Strategic tasks are not draggable
 
     // Optimistic update
     setTasks((prev) =>
@@ -244,6 +255,10 @@ export default function KanbanPage() {
   }
 
   async function openDetail(task: Task) {
+    if (task._isStrategic) {
+      setStrategicDetailTask(task)
+      return
+    }
     setDetailFull(null)
     setDetailLoading(true)
     setDetailOpen(true)
@@ -376,47 +391,64 @@ export default function KanbanPage() {
                         }`}
                       >
                         {colTasks.map((task, index) => (
-                          <Draggable key={task.id} draggableId={task.id} index={index}>
+                          <Draggable key={task.id} draggableId={task.id} index={index} isDragDisabled={!!task._isStrategic}>
                             {(drag, dragSnapshot) => (
                               <div
                                 ref={drag.innerRef}
                                 {...drag.draggableProps}
-                                className={`bg-card rounded-lg border border-border border-l-4 ${PRIORITY_COLORS[task.priority]} p-3 shadow-sm hover:shadow-md transition-shadow cursor-pointer ${dragSnapshot.isDragging ? 'shadow-lg rotate-1' : ''}`}
+                                className={`bg-card rounded-lg border border-border border-l-4 ${
+                                  task._isStrategic ? 'border-l-purple-400' : PRIORITY_COLORS[task.priority]
+                                } p-3 shadow-sm hover:shadow-md transition-shadow cursor-pointer ${dragSnapshot.isDragging ? 'shadow-lg rotate-1' : ''}`}
                                 onClick={() => openDetail(task)}
                               >
                                 <div className="flex items-start gap-2">
                                   <div
                                     {...drag.dragHandleProps}
-                                    className="mt-0.5 text-muted-foreground"
+                                    className={`mt-0.5 text-muted-foreground ${task._isStrategic ? 'invisible w-0 overflow-hidden' : ''}`}
                                     onClick={(e) => e.stopPropagation()}
                                   >
                                     <GripVertical className="h-3.5 w-3.5" />
                                   </div>
                                   <div className="flex-1 min-w-0">
-                                    <p className="text-sm font-medium leading-tight line-clamp-2">{task.name}</p>
-                                    <p className="text-xs text-muted-foreground mt-0.5 truncate">
-                                      {task.workstream.project.name === '__direct_assignments__'
-                                        ? 'Direct Assignment'
-                                        : `${task.workstream.project.name} · ${task.workstream.name}`}
-                                    </p>
-                                    <div className="flex items-center gap-1.5 mt-0.5">
-                                      <span className="text-[10px] text-muted-foreground/70">
-                                        · {timeInStatus(task.statusChangedAt)} in status
-                                      </span>
-                                      {task.reworkCount > 0 && (
-                                        <span className="text-[10px] bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400 px-1 rounded">
-                                          ↩ {task.reworkCount}
-                                        </span>
+                                    <div className="flex items-start gap-1">
+                                      {task._isStrategic && (
+                                        <span className="text-[10px] font-semibold text-purple-600 dark:text-purple-400 shrink-0 mt-0.5">★</span>
                                       )}
+                                      <p className="text-sm font-medium leading-tight line-clamp-2">{task.name}</p>
                                     </div>
+                                    <p className="text-xs text-muted-foreground mt-0.5 truncate">
+                                      {task._isStrategic
+                                        ? task.workstream.name
+                                        : task.workstream.project.name === '__direct_assignments__'
+                                          ? 'Direct Assignment'
+                                          : `${task.workstream.project.name} · ${task.workstream.name}`}
+                                    </p>
+                                    {!task._isStrategic && (
+                                      <div className="flex items-center gap-1.5 mt-0.5">
+                                        <span className="text-[10px] text-muted-foreground/70">
+                                          · {timeInStatus(task.statusChangedAt)} in status
+                                        </span>
+                                        {task.reworkCount > 0 && (
+                                          <span className="text-[10px] bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400 px-1 rounded">
+                                            ↩ {task.reworkCount}
+                                          </span>
+                                        )}
+                                      </div>
+                                    )}
                                   </div>
                                 </div>
 
                                 <div className="mt-2 flex items-center justify-between gap-2">
                                   <div className="flex items-center gap-1.5">
-                                    <span className={`text-xs px-1.5 py-0.5 rounded ${PRIORITY_BADGE[task.priority]}`}>
-                                      {task.priority}
-                                    </span>
+                                    {task._isStrategic ? (
+                                      <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300">
+                                        Strategic
+                                      </span>
+                                    ) : (
+                                      <span className={`text-xs px-1.5 py-0.5 rounded ${PRIORITY_BADGE[task.priority]}`}>
+                                        {task.priority}
+                                      </span>
+                                    )}
                                     {task.estimatedHours > 0 && (
                                       <span className="text-xs text-muted-foreground flex items-center gap-0.5">
                                         <Clock className="h-3 w-3" />{task.estimatedHours}h
@@ -441,8 +473,8 @@ export default function KanbanPage() {
                                   </div>
                                 )}
 
-                                {/* Action buttons — stopPropagation so they don't open the detail dialog */}
-                                {task.status === 'IN_PROGRESS' && task.ownerId === user?.id && (
+                                {/* Action buttons — only for regular (non-strategic) tasks */}
+                                {!task._isStrategic && task.status === 'IN_PROGRESS' && task.ownerId === user?.id && (
                                   <div className="mt-2" onClick={(e) => e.stopPropagation()}>
                                     <Button
                                       size="sm"
@@ -460,7 +492,7 @@ export default function KanbanPage() {
                                   </div>
                                 )}
 
-                                {task.status === 'REVIEW' && canReview(task) && (
+                                {!task._isStrategic && task.status === 'REVIEW' && canReview(task) && (
                                   <div className="mt-2 flex gap-1" onClick={(e) => e.stopPropagation()}>
                                     <Button
                                       size="sm"
@@ -487,7 +519,7 @@ export default function KanbanPage() {
                                   </div>
                                 )}
 
-                                {task.status === 'REWORK' && task.ownerId === user?.id && (
+                                {!task._isStrategic && task.status === 'REWORK' && task.ownerId === user?.id && (
                                   <div className="mt-2" onClick={(e) => e.stopPropagation()}>
                                     <Button
                                       size="sm"
@@ -756,6 +788,52 @@ export default function KanbanPage() {
               </div>
             )
           })()}
+        </DialogContent>
+      </Dialog>
+
+      {/* Strategic task detail dialog */}
+      <Dialog open={!!strategicDetailTask} onOpenChange={(o) => { if (!o) setStrategicDetailTask(null) }}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <span className="text-purple-600">★</span> Strategic Task
+            </DialogTitle>
+          </DialogHeader>
+          {strategicDetailTask && (
+            <div className="space-y-3 py-1">
+              <div>
+                <p className="text-sm font-semibold leading-snug">{strategicDetailTask.name}</p>
+                <p className="text-xs text-muted-foreground mt-0.5">{strategicDetailTask.workstream.name}</p>
+              </div>
+              {strategicDetailTask.owner && (
+                <div className="flex items-center gap-2 text-sm">
+                  <User2 className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                  <span>{strategicDetailTask.owner.name}</span>
+                </div>
+              )}
+              {(strategicDetailTask.startDate || strategicDetailTask.endDate) && (
+                <div className="flex items-center gap-2 text-sm">
+                  <Calendar className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                  <span>
+                    {strategicDetailTask.startDate && format(new Date(strategicDetailTask.startDate), 'MMM d')}
+                    {strategicDetailTask.startDate && strategicDetailTask.endDate && ' – '}
+                    {strategicDetailTask.endDate && format(new Date(strategicDetailTask.endDate), 'MMM d, yyyy')}
+                  </span>
+                </div>
+              )}
+              {strategicDetailTask.estimatedHours > 0 && (
+                <div className="flex items-center gap-2 text-sm">
+                  <Clock className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                  <span>{strategicDetailTask.estimatedHours}h estimated</span>
+                </div>
+              )}
+              <div className="pt-1 border-t border-border">
+                <a href="/requests" className="text-xs text-blue-600 hover:underline dark:text-blue-400">
+                  → Manage in Strategic Requests
+                </a>
+              </div>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
 

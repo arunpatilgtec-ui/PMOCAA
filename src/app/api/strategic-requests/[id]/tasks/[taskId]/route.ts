@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { requireAuth } from '@/lib/auth'
+import { createNotification } from '@/lib/notifications'
 
 type Ctx = { params: Promise<{ id: string; taskId: string }> }
 
@@ -21,6 +22,12 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
     if (!canEdit) return Response.json({ error: 'Forbidden' }, { status: 403 })
 
     const data = await req.json()
+
+    // Fetch existing task to detect assignee change
+    const existing = await prisma.strategicTask.findUnique({
+      where: { id: taskId, strategicRequestId: id },
+      select: { assigneeId: true, title: true },
+    })
 
     const task = await prisma.strategicTask.update({
       where: { id: taskId, strategicRequestId: id },
@@ -43,6 +50,23 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
       },
       include: { assignee: { select: { id: true, name: true } } },
     })
+
+    // Notify new assignee if assignee changed
+    const newAssigneeId = data.assigneeId !== undefined ? (data.assigneeId || null) : existing?.assigneeId
+    if (
+      data.assigneeId !== undefined &&
+      data.assigneeId &&
+      data.assigneeId !== existing?.assigneeId
+    ) {
+      await createNotification({
+        type: 'TASK_ASSIGNED',
+        title: 'Strategic Task Assigned',
+        message: `You have been assigned to: ${existing?.title ?? task.title}`,
+        userId: newAssigneeId!,
+        senderId: session.id,
+        actionUrl: '/requests',
+      })
+    }
 
     return Response.json(task)
   } catch (err: unknown) {

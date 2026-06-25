@@ -27,6 +27,8 @@ interface Task {
   ownerId?: string
   owner?: { id: string; name: string }
   workstream: { id: string; name: string; project: { id: string; name: string } }
+  _isStrategic?: boolean
+  _srId?: string
 }
 
 interface User {
@@ -122,14 +124,14 @@ export default function GanttPage() {
   useEffect(() => { zoomRef.current = zoom }, [zoom])
   useEffect(() => {
     userRef.current = user
-    canEditRef.current = !!(user && ['ADMIN', 'PLANNER', 'PROJECT_LEAD'].includes(user.role))
+    canEditRef.current = !!(user && ['ADMIN', 'PLANNER', 'PROJECT_LEAD', 'MANAGER'].includes(user.role))
   }, [user])
   useEffect(() => { localTasksRef.current = localTasks }, [localTasks])
   useEffect(() => { projectsRef.current = projects }, [projects])
 
-  // Can this user edit tasks in a specific project?
+  // Can this user drag/resize a task? Strategic tasks are never draggable.
   function taskIsEditable(task: Task): boolean {
-    if (!user) return false
+    if (!user || task._isStrategic) return false
     if (['ADMIN', 'PLANNER'].includes(user.role)) return true
     if (user.role === 'PROJECT_LEAD') {
       const proj = projects.find(p => p.id === task.workstream.project.id)
@@ -138,20 +140,35 @@ export default function GanttPage() {
     return false
   }
 
-  const canEdit = !!(user && ['ADMIN', 'PLANNER', 'PROJECT_LEAD'].includes(user.role))
+  const canEdit = !!(user && ['ADMIN', 'PLANNER', 'PROJECT_LEAD', 'MANAGER'].includes(user.role))
 
-  // Load tasks + projects
+  function openStrategicEditForm(task: Task) {
+    setEditForm({
+      taskId: task.id, name: task.name, status: task.status,
+      startDate: task.startDate?.slice(0, 10) ?? '',
+      endDate: task.endDate?.slice(0, 10) ?? '',
+      ownerId: task.ownerId ?? '',
+      projName: 'Strategic Tasks',
+      wsName: task.workstream.name,
+    })
+  }
+
+  // Load tasks + projects + strategic tasks
   useEffect(() => {
     let cancelled = false
     async function load() {
       try {
-        const [taskRes, projRes] = await Promise.all([
-          fetch(`/api/tasks${selectedProject && selectedProject !== 'ALL' ? `?projectId=${selectedProject}` : ''}`),
+        const isAll = !selectedProject || selectedProject === 'ALL'
+        const [taskRes, projRes, srRes] = await Promise.all([
+          fetch(`/api/tasks${!isAll ? `?projectId=${selectedProject}` : ''}`),
           fetch('/api/projects'),
+          isAll ? fetch('/api/strategic-tasks') : Promise.resolve(null),
         ])
         const [taskData, projData] = await Promise.all([taskRes.json(), projRes.json()])
+        const srData = srRes ? await srRes.json() : []
         if (cancelled) return
-        const taskArr = Array.isArray(taskData) ? taskData : []
+        const srTasks = Array.isArray(srData) ? srData : []
+        const taskArr = [...(Array.isArray(taskData) ? taskData : []), ...srTasks]
         setTasks(taskArr)
         setLocalTasks(taskArr)
         localTasksRef.current = taskArr
@@ -382,9 +399,39 @@ export default function GanttPage() {
     setEditSaving(true)
     try {
       const task = localTasks.find(t => t.id === editForm.taskId)
+
+      // Strategic task: save to different API endpoint
+      if (task?._isStrategic && task._srId) {
+        const res = await fetch(`/api/strategic-requests/${task._srId}/tasks/${task.id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            title: editForm.name,
+            startDate: editForm.startDate || null,
+            endDate: editForm.endDate || null,
+            assigneeId: editForm.ownerId || null,
+          }),
+        })
+        if (!res.ok) { toast.error('Failed to save task'); return }
+        const updatedTask = await res.json()
+        const patch = {
+          name: updatedTask.title ?? editForm.name,
+          startDate: updatedTask.startDate ? (updatedTask.startDate as string).slice(0, 10) : undefined,
+          endDate: updatedTask.endDate ? (updatedTask.endDate as string).slice(0, 10) : undefined,
+          ownerId: updatedTask.assigneeId ?? undefined,
+          owner: updatedTask.assignee ?? undefined,
+        }
+        setLocalTasks(prev => prev.map(t => t.id === editForm.taskId ? { ...t, ...patch } : t))
+        setTasks(prev => prev.map(t => t.id === editForm.taskId ? { ...t, ...patch } : t))
+        toast.success('Task saved')
+        setEditForm(null)
+        setUserSearch('')
+        return
+      }
+
       const taskProject = projects.find(p => p.id === task?.workstream.project.id)
 
-      // Permission check
+      // Permission check for regular tasks
       const isAdminOrPlanner = user && ['ADMIN', 'PLANNER'].includes(user.role)
       const isTaskLead = user?.role === 'PROJECT_LEAD' && taskProject?.leadId === user.id
       if (!isAdminOrPlanner && !isTaskLead) {
@@ -609,11 +656,13 @@ export default function GanttPage() {
     return (
       <div
         className={`absolute top-1/2 -translate-y-1/2 rounded overflow-hidden ${barBg} text-white select-none ${
-          editable ? 'cursor-grab active:cursor-grabbing' : ''
+          editable ? 'cursor-grab active:cursor-grabbing' :
+          task._isStrategic && canEdit ? 'cursor-pointer' : ''
         } ${isEditing ? 'ring-2 ring-white ring-offset-1' : ''}`}
         style={{ left: clampedLeft, width: clampedWidth, height: 24 }}
-        title={`${task.name}${task.owner ? ` · ${task.owner.name}` : ''} · ${task.status}`}
+        title={`${task.name}${task.owner ? ` · ${task.owner.name}` : ''} · ${task.status}${task._isStrategic ? ' (Strategic)' : ''}`}
         onMouseDown={editable ? (e) => startDrag(e, task.id, 'move') : undefined}
+        onClick={task._isStrategic && canEdit ? () => openStrategicEditForm(task) : undefined}
       >
         {/* Progress overlay */}
         {pct > 0 && (
@@ -623,8 +672,8 @@ export default function GanttPage() {
         <span className="px-2 text-xs font-medium leading-6 whitespace-nowrap truncate block relative z-10 pr-5">
           {dayW >= 28 ? task.name : ''}
         </span>
-        {/* Resize handle — right edge */}
-        {editable && (
+        {/* Resize handle — right edge (not for strategic tasks) */}
+        {editable && !task._isStrategic && (
           <div
             className="absolute right-0 top-0 bottom-0 w-5 flex items-center justify-center cursor-col-resize hover:bg-black/20 z-20"
             onMouseDown={(e) => { e.stopPropagation(); startDrag(e, task.id, 'resize') }}
@@ -632,6 +681,10 @@ export default function GanttPage() {
           >
             <GripHorizontal className="h-3 w-3 text-white/60" />
           </div>
+        )}
+        {/* Strategic indicator */}
+        {task._isStrategic && (
+          <span className="absolute right-1 top-1/2 -translate-y-1/2 text-[9px] font-bold text-white/70">★</span>
         )}
       </div>
     )
@@ -782,10 +835,13 @@ export default function GanttPage() {
                       row.type === 'workstream' ? 'bg-muted/20 hover:bg-muted/30' : 'hover:bg-muted/10'
                     } ${editForm?.taskId === row.task?.id ? 'ring-1 ring-inset ring-blue-400' : ''}`}
                     style={{ height: ROW_HEIGHT }}>
-                    <div style={{ width: labelWidth, minWidth: labelWidth, paddingLeft: 8 + row.depth * 12, position: 'sticky', left: 0, zIndex: 5 }}
+                    <div
+                      style={{ width: labelWidth, minWidth: labelWidth, paddingLeft: 8 + row.depth * 12, position: 'sticky', left: 0, zIndex: 5 }}
                       className={`shrink-0 border-r border-border flex items-center gap-2 overflow-hidden ${
                         row.type === 'project' ? 'bg-muted/40' : row.type === 'workstream' ? 'bg-muted/20' : 'bg-background'
-                      }`}>
+                      } ${row.task?._isStrategic && canEdit ? 'cursor-pointer' : ''}`}
+                      onClick={row.task?._isStrategic && canEdit ? () => openStrategicEditForm(row.task!) : undefined}
+                    >
                       <span className={`text-sm truncate flex-1 ${
                         row.type === 'project' ? 'font-bold' :
                         row.type === 'workstream' ? 'font-medium text-muted-foreground' : ''
@@ -840,28 +896,40 @@ export default function GanttPage() {
                 />
               </div>
 
-              {/* Status */}
-              <div className="space-y-1.5">
-                <Label className="text-xs">Status</Label>
-                <Select
-                  value={editForm.status}
-                  onValueChange={v => { if (v) setEditForm(f => f ? { ...f, status: v } : f) }}
-                >
-                  <SelectTrigger className="h-8 text-sm">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {STATUS_OPTIONS.map(s => (
-                      <SelectItem key={s} value={s}>
-                        <div className="flex items-center gap-2">
-                          <div className={`h-2 w-2 rounded-full ${TASK_STATUS_BG[s]}`} />
-                          {STATUS_LABELS[s]}
-                        </div>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+              {/* Status — hidden for strategic tasks (status is derived from dates) */}
+              {!localTasks.find(t => t.id === editForm.taskId)?._isStrategic && (
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Status</Label>
+                  <Select
+                    value={editForm.status}
+                    onValueChange={v => { if (v) setEditForm(f => f ? { ...f, status: v } : f) }}
+                  >
+                    <SelectTrigger className="h-8 text-sm">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {STATUS_OPTIONS.map(s => (
+                        <SelectItem key={s} value={s}>
+                          <div className="flex items-center gap-2">
+                            <div className={`h-2 w-2 rounded-full ${TASK_STATUS_BG[s]}`} />
+                            {STATUS_LABELS[s]}
+                          </div>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+              {localTasks.find(t => t.id === editForm.taskId)?._isStrategic && (
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Status</Label>
+                  <div className="flex items-center gap-2 px-2.5 py-1.5 bg-muted/40 rounded-md text-sm text-muted-foreground">
+                    <div className={`h-2 w-2 rounded-full ${TASK_STATUS_BG[editForm.status] ?? 'bg-slate-400'}`} />
+                    {STATUS_LABELS[editForm.status] ?? editForm.status}
+                    <span className="text-xs ml-1">(derived from dates)</span>
+                  </div>
+                </div>
+              )}
 
               {/* Dates */}
               <div className="grid grid-cols-2 gap-2">
