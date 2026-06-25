@@ -80,6 +80,7 @@ interface Leave {
   reason?: string
   tasksShifted: number
   createdAt: string
+  user?: { id: string; name: string }
 }
 
 interface StrategicRequest {
@@ -1310,6 +1311,7 @@ export default function RequestsPage() {
                 <Select
                   value={meetDuration}
                   onValueChange={v => {
+                    if (!v) return
                     setMeetDuration(v)
                     setMeetEnd(calcEndTime(meetStart, v))
                   }}
@@ -1349,7 +1351,7 @@ export default function RequestsPage() {
         <div className="space-y-3">
           <div className="flex items-center justify-between gap-3">
             {canManageLeave && leaveUsers.length > 0 ? (
-              <Select value={leaveForId || '__self__'} onValueChange={v => setLeaveForId(v === '__self__' ? '' : v)}>
+              <Select value={leaveForId || '__self__'} onValueChange={v => { if (v) setLeaveForId(v === '__self__' ? '' : v) }}>
                 <SelectTrigger className="w-48 h-8 text-sm">
                   <SelectValue />
                 </SelectTrigger>
@@ -1429,7 +1431,7 @@ export default function RequestsPage() {
             {canManageLeave && (
               <div className="space-y-1.5">
                 <Label>Employee</Label>
-                <Select value={leaveForId || '__self__'} onValueChange={v => setLeaveForId(v === '__self__' ? '' : v)}>
+                <Select value={leaveForId || '__self__'} onValueChange={v => { if (v) setLeaveForId(v === '__self__' ? '' : v) }}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="__self__">Myself</SelectItem>
