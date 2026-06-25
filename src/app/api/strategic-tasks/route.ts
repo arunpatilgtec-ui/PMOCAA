@@ -1,14 +1,6 @@
 import { requireAuth } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 
-function inferStatus(startDate: Date | null, endDate: Date | null): string {
-  const now = new Date()
-  if (!startDate) return 'PLANNED'
-  if (startDate > now) return 'PLANNED'
-  if (!endDate || endDate >= now) return 'IN_PROGRESS'
-  return 'COMPLETED'
-}
-
 export async function GET() {
   try {
     const session = await requireAuth()
@@ -34,7 +26,7 @@ export async function GET() {
       return {
         id: t.id,
         name: t.title,
-        status: t.status ?? inferStatus(t.startDate, t.endDate),
+        status: t.status ?? 'PLANNED',
         priority: 'MEDIUM',
         startDate: t.startDate?.toISOString(),
         endDate: t.endDate?.toISOString(),
