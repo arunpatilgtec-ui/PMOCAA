@@ -197,9 +197,19 @@ export default function RequestsPage() {
   const [meetTitle,      setMeetTitle]      = useState('')
   const [meetDate,       setMeetDate]       = useState('')
   const [meetStart,      setMeetStart]      = useState('')
+  const [meetDuration,   setMeetDuration]   = useState('1')
   const [meetEnd,        setMeetEnd]        = useState('')
   const [meetDesc,       setMeetDesc]       = useState('')
   const [meetSubmit,     setMeetSubmit]     = useState(false)
+
+  function calcEndTime(start: string, durationHrs: string): string {
+    if (!start) return ''
+    const [h, m] = start.split(':').map(Number)
+    const totalMins = h * 60 + m + Math.round(parseFloat(durationHrs) * 60)
+    const endH = Math.floor(totalMins / 60) % 24
+    const endM = totalMins % 60
+    return `${String(endH).padStart(2, '0')}:${String(endM).padStart(2, '0')}`
+  }
 
   // Edit regular request
   const [editReqId,      setEditReqId]      = useState<string | null>(null)
@@ -346,7 +356,8 @@ export default function RequestsPage() {
   async function submitMeeting() {
     if (!meetTitle.trim()) { toast.error('Title is required'); return }
     if (!meetDate) { toast.error('Date is required'); return }
-    if (!meetStart || !meetEnd) { toast.error('Start and end times are required'); return }
+    if (!meetStart) { toast.error('Start time is required'); return }
+    if (!meetEnd)   { toast.error('Select a start time to calculate end time'); return }
     if (meetEnd <= meetStart) { toast.error('End time must be after start time'); return }
     setMeetSubmit(true)
     try {
@@ -362,7 +373,7 @@ export default function RequestsPage() {
         ? `Meeting logged — ${shifted} task${shifted !== 1 ? 's' : ''} rescheduled (${data.durationHours?.toFixed(1)}h meeting)`
         : 'Meeting logged')
       setMeetingOpen(false)
-      setMeetTitle(''); setMeetDate(''); setMeetStart(''); setMeetEnd(''); setMeetDesc('')
+      setMeetTitle(''); setMeetDate(''); setMeetStart(''); setMeetDuration('1'); setMeetEnd(''); setMeetDesc('')
       setMeetings(prev => [data, ...prev])
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : 'Failed to log meeting')
@@ -1267,13 +1278,40 @@ export default function RequestsPage() {
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <Label>Start Time *</Label>
-                <Input type="time" value={meetStart} onChange={e => setMeetStart(e.target.value)} />
+                <Input
+                  type="time"
+                  value={meetStart}
+                  onChange={e => {
+                    setMeetStart(e.target.value)
+                    setMeetEnd(calcEndTime(e.target.value, meetDuration))
+                  }}
+                />
               </div>
               <div className="space-y-1.5">
-                <Label>End Time *</Label>
-                <Input type="time" value={meetEnd} onChange={e => setMeetEnd(e.target.value)} />
+                <Label>Duration *</Label>
+                <Select
+                  value={meetDuration}
+                  onValueChange={v => {
+                    setMeetDuration(v)
+                    setMeetEnd(calcEndTime(meetStart, v))
+                  }}
+                >
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {['0.5','1','1.5','2','2.5','3','3.5','4','4.5','5','6','7','8'].map(d => (
+                      <SelectItem key={d} value={d}>
+                        {parseFloat(d) < 1 ? `${parseFloat(d) * 60} min` : `${d} hr${parseFloat(d) !== 1 ? 's' : ''}`}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
             </div>
+            {meetEnd && (
+              <p className="text-xs text-muted-foreground -mt-2">
+                End time: <span className="font-medium text-foreground">{meetEnd}</span>
+              </p>
+            )}
             <div className="space-y-1.5">
               <Label>Notes (optional)</Label>
               <Textarea placeholder="Agenda, attendees, decisions…" rows={2} value={meetDesc} onChange={e => setMeetDesc(e.target.value)} />
