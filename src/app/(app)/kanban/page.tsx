@@ -124,7 +124,7 @@ export default function KanbanPage() {
   const [projects, setProjects] = useState<Project[]>([])
   const [loading, setLoading] = useState(true)
   const [projectFilter, setProjectFilter] = useState<string | null>('ALL')
-  const [ownerFilter, setOwnerFilter] = useState<string | null>(searchParams.get('owner') ?? 'ALL')
+  const [ownerFilter, setOwnerFilter] = useState<string | null>(searchParams.get('owner') ?? 'ME')
   const [allUsers, setAllUsers] = useState<Array<{ id: string; name: string }>>([])
 
   useEffect(() => {
