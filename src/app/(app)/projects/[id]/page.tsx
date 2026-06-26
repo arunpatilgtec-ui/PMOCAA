@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { useAuthStore, isPlanner, canAllocateResources } from '@/store/auth'
 import { toast } from 'sonner'
@@ -85,6 +85,7 @@ export default function ProjectDetailPage() {
   const [loading, setLoading] = useState(true)
   const [wizardOpen, setWizardOpen] = useState(false)
   const [activeTab, setActiveTab] = useState('report')
+  const teardownMigratedRef = useRef(false)
 
   // Edit project dialog
   const [editProjectOpen, setEditProjectOpen] = useState(false)
@@ -154,6 +155,14 @@ export default function ProjectDetailPage() {
         if (Array.isArray(prods)) {
           setTimelineProducts(prods)
           if (prods.length > 0) setTimelineProductId((prev) => prev ?? prods[0].id)
+          // One-time migration: generate per-product teardown tasks for existing products
+          if (prods.length > 0 && !teardownMigratedRef.current) {
+            teardownMigratedRef.current = true
+            fetch(`/api/projects/${id}/sync-product-teardown`, { method: 'POST' })
+              .then((r) => r.ok ? r.json() : null)
+              .then((result) => { if (result?.migrated > 0) load() })
+              .catch(() => {})
+          }
         }
       }
     } finally {
