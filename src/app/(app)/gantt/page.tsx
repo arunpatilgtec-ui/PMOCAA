@@ -578,18 +578,10 @@ export default function GanttPage() {
     return new Date(y, m - 1, d)
   }
 
-  function getBarProps(startStr: string, endStr: string, label?: string) {
+  function getBarProps(startStr: string, endStr: string) {
     const start = parseDate(startStr), end = parseDate(endStr)
     const offsetDays = differenceInDays(start, viewStart)
     const durationDays = Math.max(1, differenceInDays(end, start) + 1)
-    if (label?.includes('ECA')) {
-      console.log('[GANTT DEBUG] ECA Deployment:', {
-        rawStart: startStr, rawEnd: endStr,
-        parsedStart: start.toString(), parsedEnd: end.toString(),
-        viewStart: viewStart.toString(), offsetDays, durationDays, dayW,
-        leftPx: offsetDays * dayW,
-      })
-    }
     return {
       left: offsetDays * dayW,
       width: durationDays * dayW - 2,
@@ -660,7 +652,7 @@ export default function GanttPage() {
 
   function renderTaskBar(task: Task) {
     if (!task.startDate || !task.endDate) return null
-    const { left, width, visible } = getBarProps(task.startDate, task.endDate, task.name)
+    const { left, width, visible } = getBarProps(task.startDate, task.endDate)
     if (!visible || width <= 0) return null
     const isEditing = editForm?.taskId === task.id
     const barBg = TASK_STATUS_BG[task.status] ?? 'bg-slate-400'
