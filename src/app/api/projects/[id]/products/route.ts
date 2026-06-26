@@ -2,6 +2,7 @@ import { NextRequest } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { requireAuth } from '@/lib/auth'
 import { addWorkingDays } from '@/lib/date-utils'
+import { CATEGORY_TEMPLATES } from '@/lib/project-templates'
 
 // DW: Planning(2) + TearDown(5) + Costing(5) = 12 working days before BOB
 const DW_BOB_OFFSET = 12
@@ -141,6 +142,31 @@ export async function POST(req: NextRequest, ctx: Ctx) {
             effortHours: 16,
           },
         ],
+      })
+    }
+
+    // Create per-product teardown tasks using the category template
+    const template = project.category ? CATEGORY_TEMPLATES[project.category] : undefined
+    const tdTaskTemplates = template?.find((ws) => ws.name === 'Tear Down')?.tasks ?? []
+    if (tdTaskTemplates.length > 0) {
+      const existingTdWs = await prisma.workstream.findFirst({ where: { projectId: id, name: 'Tear Down' } })
+      const tdWsOrder = existingTdWs ? 0 : await prisma.workstream.count({ where: { projectId: id } })
+      const tdWs = existingTdWs ?? await prisma.workstream.create({ data: { projectId: id, name: 'Tear Down', order: tdWsOrder } })
+      // Teardown window: working days 3–7 after project start (after 2 planning days)
+      const tdStart = project.startDate ? addWorkingDays(new Date(project.startDate), 2) : null
+      const tdEnd = project.startDate ? addWorkingDays(new Date(project.startDate), 6) : null
+      const productLabel = `${product.brand}${product.modelNo ? ` ${product.modelNo}` : ''}`
+      await prisma.task.createMany({
+        data: tdTaskTemplates.map((task) => ({
+          workstreamId: tdWs.id,
+          name: `${productLabel} — ${task.name}`,
+          description: `__productTask:${product.id}:teardown__`,
+          ownerId: product.leadId ?? null,
+          startDate: tdStart,
+          endDate: tdEnd,
+          estimatedHours: task.estimatedHours,
+          effortHours: 0,
+        })),
       })
     }
 

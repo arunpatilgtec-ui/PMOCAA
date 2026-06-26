@@ -277,10 +277,11 @@ export async function DELETE(_req: NextRequest, ctx: Ctx) {
       return Response.json({ error: 'Forbidden' }, { status: 403 })
     }
     // Clean up auto-generated tasks before deleting the product
-    const [costingWs, costingWs2, bobWs] = await Promise.all([
+    const [costingWs, costingWs2, bobWs, tearDownWs] = await Promise.all([
       prisma.workstream.findFirst({ where: { projectId: id, name: 'Product Costing' } }),
       prisma.workstream.findFirst({ where: { projectId: id, name: 'Costing' } }),
       prisma.workstream.findFirst({ where: { projectId: id, name: 'BOB & A2Mac1' } }),
+      prisma.workstream.findFirst({ where: { projectId: id, name: 'Tear Down' } }),
     ])
     await Promise.all([
       costingWs && prisma.task.deleteMany({
@@ -291,6 +292,9 @@ export async function DELETE(_req: NextRequest, ctx: Ctx) {
       }),
       bobWs && prisma.task.deleteMany({
         where: { workstreamId: bobWs.id, description: { contains: `__productTask:${productId}:` } },
+      }),
+      tearDownWs && prisma.task.deleteMany({
+        where: { workstreamId: tearDownWs.id, description: { contains: `__productTask:${productId}:` } },
       }),
     ])
     await prisma.product.delete({ where: { id: productId } })

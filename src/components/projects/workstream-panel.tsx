@@ -202,13 +202,21 @@ export function WorkstreamPanel({ project, onRefresh, productId, onlyDeliverable
   // Workstreams shown in Report tab (onlyDeliverables); hidden from per-product Timeline.
   const CHECKLIST_WS = new Set(['Planning', 'Deliverables', 'Report', 'Reports & Report-out'])
   // Workstreams whose tasks are filtered per selected product (tagged __productTask:{productId}:)
-  const PER_PRODUCT_WS = new Set(['Product Costing', 'BOB & A2Mac1'])
+  const PER_PRODUCT_WS = new Set(['Product Costing', 'BOB & A2Mac1', 'Tear Down', 'Costing'])
+
+  // Filter a per-product workstream by productId, with fallback to all tasks for backward compat
+  // (projects created before per-product tear-down/costing tasks were introduced)
+  const filterByProduct = (ws: typeof project.workstreams[0], pid: string) => {
+    const filtered = ws.tasks.filter((t) => t.description?.includes(`__productTask:${pid}:`))
+    return { ...ws, tasks: filtered.length > 0 ? filtered : ws.tasks }
+  }
+
   const visibleWorkstreams = onlyDeliverables
     ? project.workstreams.filter((ws) => CHECKLIST_WS.has(ws.name))
     : onlyPerProduct && productId
     ? project.workstreams
         .filter((ws) => PER_PRODUCT_WS.has(ws.name))
-        .map((ws) => ({ ...ws, tasks: ws.tasks.filter((t) => t.description?.includes(`__productTask:${productId}:`)) }))
+        .map((ws) => filterByProduct(ws, productId))
     : hidePerProduct
     ? project.workstreams.filter((ws) => !CHECKLIST_WS.has(ws.name) && !PER_PRODUCT_WS.has(ws.name))
     : productId
@@ -216,7 +224,7 @@ export function WorkstreamPanel({ project, onRefresh, productId, onlyDeliverable
         .filter((ws) => !CHECKLIST_WS.has(ws.name))
         .map((ws) =>
           PER_PRODUCT_WS.has(ws.name)
-            ? { ...ws, tasks: ws.tasks.filter((t) => t.description?.includes(`__productTask:${productId}:`)) }
+            ? filterByProduct(ws, productId)
             : ws
         )
     : project.workstreams.filter((ws) => !CHECKLIST_WS.has(ws.name))
