@@ -114,14 +114,12 @@ export async function applyPriorityShift(
     },
   })
 
-  // Tasks that need to move: lower priority AND either conflicting with the new task's window
-  // OR have no dates (will be placed after the new task)
+  // Only auto-schedule tasks that have NO dates set — never overwrite manually-set dates.
+  // Dated tasks have an explicit user-defined timeline that must be respected.
   const toShift = activeTasks.filter(t => {
     const tRank = PRIORITY_RANK[t.priority] ?? 1
     if (tRank >= newPriorityRank) return false
-    if (!t.startDate) return true // undated lower-priority → assign dates after new task
-    const tStart = new Date(t.startDate)
-    return tStart >= today && tStart <= newTaskEnd // conflicts with new task window
+    return !t.startDate && !t.endDate // only undated lower-priority tasks
   })
 
   if (toShift.length === 0) return { shiftedCount: 0 }
@@ -130,23 +128,16 @@ export async function applyPriorityShift(
   // Start placing shifted tasks the day after the new task ends
   let cursor = addWorkingDays(newTaskEnd, 1)
 
-  // Sort toShift by priority DESC then by existing startDate
+  // Sort toShift by priority DESC (undated tasks only, so no startDate to sort by)
   toShift.sort((a, b) => {
     const pa = PRIORITY_RANK[a.priority] ?? 1
     const pb = PRIORITY_RANK[b.priority] ?? 1
-    if (pb !== pa) return pb - pa
-    if (a.startDate && b.startDate) return new Date(a.startDate).getTime() - new Date(b.startDate).getTime()
-    if (a.startDate) return -1
-    if (b.startDate) return 1
-    return 0
+    return pb - pa
   })
 
   for (const task of toShift) {
-    const taskEnd = task.endDate ? new Date(task.endDate) : null
-    const taskStart = task.startDate ? new Date(task.startDate) : null
-    const durationDays = (taskStart && taskEnd)
-      ? Math.max(1, Math.ceil((taskEnd.getTime() - taskStart.getTime()) / 86400000))
-      : Math.max(1, Math.ceil((task.estimatedHours || 8) / 8))
+    // Duration from estimatedHours only (these are undated tasks)
+    const durationDays = Math.max(1, Math.ceil((task.estimatedHours || 8) / 8))
 
     const newStart = new Date(cursor)
     const newEnd = addWorkingDays(newStart, durationDays - 1)
