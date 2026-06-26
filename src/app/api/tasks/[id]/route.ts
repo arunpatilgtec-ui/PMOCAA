@@ -2,7 +2,7 @@ import type { NextRequest } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { requireAuth } from '@/lib/auth'
 import { notifyTaskAssigned } from '@/lib/notifications'
-import { applyPriorityShift } from '@/lib/priority-shift'
+
 
 export async function GET(_req: NextRequest, ctx: RouteContext<'/api/tasks/[id]'>) {
   try {
@@ -255,19 +255,6 @@ export async function PATCH(req: NextRequest, ctx: RouteContext<'/api/tasks/[id]
           },
         }).catch(console.error)
       }
-    }
-
-    // Shift lower-priority tasks when priority is raised to CRITICAL/HIGH
-    const priorityChanged = data.priority !== undefined && data.priority !== existing.priority
-    if (priorityChanged && ['CRITICAL', 'HIGH'].includes(data.priority) && task.ownerId) {
-      await applyPriorityShift(
-        {
-          id: task.id, name: task.name, priority: task.priority,
-          startDate: task.startDate, endDate: task.endDate,
-          estimatedHours: task.estimatedHours, ownerId: task.ownerId,
-        },
-        session.id
-      ).catch(console.error)
     }
 
     return Response.json(task)

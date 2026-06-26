@@ -2,7 +2,7 @@ import type { NextRequest } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { requireAuth } from '@/lib/auth'
 import { getOrCreateDirectWorkstream } from '@/lib/direct-assignments'
-import { applyPriorityShift } from '@/lib/priority-shift'
+
 
 function countWorkingDays(start: Date, end: Date): number {
   let count = 0
@@ -267,16 +267,6 @@ export async function PATCH(req: NextRequest, ctx: RouteContext<'/api/requests/[
               endDate: existing.endDate ?? null,
             },
           })
-          // Auto-shift lower-priority tasks if this is HIGH/CRITICAL
-          await applyPriorityShift(
-            {
-              id: task.id, name: task.name, priority: request.priority,
-              startDate: existing.startDate ?? null, endDate: existing.endDate ?? null,
-              estimatedHours: taskHours, ownerId: effectiveAssigneeId,
-            },
-            session.id
-          ).catch(e => console.error('[REQUESTS APPROVE] priority shift failed:', e))
-
           // Notify the assignee that they have been given work
           if (effectiveAssigneeId !== session.id) {
             const requestedBy = existing.submitterId !== session.id

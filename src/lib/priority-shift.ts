@@ -1,18 +1,8 @@
-import { prisma } from './prisma'
 import { addWorkingDays } from './date-utils'
 
 export { addWorkingDays }
 export const PRIORITY_RANK: Record<string, number> = { LOW: 0, MEDIUM: 1, HIGH: 2, CRITICAL: 3 }
 
-interface IncomingTask {
-  id: string
-  name: string
-  priority: string
-  startDate: Date | null
-  endDate: Date | null
-  estimatedHours: number
-  ownerId: string | null
-}
 
 export interface ScheduledTask {
   id: string
@@ -74,96 +64,4 @@ export function generatePrioritySchedule(
   return result
 }
 
-/**
- * When a HIGH or CRITICAL task lands in a resource's queue, automatically push any
- * lower-priority tasks that conflict with its window. Also assigns dates to previously
- * undated lower-priority tasks so they slot in after the new task.
- */
-export async function applyPriorityShift(
-  newTask: IncomingTask,
-  assignerId: string
-): Promise<{ shiftedCount: number }> {
-  if (!newTask.ownerId) return { shiftedCount: 0 }
-  if (!['HIGH', 'CRITICAL'].includes(newTask.priority)) return { shiftedCount: 0 }
 
-  const today = new Date()
-  today.setHours(0, 0, 0, 0)
-
-  const newPriorityRank = PRIORITY_RANK[newTask.priority] ?? 1
-
-  // Determine when the new task frees up the resource
-  let newTaskEnd: Date
-  if (newTask.endDate) {
-    newTaskEnd = new Date(newTask.endDate)
-  } else {
-    const durationDays = Math.max(1, Math.ceil((newTask.estimatedHours || 8) / 8))
-    const startFrom = newTask.startDate ? new Date(newTask.startDate) : today
-    newTaskEnd = addWorkingDays(startFrom, durationDays)
-  }
-
-  // Get all active tasks for the resource (including undated ones)
-  const activeTasks = await prisma.task.findMany({
-    where: {
-      ownerId: newTask.ownerId,
-      id: { not: newTask.id },
-      status: { notIn: ['COMPLETED', 'CANCELLED', 'IN_PROGRESS'] },
-    },
-    select: {
-      id: true, name: true, priority: true,
-      startDate: true, endDate: true, estimatedHours: true,
-    },
-  })
-
-  // Only auto-schedule tasks that have NO dates set — never overwrite manually-set dates.
-  // Dated tasks have an explicit user-defined timeline that must be respected.
-  const toShift = activeTasks.filter(t => {
-    const tRank = PRIORITY_RANK[t.priority] ?? 1
-    if (tRank >= newPriorityRank) return false
-    return !t.startDate && !t.endDate // only undated lower-priority tasks
-  })
-
-  if (toShift.length === 0) return { shiftedCount: 0 }
-
-  const shiftedNames: string[] = []
-  // Start placing shifted tasks the day after the new task ends
-  let cursor = addWorkingDays(newTaskEnd, 1)
-
-  // Sort toShift by priority DESC (undated tasks only, so no startDate to sort by)
-  toShift.sort((a, b) => {
-    const pa = PRIORITY_RANK[a.priority] ?? 1
-    const pb = PRIORITY_RANK[b.priority] ?? 1
-    return pb - pa
-  })
-
-  for (const task of toShift) {
-    // Duration from estimatedHours only (these are undated tasks)
-    const durationDays = Math.max(1, Math.ceil((task.estimatedHours || 8) / 8))
-
-    const newStart = new Date(cursor)
-    const newEnd = addWorkingDays(newStart, durationDays - 1)
-
-    await prisma.task.update({
-      where: { id: task.id },
-      data: { startDate: newStart, endDate: newEnd },
-    })
-    shiftedNames.push(task.name)
-    cursor = addWorkingDays(newEnd, 1)
-  }
-
-  if (shiftedNames.length > 0 && newTask.ownerId !== assignerId) {
-    const preview = shiftedNames.slice(0, 2).map(n => `"${n}"`).join(', ')
-    const more = shiftedNames.length > 2 ? ` +${shiftedNames.length - 2} more` : ''
-    await prisma.notification.create({
-      data: {
-        userId: newTask.ownerId,
-        senderId: assignerId,
-        type: 'TASK_UPDATED',
-        title: 'Queue Reordered — Priority Task Added',
-        message: `"${newTask.name}" (${newTask.priority}) was added to your queue. ${shiftedNames.length} task(s) rescheduled: ${preview}${more}. View your updated plan.`,
-        actionUrl: '/queue',
-      },
-    }).catch(console.error)
-  }
-
-  return { shiftedCount: shiftedNames.length }
-}

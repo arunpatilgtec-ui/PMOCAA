@@ -2,7 +2,7 @@ import { NextRequest } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { requireAuth } from '@/lib/auth'
 import { notifyTaskAssigned } from '@/lib/notifications'
-import { applyPriorityShift } from '@/lib/priority-shift'
+
 
 export async function GET(req: NextRequest) {
   try {
@@ -146,18 +146,6 @@ export async function POST(req: NextRequest) {
         task.ownerId,
         session.id,
         task.workstream.project.id
-      ).catch(console.error)
-    }
-
-    // Shift lower-priority tasks when a CRITICAL/HIGH task is created
-    if (['CRITICAL', 'HIGH'].includes(task.priority) && task.ownerId) {
-      await applyPriorityShift(
-        {
-          id: task.id, name: task.name, priority: task.priority,
-          startDate: task.startDate, endDate: task.endDate,
-          estimatedHours: task.estimatedHours, ownerId: task.ownerId,
-        },
-        session.id
       ).catch(console.error)
     }
 
