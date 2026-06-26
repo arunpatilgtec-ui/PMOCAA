@@ -228,6 +228,22 @@ export default function ProjectDetailPage() {
     }
   }
 
+  async function syncPerProductTasks() {
+    try {
+      const res = await fetch(`/api/projects/${id}/sync-product-teardown`, { method: 'POST' })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error)
+      if (data.migrated > 0) {
+        toast.success(`Per-product tasks synced for ${data.migrated} workstream(s)`)
+        load()
+      } else {
+        toast.info('Per-product tasks already up to date')
+      }
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'Sync failed')
+    }
+  }
+
   function openEditProject() {
     if (!project) return
     setEditName(project.name)
@@ -501,6 +517,11 @@ export default function ProjectDetailPage() {
                   <DropdownMenuItem onClick={syncTemplateTasks}>
                     <Plus className="mr-2 h-4 w-4 text-green-600" /> Sync Template Tasks
                   </DropdownMenuItem>
+                  {timelineProducts.length > 0 && (
+                    <DropdownMenuItem onClick={syncPerProductTasks}>
+                      <Plus className="mr-2 h-4 w-4 text-purple-600" /> Sync Per-Product Tasks
+                    </DropdownMenuItem>
+                  )}
                   <DropdownMenuItem onClick={openEditTimeline}>
                     <CalendarRange className="mr-2 h-4 w-4" /> Edit Timeline
                   </DropdownMenuItem>
