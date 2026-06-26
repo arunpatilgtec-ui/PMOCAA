@@ -194,7 +194,8 @@ export default function GanttPage() {
   useEffect(() => {
     if (!loading && chartScrollRef.current) {
       const dayW = Math.round(DAY_WIDTH * zoom)
-      const todayOff = differenceInDays(new Date(), viewStart) * dayW
+      const t0 = new Date(); t0.setHours(0, 0, 0, 0)
+      const todayOff = differenceInDays(t0, viewStart) * dayW
       const chartAreaWidth = chartScrollRef.current.clientWidth - labelWidth
       // Put today at the left quarter of the chart area so future tasks are visible
       const scrollTo = Math.max(0, todayOff - chartAreaWidth / 4)
@@ -223,8 +224,10 @@ export default function GanttPage() {
         const deltaDays = Math.round(deltaPx / dayW)
         if (Math.abs(deltaPx) >= 4) d.moved = true
 
-        const origS = new Date(d.origStart)
-        const origE = new Date(d.origEnd)
+        const [sy, sm, sd] = d.origStart.slice(0, 10).split('-').map(Number)
+        const [ey, em, ed] = d.origEnd.slice(0, 10).split('-').map(Number)
+        const origS = new Date(sy, sm - 1, sd)
+        const origE = new Date(ey, em - 1, ed)
         let newStart: string, newEnd: string
 
         if (d.type === 'move') {
@@ -527,7 +530,7 @@ export default function GanttPage() {
   const dayW = Math.round(DAY_WIDTH * zoom)
   const viewEnd = addDays(viewStart, 90)
   const days = eachDayOfInterval({ start: viewStart, end: viewEnd })
-  const today = new Date()
+  const today = new Date(); today.setHours(0, 0, 0, 0)
 
   const ownerFilteredTasks = ownerFilter && ownerFilter !== 'ALL'
     ? localTasks.filter(t => t.owner?.id === ownerFilter)
@@ -569,8 +572,14 @@ export default function GanttPage() {
       if (a.startDate) return -1; if (b.startDate) return 1; return 0
     })
 
+  // Parse a date string using only YYYY-MM-DD so UTC datetimes never shift by timezone
+  function parseDate(s: string): Date {
+    const [y, m, d] = s.slice(0, 10).split('-').map(Number)
+    return new Date(y, m - 1, d)
+  }
+
   function getBarProps(startStr: string, endStr: string) {
-    const start = new Date(startStr), end = new Date(endStr)
+    const start = parseDate(startStr), end = parseDate(endStr)
     const offsetDays = differenceInDays(start, viewStart)
     const durationDays = Math.max(1, differenceInDays(end, start) + 1)
     return {
