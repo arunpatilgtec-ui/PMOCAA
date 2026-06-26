@@ -171,7 +171,14 @@ export async function GET(req: NextRequest) {
           },
         },
         ownedTasks: {
-          where: { status: { notIn: ['COMPLETED', 'CANCELLED'] } },
+          where: {
+            status: { notIn: ['COMPLETED', 'CANCELLED'] },
+            OR: [
+              { startDate: null },
+              { endDate: null },
+              { startDate: { lte: rangeEnd }, endDate: { gte: rangeStart } },
+            ],
+          },
           select: {
             id: true,
             name: true,

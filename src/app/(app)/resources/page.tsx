@@ -135,6 +135,10 @@ function fmtDate(d: string | null) {
   return new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
 }
 
+function toDateKey(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
 /** Get Monday of the week containing `date` */
 function getMondayOf(date: Date): Date {
   const d = new Date(date)
@@ -183,8 +187,8 @@ function ResourceGanttView() {
   useEffect(() => {
     const fetchGantt = async () => {
       setLoading(true)
-      const f = dateRange.from.toISOString().slice(0, 10)
-      const t = dateRange.to.toISOString().slice(0, 10)
+      const f = toDateKey(dateRange.from)
+      const t = toDateKey(dateRange.to)
       try {
         const r = await fetch(`/api/resources?from=${f}&to=${t}`)
         const d = await r.json()
@@ -214,7 +218,7 @@ function ResourceGanttView() {
     const map = new Map<string, Date[]>()
     for (const day of workingDays) {
       const mon = getMondayOf(day)
-      const key = mon.toISOString().slice(0, 10)
+      const key = toDateKey(mon)
       if (!map.has(key)) map.set(key, [])
       map.get(key)!.push(day)
     }
@@ -297,7 +301,7 @@ function ResourceGanttView() {
                 </th>
                 {mode === 'daily'
                   ? workingDays.map(day => (
-                    <th key={day.toISOString().slice(0, 10)} className="px-2 py-2.5 text-center font-medium text-xs min-w-[80px]">
+                    <th key={toDateKey(day)} className="px-2 py-2.5 text-center font-medium text-xs min-w-[80px]">
                       <div>{day.toLocaleDateString('en-US', { weekday: 'short' })}</div>
                       <div className="text-muted-foreground font-normal">{day.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</div>
                     </th>
@@ -330,7 +334,7 @@ function ResourceGanttView() {
 
                   {mode === 'daily'
                     ? workingDays.map(day => {
-                      const key = day.toISOString().slice(0, 10)
+                      const key = toDateKey(day)
                       const h = Math.round((r.dailyHoursMap[key] ?? 0) * 10) / 10
                       const delayedH = Math.round((r.delayedDailyHoursMap?.[key] ?? 0) * 10) / 10
                       const onLeave = (r.leaveDates ?? []).includes(key)
@@ -355,14 +359,14 @@ function ResourceGanttView() {
                     })
                     : weeks.map((wk, i) => {
                       const total = wk.days.reduce((s, d) => {
-                        const key = d.toISOString().slice(0, 10)
+                        const key = toDateKey(d)
                         return s + (r.dailyHoursMap[key] ?? 0)
                       }, 0)
                       const rounded = Math.round(total * 10) / 10
                       const cap = r.weeklyCapacityHours
                       const pct = cap > 0 ? Math.round(total / cap * 100) : 0
                       const leaveDaysInWeek = wk.days.filter(d =>
-                        (r.leaveDates ?? []).includes(d.toISOString().slice(0, 10))
+                        (r.leaveDates ?? []).includes(toDateKey(d))
                       ).length
                       return (
                         <td key={i} className="px-1 py-1 text-center">

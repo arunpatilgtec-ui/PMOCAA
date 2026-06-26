@@ -98,7 +98,7 @@ export default function GanttPage() {
   const [viewMode, setViewMode] = useState<ViewMode>('tasks')
   const [selectedProject, setSelectedProject] = useState<string>(projectId || 'ALL')
   const [ownerFilter, setOwnerFilter] = useState<string>(searchParams.get('owner') ?? 'ALL')
-  const [viewStart, setViewStart] = useState(() => { const d = new Date(); d.setDate(1); return d })
+  const [viewStart, setViewStart] = useState(() => { const d = new Date(); d.setDate(1); d.setHours(0, 0, 0, 0); return d })
   const [zoom, setZoom] = useState(1)
   const [editForm, setEditForm] = useState<EditForm | null>(null)
   const [editSaving, setEditSaving] = useState(false)
