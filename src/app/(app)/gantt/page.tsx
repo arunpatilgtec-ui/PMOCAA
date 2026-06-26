@@ -231,12 +231,12 @@ export default function GanttPage() {
         let newStart: string, newEnd: string
 
         if (d.type === 'move') {
-          newStart = addDays(origS, deltaDays).toISOString().slice(0, 10)
-          newEnd = addDays(origE, deltaDays).toISOString().slice(0, 10)
+          newStart = format(addDays(origS, deltaDays), 'yyyy-MM-dd')
+          newEnd = format(addDays(origE, deltaDays), 'yyyy-MM-dd')
         } else {
-          newStart = d.origStart
+          newStart = d.origStart.slice(0, 10)
           const newEndDate = addDays(origE, deltaDays)
-          newEnd = (newEndDate > origS ? newEndDate : addDays(origS, 1)).toISOString().slice(0, 10)
+          newEnd = format(newEndDate > origS ? newEndDate : addDays(origS, 1), 'yyyy-MM-dd')
         }
 
         d.currentStart = newStart
