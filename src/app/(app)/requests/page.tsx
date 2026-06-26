@@ -418,6 +418,7 @@ export default function RequestsPage() {
   }
 
   async function onSubmitRequest(data: SubmitForm) {
+    if (!reqHours || parseFloat(reqHours) <= 0) { toast.error('Duration (hours) is required'); return }
     setSubmitting(true)
     try {
       const res = await fetch('/api/requests', {
@@ -519,6 +520,7 @@ export default function RequestsPage() {
       toast.error('Title and description are required')
       return
     }
+    if (!editReqHours || parseFloat(editReqHours) <= 0) { toast.error('Duration (hours) is required'); return }
     setEditSubmitting(true)
     try {
       const res = await fetch(`/api/requests/${editReqId}`, {
@@ -604,6 +606,8 @@ export default function RequestsPage() {
     if (!srSelectedId) { toast.error('Select a strategic request'); return }
     const valid = srTaskRows.filter(r => r.title.trim())
     if (valid.length === 0) { toast.error('Add at least one task with a title'); return }
+    const missingHours = valid.find(r => !(r.isRecurring ? parseFloat(r.hoursPerDay) > 0 : parseFloat(r.estimatedHours) > 0))
+    if (missingHours) { toast.error(`Duration (hours) is required for "${missingHours.title}"`); return }
     setSrSubmitting(true)
     try {
       const res = await fetch(`/api/strategic-requests/${srSelectedId}/tasks`, {
@@ -673,6 +677,7 @@ export default function RequestsPage() {
 
   async function submitEditTask() {
     if (!editStSrId || !editStTask || !editStTitle.trim()) { toast.error('Title is required'); return }
+    if (!editStHours || parseFloat(editStHours) <= 0) { toast.error('Duration (hours) is required'); return }
     setEditStBusy(true)
     try {
       const res = await fetch(`/api/strategic-requests/${editStSrId}/tasks/${editStTask.id}`, {
@@ -1569,9 +1574,9 @@ export default function RequestsPage() {
 
             <div className="grid grid-cols-3 gap-3">
               <div className="space-y-1.5">
-                <Label>{isRecurring ? 'Hours/day' : 'Est. hours'}</Label>
+                <Label>{isRecurring ? 'Hours/day' : 'Est. hours'} <span className="text-destructive">*</span></Label>
                 <Input
-                  type="number" min="0" step="0.5" placeholder={isRecurring ? '2' : '8'}
+                  type="number" min="0.5" step="0.5" placeholder={isRecurring ? '2' : '8'}
                   value={reqHours} onChange={(e) => setReqHours(e.target.value)}
                 />
               </div>
@@ -1659,8 +1664,8 @@ export default function RequestsPage() {
             </div>
             <div className="grid grid-cols-3 gap-3">
               <div className="space-y-1.5">
-                <Label>{editReqRecurring ? 'Hours/day' : 'Est. hours'}</Label>
-                <Input type="number" min="0" step="0.5" value={editReqHours} onChange={e => setEditReqHours(e.target.value)} />
+                <Label>{editReqRecurring ? 'Hours/day' : 'Est. hours'} <span className="text-destructive">*</span></Label>
+                <Input type="number" min="0.5" step="0.5" value={editReqHours} onChange={e => setEditReqHours(e.target.value)} />
               </div>
               <div className="space-y-1.5">
                 <Label>Start date</Label>
@@ -1845,8 +1850,8 @@ export default function RequestsPage() {
                     </div>
                     <div className="grid grid-cols-2 gap-3">
                       <div className="space-y-1.5">
-                        <Label className="text-xs">{row.isRecurring ? 'Hours / day' : 'Est. hours'}</Label>
-                        <Input type="number" min="0" step="0.5" placeholder={row.isRecurring ? '2' : '8'}
+                        <Label className="text-xs">{row.isRecurring ? 'Hours / day' : 'Est. hours'} <span className="text-destructive">*</span></Label>
+                        <Input type="number" min="0.5" step="0.5" placeholder={row.isRecurring ? '2' : '8'}
                           value={row.isRecurring ? row.hoursPerDay : row.estimatedHours}
                           onChange={e => setSrTaskRows(prev => prev.map(r => r._key === row._key
                             ? r.isRecurring ? { ...r, hoursPerDay: e.target.value } : { ...r, estimatedHours: e.target.value }
@@ -1941,8 +1946,8 @@ export default function RequestsPage() {
               <Label htmlFor="editStRecurring">Recurring</Label>
             </div>
             <div className="space-y-1.5">
-              <Label>{editStRecurring ? 'Hours per Day' : 'Estimated Hours'}</Label>
-              <Input type="number" min="0" step="0.5" value={editStHours}
+              <Label>{editStRecurring ? 'Hours per Day' : 'Estimated Hours'} <span className="text-destructive">*</span></Label>
+              <Input type="number" min="0.5" step="0.5" value={editStHours}
                 onChange={e => setEditStHours(e.target.value)} />
             </div>
             <div className="grid grid-cols-2 gap-3">
