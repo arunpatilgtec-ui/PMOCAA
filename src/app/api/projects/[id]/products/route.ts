@@ -43,9 +43,10 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       where: { id },
       select: { leadId: true, startDate: true, endDate: true, category: true },
     })
+    if (!project) return Response.json({ error: 'Not found' }, { status: 404 })
     const canManage =
       ['ADMIN', 'PLANNER', 'MANAGER'].includes(session.role) ||
-      project?.leadId === session.id
+      project.leadId === session.id
     if (!canManage) return Response.json({ error: 'Forbidden' }, { status: 403 })
 
     const data = await req.json()
