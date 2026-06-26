@@ -6,8 +6,8 @@ import { CATEGORY_TEMPLATES } from '@/lib/project-templates'
 
 type Ctx = { params: Promise<{ id: string }> }
 
-// Generates per-product teardown tasks for any existing products that don't have them.
-// Safe to call repeatedly — skips products that already have per-product teardown tasks.
+// Generates per-product teardown AND costing tasks for existing products that don't have them.
+// Safe to call repeatedly — skips products that already have per-product tasks.
 export async function POST(_req: NextRequest, ctx: Ctx) {
   try {
     await requireAuth()
@@ -23,7 +23,7 @@ export async function POST(_req: NextRequest, ctx: Ctx) {
           orderBy: { order: 'asc' },
         },
         workstreams: {
-          where: { name: 'Tear Down' },
+          where: { name: { in: ['Tear Down', 'Costing'] } },
           include: { tasks: { select: { id: true, description: true } } },
         },
       },
@@ -32,46 +32,77 @@ export async function POST(_req: NextRequest, ctx: Ctx) {
     if (!project.products.length) return Response.json({ migrated: 0 })
 
     const template = project.category ? CATEGORY_TEMPLATES[project.category] : undefined
-    const tdTaskTemplates = template?.find((ws) => ws.name === 'Tear Down')?.tasks ?? []
-    if (!tdTaskTemplates.length) return Response.json({ migrated: 0 })
+    if (!template) return Response.json({ migrated: 0 })
 
-    // Teardown window: working days 3–7 after project start (after 2 planning days)
+    const tdTaskTemplates = template.find((ws) => ws.name === 'Tear Down')?.tasks ?? []
+    const costTaskTemplates = template.find((ws) => ws.name === 'Costing')?.tasks ?? []
+
+    // Date windows relative to project start
+    // Teardown: working days 3–7 (after 2 planning days)
     const tdStart = project.startDate ? addWorkingDays(new Date(project.startDate), 2) : null
     const tdEnd = project.startDate ? addWorkingDays(new Date(project.startDate), 6) : null
+    // Costing: working days 8–12 (after teardown)
+    const costStart = project.startDate ? addWorkingDays(new Date(project.startDate), 7) : null
+    const costEnd = project.startDate ? addWorkingDays(new Date(project.startDate), 11) : null
 
-    let tearDownWs = project.workstreams[0] ?? null
+    let tdWs = project.workstreams.find((w) => w.name === 'Tear Down') ?? null
+    let costWs = project.workstreams.find((w) => w.name === 'Costing') ?? null
     let migrated = 0
 
     for (const product of project.products) {
-      // Skip if this product already has per-product teardown tasks
-      const alreadyMigrated = tearDownWs?.tasks.some((t) =>
-        t.description?.includes(`__productTask:${product.id}:teardown`)
-      )
-      if (alreadyMigrated) continue
+      const productLabel = `${product.brand}${product.modelNo ? ` ${product.modelNo}` : ''}`
+      const hasTd = tdWs?.tasks.some((t) => t.description?.includes(`__productTask:${product.id}:teardown`))
+      const hasCost = costWs?.tasks.some((t) => t.description?.includes(`__productTask:${product.id}:costing`))
 
-      // Create the workstream if it doesn't exist yet
-      if (!tearDownWs) {
-        const order = await prisma.workstream.count({ where: { projectId: id } })
-        tearDownWs = await prisma.workstream.create({
-          data: { projectId: id, name: 'Tear Down', order },
-          include: { tasks: { select: { id: true, description: true } } },
-        }) as typeof tearDownWs
+      // Migrate Tear Down
+      if (!hasTd && tdTaskTemplates.length > 0) {
+        if (!tdWs) {
+          const order = await prisma.workstream.count({ where: { projectId: id } })
+          const created = await prisma.workstream.create({
+            data: { projectId: id, name: 'Tear Down', order },
+            include: { tasks: { select: { id: true, description: true } } },
+          })
+          tdWs = created
+        }
+        await prisma.task.createMany({
+          data: tdTaskTemplates.map((task) => ({
+            workstreamId: tdWs!.id,
+            name: `${productLabel} — ${task.name}`,
+            description: `__productTask:${product.id}:teardown__`,
+            ownerId: product.leadId ?? null,
+            startDate: tdStart,
+            endDate: tdEnd,
+            estimatedHours: task.estimatedHours,
+            effortHours: 0,
+          })),
+        })
+        migrated++
       }
 
-      const productLabel = `${product.brand}${product.modelNo ? ` ${product.modelNo}` : ''}`
-      await prisma.task.createMany({
-        data: tdTaskTemplates.map((task) => ({
-          workstreamId: tearDownWs!.id,
-          name: `${productLabel} — ${task.name}`,
-          description: `__productTask:${product.id}:teardown__`,
-          ownerId: product.leadId ?? null,
-          startDate: tdStart,
-          endDate: tdEnd,
-          estimatedHours: task.estimatedHours,
-          effortHours: 0,
-        })),
-      })
-      migrated++
+      // Migrate Costing (template sub-system tasks only — user×costingType tasks are managed separately)
+      if (!hasCost && costTaskTemplates.length > 0) {
+        if (!costWs) {
+          const order = await prisma.workstream.count({ where: { projectId: id } })
+          const created = await prisma.workstream.create({
+            data: { projectId: id, name: 'Costing', order },
+            include: { tasks: { select: { id: true, description: true } } },
+          })
+          costWs = created
+        }
+        await prisma.task.createMany({
+          data: costTaskTemplates.map((task) => ({
+            workstreamId: costWs!.id,
+            name: `${productLabel} — ${task.name}`,
+            description: `__productTask:${product.id}:costing__`,
+            ownerId: product.leadId ?? null,
+            startDate: costStart,
+            endDate: costEnd,
+            estimatedHours: task.estimatedHours,
+            effortHours: 0,
+          })),
+        })
+        migrated++
+      }
     }
 
     return Response.json({ migrated })
