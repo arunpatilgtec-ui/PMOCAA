@@ -177,6 +177,8 @@ export async function GET(req: NextRequest) {
               { startDate: null },
               { endDate: null },
               { startDate: { lte: rangeEnd }, endDate: { gte: rangeStart } },
+              // Always pull active tasks — overdue IN_PROGRESS/REWORK must count this week
+              { status: { in: ['IN_PROGRESS', 'REWORK'] } },
             ],
           },
           select: {
@@ -313,8 +315,22 @@ export async function GET(req: NextRequest) {
       // Tasks (approved) + REVIEW requests + strategic tasks drive utilization
       const allWorkItems = [...user.ownedTasks, ...reviewRequestItems, ...userStrategicItems]
 
+      // For weekly utilization: overdue IN_PROGRESS/REWORK tasks (endDate before this week) get their
+      // dates nulled so calcDailyHours spreads their hours across the current week instead of skipping them.
+      const weeklyTasks = user.ownedTasks.map((t) =>
+        (t.status === 'IN_PROGRESS' || t.status === 'REWORK') &&
+        t.endDate && new Date(t.endDate) < weekStart
+          ? { ...t, startDate: null as Date | null, endDate: null as Date | null }
+          : t
+      )
+      const weeklyWorkItems = [...weeklyTasks, ...reviewRequestItems, ...userStrategicItems]
+
       // dailyHoursMap covers the requested range (gantt) or current week (default)
-      const dailyHoursMap = calcDailyHours(allWorkItems, rangeStart, rangeEnd)
+      const dailyHoursMap = calcDailyHours(
+        fromParam || toParam ? allWorkItems : weeklyWorkItems,
+        rangeStart,
+        rangeEnd
+      )
 
       // Merge completed task hours into dailyHoursMap (actual work window, capped at statusChangedAt)
       const userCompletedTasks = completedByUser.get(user.id) ?? []
@@ -329,7 +345,7 @@ export async function GET(req: NextRequest) {
       // Weekly stats always reflect the current week regardless of gantt range
       let currentWeekMap: Record<string, number>
       if (fromParam || toParam) {
-        currentWeekMap = calcDailyHours(allWorkItems, weekStart, weekEnd)
+        currentWeekMap = calcDailyHours(weeklyWorkItems, weekStart, weekEnd)
         const { regular: cwR, delayed: cwD } = calcCompletedHours(userCompletedTasks, weekStart, weekEnd)
         for (const [date, h] of Object.entries(cwR)) currentWeekMap[date] = (currentWeekMap[date] ?? 0) + h
         for (const [date, h] of Object.entries(cwD)) currentWeekMap[date] = (currentWeekMap[date] ?? 0) + h

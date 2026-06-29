@@ -147,9 +147,13 @@ function MyUtilizationReport({ userId }: { userId: string }) {
       ? Math.round(totalHours / dailyCap * 100)
       : 0
 
-  // Tasks overlapping the date range
+  // Tasks overlapping the date range — overdue IN_PROGRESS/REWORK tasks always included
   const tasksInPeriod = useMemo(() => {
     return tasks.filter(t => {
+      if (
+        (t.status === 'IN_PROGRESS' || t.status === 'REWORK') &&
+        t.endDate && t.endDate.slice(0, 10) < dateRange.from
+      ) return true
       const ts = t.startDate?.slice(0, 10) ?? '0000-00-00'
       const te = t.endDate?.slice(0, 10)   ?? '9999-12-31'
       return ts <= dateRange.to && te >= dateRange.from
