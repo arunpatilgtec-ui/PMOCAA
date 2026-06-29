@@ -584,6 +584,24 @@ function EmployeeDetailDialog({ resource, open, onOpenChange, onLogMeeting }: {
   // Reset focus when dialog closes or resource changes
   const handleOpenChange = (v: boolean) => { if (!v) setFocusedId(null); onOpenChange(v) }
 
+  // ALL hooks must be called before any early return (Rules of Hooks)
+  const weekDates = useMemo(
+    () => resource ? Object.keys(resource.dailyHoursMap).sort().slice(0, 5) : [],
+    [resource]
+  )
+
+  const focusedTaskMap = useMemo(() => {
+    if (!focusedId || !resource) return null
+    const task = resource.ownedTasks.find(t => t.id === focusedId)
+      ?? resource.strategicTasks?.find(t => t.id === focusedId)
+    if (task) return calcTaskDailyHours({ ...task, estimatedHours: task.estimatedHours || 0 }, weekDates)
+    const meeting = resource.meetings?.find(m => m.id === focusedId)
+    if (meeting) {
+      return weekDates.includes(meeting.date) ? { [meeting.date]: meeting.hours } : {}
+    }
+    return null
+  }, [focusedId, resource, weekDates])
+
   if (!resource) return null
 
   const utilBar = Math.min(resource.utilizationPct, 150)
@@ -599,24 +617,6 @@ function EmployeeDetailDialog({ resource, open, onOpenChange, onLogMeeting }: {
 
   const totalHours = resource.ownedTasks.reduce((s, t) => s + (t.estimatedHours || 0), 0)
   const pendingReqHours = resource.pendingRequestHours ?? 0
-
-  // Sorted week dates from dailyHoursMap
-  const weekDates = Object.keys(resource.dailyHoursMap).sort().slice(0, 5)
-
-  // When a task/meeting is focused, compute its per-day hours
-  const focusedTaskMap = useMemo(() => {
-    if (!focusedId) return null
-    const task = resource.ownedTasks.find(t => t.id === focusedId)
-      ?? resource.strategicTasks?.find(t => t.id === focusedId)
-    if (task) return calcTaskDailyHours({ ...task, estimatedHours: task.estimatedHours || 0 }, weekDates)
-    const meeting = resource.meetings?.find(m => m.id === focusedId)
-    if (meeting) {
-      // Meeting is a single day — put all hours on that date if it's in the week
-      return weekDates.includes(meeting.date) ? { [meeting.date]: meeting.hours } : {}
-    }
-    return null
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [focusedId, resource])
 
   const focusedItem = focusedId
     ? (resource.ownedTasks.find(t => t.id === focusedId)
