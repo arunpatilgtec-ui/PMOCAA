@@ -358,7 +358,8 @@ export default function KanbanPage() {
 
   const canReview = (task: Task) => {
     if (!user) return false
-    if (task.ownerId === user.id) return false   // owner cannot approve their own work
+    // Block only when someone else assigned this task to the current user
+    if (task.ownerId === user.id && task.assignedById && task.assignedById !== user.id) return false
     return task.assignedById === user.id || REVIEWER_ROLES.has(user.role)
   }
 
