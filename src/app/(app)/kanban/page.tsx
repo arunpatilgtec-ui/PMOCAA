@@ -356,10 +356,11 @@ export default function KanbanPage() {
     }
   }
 
-  const canReview = (task: Task) =>
-    user
-      ? task.assignedById === user.id || REVIEWER_ROLES.has(user.role)
-      : false
+  const canReview = (task: Task) => {
+    if (!user) return false
+    if (task.ownerId === user.id) return false   // owner cannot approve their own work
+    return task.assignedById === user.id || REVIEWER_ROLES.has(user.role)
+  }
 
   return (
     <div className="p-6 h-full flex flex-col">
