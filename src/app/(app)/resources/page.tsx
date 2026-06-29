@@ -22,11 +22,14 @@ import { AssignWorkDialog } from '@/components/assign-work-dialog'
 interface AssignedTask {
   id: string
   name: string
+  description?: string | null
   status: string
   priority: string
   estimatedHours: number
+  pctComplete?: number
   startDate: string | null
   endDate: string | null
+  assignedBy?: { id: string; name: string } | null
   workstream: {
     id: string
     name: string
@@ -756,6 +759,74 @@ function EmployeeDetailDialog({ resource, open, onOpenChange, onLogMeeting }: {
             </p>
           )}
         </div>
+
+        {/* Task summary card — shown when a task or strategic task is focused */}
+        {focusedId && (() => {
+          const task = resource.ownedTasks.find(t => t.id === focusedId)
+          const st = !task ? resource.strategicTasks?.find(s => s.id === focusedId) : null
+          if (!task && !st) return null
+          const name = task ? task.name : st!.name
+          const status = task ? task.status : (st!.status ?? 'UNKNOWN')
+          const startDate = task ? task.startDate : st!.startDate
+          const endDate = task ? task.endDate : st!.endDate
+          const hours = task ? task.estimatedHours : st!.estimatedHours
+          const pct = task?.pctComplete ?? null
+          const desc = task?.description
+          const assignedBy = task?.assignedBy
+          const context = task
+            ? `${task.workstream.project.name} › ${task.workstream.name}`
+            : st!.requestTitle
+          const today = new Date(); today.setHours(0,0,0,0)
+          const end = endDate ? new Date(endDate) : null
+          const isOverdue = end && end < today && status !== 'COMPLETED' && status !== 'CANCELLED'
+          const overdueDays = isOverdue ? Math.round((today.getTime() - end!.getTime()) / 86400000) : 0
+          return (
+            <div className="border border-blue-200 dark:border-blue-800 rounded-lg p-3 bg-blue-50/50 dark:bg-blue-950/20 space-y-2 shrink-0">
+              <div>
+                <p className="text-sm font-semibold leading-tight">{name}</p>
+                <p className="text-xs text-muted-foreground mt-0.5">{context}</p>
+              </div>
+              {desc && <p className="text-xs text-foreground/80 leading-relaxed">{desc}</p>}
+              <div className="grid grid-cols-3 gap-2 text-xs">
+                <div>
+                  <p className="text-muted-foreground">Start</p>
+                  <p className="font-medium">{fmtDate(startDate)}</p>
+                </div>
+                <div>
+                  <p className="text-muted-foreground">End</p>
+                  <p className={`font-medium ${isOverdue ? 'text-red-600' : ''}`}>{fmtDate(endDate)}</p>
+                </div>
+                <div>
+                  <p className="text-muted-foreground">Duration</p>
+                  <p className="font-medium">{hours > 0 ? `${hours}h` : '—'}</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${STATUS_COLORS[status] ?? 'bg-slate-100 text-slate-600'}`}>
+                  {status.replace(/_/g, ' ')}
+                </span>
+                {task && (
+                  <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${PRIORITY_COLORS[task.priority] ?? ''}`}>
+                    {task.priority}
+                  </span>
+                )}
+                {isOverdue && (
+                  <span className="text-xs px-1.5 py-0.5 rounded font-medium bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-400">
+                    {overdueDays}d overdue
+                  </span>
+                )}
+                {pct !== null && pct !== undefined && (
+                  <span className="text-xs text-muted-foreground ml-auto">{pct}% complete</span>
+                )}
+              </div>
+              {assignedBy && (
+                <p className="text-xs text-muted-foreground">
+                  Assigned by <span className="font-medium text-foreground">{assignedBy.name}</span>
+                </p>
+              )}
+            </div>
+          )
+        })()}
 
         {/* Tasks list */}
         <div className="flex-1 overflow-y-auto space-y-4 mt-1">

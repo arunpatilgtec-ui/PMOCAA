@@ -190,11 +190,14 @@ export async function GET(req: NextRequest) {
           select: {
             id: true,
             name: true,
+            description: true,
             status: true,
             priority: true,
             estimatedHours: true,
+            pctComplete: true,
             startDate: true,
             endDate: true,
+            assignedBy: { select: { id: true, name: true } },
             workstream: {
               select: {
                 id: true,
