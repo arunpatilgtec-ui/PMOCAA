@@ -121,6 +121,7 @@ export async function PATCH(req: NextRequest, ctx: RouteContext<'/api/tasks/[id]
           actualEndDate: data.actualEndDate ? new Date(data.actualEndDate) : null,
         }),
         ...(data.pctComplete !== undefined && { pctComplete: Math.min(100, Math.max(0, Number(data.pctComplete))) }),
+        ...(data.comments !== undefined && { comments: data.comments ?? null }),
         ...(data.effortHours !== undefined && { effortHours: data.effortHours }),
         ...(data.estimatedHours !== undefined && { estimatedHours: data.estimatedHours }),
         ...(data.ownerId !== undefined && canAssign && { ownerId: data.ownerId || null }),

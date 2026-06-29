@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
 import { Progress } from '@/components/ui/progress'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Label } from '@/components/ui/label'
@@ -32,6 +33,7 @@ interface Task {
   startDate?: string; endDate?: string
   actualStartDate?: string; actualEndDate?: string
   pctComplete?: number
+  comments?: string
   effortHours: number; estimatedHours?: number
   owner?: { id: string; name: string; avatarUrl?: string }
 }
@@ -429,6 +431,18 @@ export function WorkstreamPanel({ project, onRefresh, productId, onlyDeliverable
                                     />
                                   </div>
                                 </div>
+                              </div>
+
+                              {/* Comments */}
+                              <div className="space-y-1">
+                                <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Comments</Label>
+                                <Textarea
+                                  placeholder="Add a comment or note…"
+                                  rows={3}
+                                  value={(getEdit(task, 'comments') as string) ?? task.comments ?? ''}
+                                  onChange={(e) => setEdit(task.id, 'comments', e.target.value)}
+                                  className="text-xs resize-none"
+                                />
                               </div>
 
                               <div className="flex items-center justify-between pt-0.5">

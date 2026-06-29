@@ -6,6 +6,7 @@ import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Textarea } from '@/components/ui/textarea'
 import {
   addDays, differenceInCalendarDays, format, isSameDay, isWeekend,
   eachDayOfInterval, endOfWeek, startOfWeek,
@@ -23,6 +24,7 @@ interface Task {
   actualStartDate?: string
   actualEndDate?: string
   description?: string
+  comments?: string
   owner?: TaskOwner
 }
 interface Workstream {
@@ -104,6 +106,7 @@ export function ProjectGanttView({
   const [editTask, setEditTask] = useState<{ task: Task; label: string } | null>(null)
   const [actualStart, setActualStart] = useState('')
   const [actualEnd, setActualEnd] = useState('')
+  const [taskComment, setTaskComment] = useState('')
   const [savingActual, setSavingActual] = useState(false)
   const [chartW, setChartW] = useState(900)
 
@@ -303,6 +306,7 @@ export function ProjectGanttView({
     setEditTask({ task, label })
     setActualStart(task.actualStartDate?.slice(0, 10) || '')
     setActualEnd(task.actualEndDate?.slice(0, 10) || '')
+    setTaskComment(task.comments || '')
   }
 
   async function saveActualDates() {
@@ -315,6 +319,7 @@ export function ProjectGanttView({
         body: JSON.stringify({
           actualStartDate: actualStart || null,
           actualEndDate: actualEnd || null,
+          comments: taskComment || null,
         }),
       })
       if (!res.ok) throw new Error()
@@ -596,8 +601,19 @@ export function ProjectGanttView({
               </div>
             </div>
 
+            <div className="space-y-1">
+              <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Comments</Label>
+              <Textarea
+                placeholder="Add a comment or note…"
+                rows={3}
+                value={taskComment}
+                onChange={(e) => setTaskComment(e.target.value)}
+                className="text-xs resize-none"
+              />
+            </div>
+
             <Button size="sm" className="w-full" onClick={saveActualDates} disabled={savingActual}>
-              {savingActual ? 'Saving…' : 'Save Actual Dates'}
+              {savingActual ? 'Saving…' : 'Save'}
             </Button>
           </div>
         )}
