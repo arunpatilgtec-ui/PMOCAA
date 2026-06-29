@@ -273,6 +273,7 @@ model Task {
   dependsOn       String[]
   tags            String[]
   reworkCount     Int        @default(0)
+  comments        String?
   statusChangedAt DateTime   @default(now())
   createdAt       DateTime   @default(now())
   updatedAt       DateTime   @updatedAt
