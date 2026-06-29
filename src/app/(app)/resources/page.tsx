@@ -103,6 +103,8 @@ interface Resource {
   isOnLeaveToday?: boolean
   completedTasks?: CompletedTask[]
   strategicTasks?: StrategicTask[]
+  meetingHours?: number
+  meetings?: Array<{ id: string; title: string; date: string; startTime: string; endTime: string; hours: number }>
   allocations: Array<{
     allocationPct: number
     project: { id: string; name: string; status: string }
@@ -718,6 +720,32 @@ function EmployeeDetailDialog({ resource, open, onOpenChange, onLogMeeting }: {
                         {st.estimatedHours > 0 ? `${st.estimatedHours}h` : '—'}
                       </span>
                     </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Meetings */}
+          {(resource.meetings?.length ?? 0) > 0 && (
+            <div>
+              <div className="flex items-center gap-2 mb-1.5">
+                <CalendarDays className="h-3.5 w-3.5 text-sky-500" />
+                <span className="text-xs font-semibold text-sky-600 dark:text-sky-400 uppercase tracking-wide">
+                  Meetings ({resource.meetings!.length})
+                </span>
+                <span className="text-xs text-muted-foreground ml-auto">
+                  {resource.meetingHours}h total
+                </span>
+              </div>
+              <div className="space-y-1.5">
+                {resource.meetings!.map(m => (
+                  <div key={m.id} className="border border-sky-200 dark:border-sky-900 rounded-lg px-3 py-2 flex items-center gap-3">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate">{m.title}</p>
+                      <p className="text-xs text-muted-foreground">{m.date} · {m.startTime}–{m.endTime}</p>
+                    </div>
+                    <span className="text-xs font-semibold text-sky-600 w-10 text-right">{m.hours}h</span>
                   </div>
                 ))}
               </div>

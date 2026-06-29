@@ -5,6 +5,12 @@ import { requireAuth } from '@/lib/auth'
 export const HOURS_PER_DAY = 8   // daily limit per person (at 100% capacity)
 export const HOURS_PER_WEEK = 40  // weekly limit per person (at 100% capacity)
 
+function parseMeetingHours(startTime: string, endTime: string): number {
+  const [sh, sm] = startTime.split(':').map(Number)
+  const [eh, em] = endTime.split(':').map(Number)
+  return Math.max(0, (eh * 60 + em - sh * 60 - sm) / 60)
+}
+
 export function getWeekBounds() {
   const now = new Date()
   const dayOfWeek = now.getDay()
@@ -273,6 +279,36 @@ export async function GET(req: NextRequest) {
       strategicByUser.get(st.assigneeId)!.push(st)
     }
 
+    // Meetings within the requested range — their hours count toward utilization
+    const meetingsAll = await prisma.meeting.findMany({
+      where: {
+        userId: { in: users.map(u => u.id) },
+        date: { gte: rangeStart, lte: rangeEnd },
+      },
+      select: { id: true, userId: true, title: true, date: true, startTime: true, endTime: true },
+    })
+    const meetingsByUser = new Map<string, typeof meetingsAll>()
+    for (const m of meetingsAll) {
+      if (!meetingsByUser.has(m.userId)) meetingsByUser.set(m.userId, [])
+      meetingsByUser.get(m.userId)!.push(m)
+    }
+
+    // Meetings within the current week (needed separately for gantt requests)
+    const weekMeetingsAll = (fromParam || toParam)
+      ? await prisma.meeting.findMany({
+          where: {
+            userId: { in: users.map(u => u.id) },
+            date: { gte: weekStart, lte: weekEnd },
+          },
+          select: { id: true, userId: true, title: true, date: true, startTime: true, endTime: true },
+        })
+      : meetingsAll
+    const weekMeetingsByUser = new Map<string, typeof weekMeetingsAll>()
+    for (const m of weekMeetingsAll) {
+      if (!weekMeetingsByUser.has(m.userId)) weekMeetingsByUser.set(m.userId, [])
+      weekMeetingsByUser.get(m.userId)!.push(m)
+    }
+
     const today = new Date()
     today.setHours(0, 0, 0, 0)
 
@@ -342,6 +378,14 @@ export async function GET(req: NextRequest) {
         dailyHoursMap[date] = (dailyHoursMap[date] ?? 0) + h
       }
 
+      // Merge meeting hours into dailyHoursMap
+      const userMeetings = meetingsByUser.get(user.id) ?? []
+      for (const m of userMeetings) {
+        const dateKey = new Date(m.date).toISOString().slice(0, 10)
+        const hrs = parseMeetingHours(m.startTime, m.endTime)
+        dailyHoursMap[dateKey] = (dailyHoursMap[dateKey] ?? 0) + hrs
+      }
+
       // Weekly stats always reflect the current week regardless of gantt range
       let currentWeekMap: Record<string, number>
       if (fromParam || toParam) {
@@ -349,6 +393,13 @@ export async function GET(req: NextRequest) {
         const { regular: cwR, delayed: cwD } = calcCompletedHours(userCompletedTasks, weekStart, weekEnd)
         for (const [date, h] of Object.entries(cwR)) currentWeekMap[date] = (currentWeekMap[date] ?? 0) + h
         for (const [date, h] of Object.entries(cwD)) currentWeekMap[date] = (currentWeekMap[date] ?? 0) + h
+        // Merge this week's meeting hours into currentWeekMap (gantt path)
+        const userWeekMeetings = weekMeetingsByUser.get(user.id) ?? []
+        for (const m of userWeekMeetings) {
+          const dateKey = new Date(m.date).toISOString().slice(0, 10)
+          const hrs = parseMeetingHours(m.startTime, m.endTime)
+          currentWeekMap[dateKey] = (currentWeekMap[dateKey] ?? 0) + hrs
+        }
       } else {
         currentWeekMap = dailyHoursMap
       }
@@ -429,6 +480,15 @@ export async function GET(req: NextRequest) {
         directTaskHours,
         reviewRequestHours,
         pendingRequestHours,
+        meetingHours: Math.round(userMeetings.reduce((s, m) => s + parseMeetingHours(m.startTime, m.endTime), 0) * 10) / 10,
+        meetings: userMeetings.map(m => ({
+          id: m.id,
+          title: m.title,
+          date: new Date(m.date).toISOString().slice(0, 10),
+          startTime: m.startTime,
+          endTime: m.endTime,
+          hours: parseMeetingHours(m.startTime, m.endTime),
+        })),
         dailyHoursMap,
         delayedDailyHoursMap,
         // Utilization
