@@ -529,6 +529,48 @@ function LogMeetingDialog({ target, open, onOpenChange, onLogged }: {
   )
 }
 
+// ─── Task daily-hours helper (client-side, mirrors server calcDailyHours) ──────
+
+function calcTaskDailyHours(
+  task: { estimatedHours: number; startDate?: string | null; endDate?: string | null; status?: string },
+  weekDates: string[]
+): Record<string, number> {
+  const hrs = task.estimatedHours || 0
+  if (hrs === 0 || weekDates.length === 0) return {}
+
+  if (!task.startDate || !task.endDate) {
+    const hpd = hrs / weekDates.length
+    return Object.fromEntries(weekDates.map(d => [d, hpd]))
+  }
+
+  const taskStart = new Date(task.startDate + 'T00:00:00')
+  const taskEnd   = new Date(task.endDate   + 'T23:59:59')
+
+  let totalWorkDays = 0
+  const cur = new Date(taskStart); cur.setHours(0, 0, 0, 0)
+  while (cur <= taskEnd) {
+    if (cur.getDay() !== 0 && cur.getDay() !== 6) totalWorkDays++
+    cur.setDate(cur.getDate() + 1)
+  }
+  const hpd = hrs / Math.max(totalWorkDays, 1)
+
+  const overlapping = weekDates.filter(d => {
+    const day = new Date(d + 'T00:00:00')
+    return day >= taskStart && day <= taskEnd
+  })
+
+  if (overlapping.length === 0) {
+    // Overdue IN_PROGRESS/REWORK: spread across entire week (mirrors server logic)
+    if (task.status === 'IN_PROGRESS' || task.status === 'REWORK') {
+      const hpdFallback = hrs / weekDates.length
+      return Object.fromEntries(weekDates.map(d => [d, hpdFallback]))
+    }
+    return {}
+  }
+
+  return Object.fromEntries(overlapping.map(d => [d, hpd]))
+}
+
 // ─── Employee Detail Dialog ───────────────────────────────────────────────────
 
 function EmployeeDetailDialog({ resource, open, onOpenChange, onLogMeeting }: {
@@ -537,6 +579,11 @@ function EmployeeDetailDialog({ resource, open, onOpenChange, onLogMeeting }: {
   onOpenChange: (v: boolean) => void
   onLogMeeting: (r: Resource) => void
 }) {
+  const [focusedId, setFocusedId] = useState<string | null>(null)
+
+  // Reset focus when dialog closes or resource changes
+  const handleOpenChange = (v: boolean) => { if (!v) setFocusedId(null); onOpenChange(v) }
+
   if (!resource) return null
 
   const utilBar = Math.min(resource.utilizationPct, 150)
@@ -553,8 +600,38 @@ function EmployeeDetailDialog({ resource, open, onOpenChange, onLogMeeting }: {
   const totalHours = resource.ownedTasks.reduce((s, t) => s + (t.estimatedHours || 0), 0)
   const pendingReqHours = resource.pendingRequestHours ?? 0
 
+  // Sorted week dates from dailyHoursMap
+  const weekDates = Object.keys(resource.dailyHoursMap).sort().slice(0, 5)
+
+  // When a task/meeting is focused, compute its per-day hours
+  const focusedTaskMap = useMemo(() => {
+    if (!focusedId) return null
+    const task = resource.ownedTasks.find(t => t.id === focusedId)
+      ?? resource.strategicTasks?.find(t => t.id === focusedId)
+    if (task) return calcTaskDailyHours({ ...task, estimatedHours: task.estimatedHours || 0 }, weekDates)
+    const meeting = resource.meetings?.find(m => m.id === focusedId)
+    if (meeting) {
+      // Meeting is a single day — put all hours on that date if it's in the week
+      return weekDates.includes(meeting.date) ? { [meeting.date]: meeting.hours } : {}
+    }
+    return null
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusedId, resource])
+
+  const focusedItem = focusedId
+    ? (resource.ownedTasks.find(t => t.id === focusedId)
+        ?? resource.strategicTasks?.find(t => t.id === focusedId)
+        ?? resource.meetings?.find(m => m.id === focusedId))
+    : null
+  const focusedLabel = focusedItem
+    ? ('name' in focusedItem ? focusedItem.name : ('title' in focusedItem ? focusedItem.title : ''))
+    : null
+  const focusedTotalHours = focusedTaskMap
+    ? Math.round(Object.values(focusedTaskMap).reduce((s, h) => s + h, 0) * 10) / 10
+    : 0
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="max-w-2xl max-h-[80vh] flex flex-col">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-3">
@@ -624,28 +701,60 @@ function EmployeeDetailDialog({ resource, open, onOpenChange, onLogMeeting }: {
 
         {/* Day-by-day breakdown */}
         <div>
-          <p className="text-xs font-medium text-muted-foreground mb-1.5">This week — daily hours (8h/day limit)</p>
+          <div className="flex items-center justify-between mb-1.5">
+            <p className="text-xs font-medium text-muted-foreground">
+              {focusedLabel
+                ? <><span className="text-blue-600 font-semibold">↑ {focusedLabel}</span><span className="text-muted-foreground"> vs total ({focusedTotalHours}h this week)</span></>
+                : 'This week — daily hours (8h/day limit)'}
+            </p>
+            {focusedId && (
+              <button onClick={() => setFocusedId(null)} className="text-xs text-muted-foreground hover:text-foreground underline">
+                Clear
+              </button>
+            )}
+          </div>
           <div className="grid grid-cols-5 gap-1.5">
-            {Object.entries(resource.dailyHoursMap).sort(([a], [b]) => a.localeCompare(b)).slice(0, 5).map(([date, hours]) => {
+            {weekDates.map(date => {
+              const hours = resource.dailyHoursMap[date] ?? 0
+              const taskHrs = focusedTaskMap?.[date] ?? 0
               const over = hours > resource.dailyCapacityHours
-              const pct  = Math.min(hours / Math.max(resource.dailyCapacityHours, 1) * 100, 100)
+              const pct      = Math.min(hours   / Math.max(resource.dailyCapacityHours, 1) * 100, 100)
+              const taskPct  = Math.min(taskHrs / Math.max(resource.dailyCapacityHours, 1) * 100, 100)
               const label = new Date(date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short' })
+              const barColor = over ? 'bg-red-400' : pct > 70 ? 'bg-orange-300' : 'bg-green-300'
               return (
                 <div key={date} className="text-center space-y-1">
                   <p className="text-xs text-muted-foreground">{label}</p>
-                  <div className="h-16 bg-muted rounded relative flex items-end overflow-hidden">
+                  <div className="h-16 bg-muted rounded relative overflow-hidden">
+                    {/* Total bar (dimmed when focused) */}
                     <div
-                      className={`w-full rounded transition-all ${over ? 'bg-red-500' : pct > 70 ? 'bg-orange-400' : 'bg-green-500'}`}
+                      className={`absolute bottom-0 w-full transition-all ${focusedId ? barColor + ' opacity-40' : (over ? 'bg-red-500' : pct > 70 ? 'bg-orange-400' : 'bg-green-500')}`}
                       style={{ height: `${Math.max(pct, 4)}%` }}
                     />
+                    {/* Focused-task overlay */}
+                    {focusedId && taskPct > 0 && (
+                      <div
+                        className="absolute bottom-0 w-full bg-blue-500 transition-all"
+                        style={{ height: `${Math.max(taskPct, 3)}%` }}
+                      />
+                    )}
                   </div>
-                  <p className={`text-xs font-medium ${over ? 'text-red-600' : ''}`}>
-                    {Math.round(hours * 10) / 10}h
+                  <p className={`text-xs font-medium ${over && !focusedId ? 'text-red-600' : ''}`}>
+                    {focusedId
+                      ? taskHrs > 0
+                        ? <><span className="text-blue-600">{Math.round(taskHrs * 10) / 10}h</span><span className="text-muted-foreground">/{Math.round(hours * 10) / 10}h</span></>
+                        : <span className="text-muted-foreground">{Math.round(hours * 10) / 10}h</span>
+                      : `${Math.round(hours * 10) / 10}h`}
                   </p>
                 </div>
               )
             })}
           </div>
+          {focusedId && (
+            <p className="text-xs text-muted-foreground mt-1.5 text-center">
+              <span className="inline-block w-2.5 h-2.5 bg-blue-500 rounded-sm mr-1 align-middle" />blue = selected · faded = total load
+            </p>
+          )}
         </div>
 
         {/* Tasks list */}
@@ -663,28 +772,35 @@ function EmployeeDetailDialog({ resource, open, onOpenChange, onLogMeeting }: {
                   </span>
                 </div>
                 <div className="space-y-1.5">
-                  {tasks.map(task => (
-                    <div key={task.id} className="border rounded-lg px-3 py-2 flex items-center gap-3">
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium truncate">{task.name}</p>
-                        <p className="text-xs text-muted-foreground truncate">
-                          {task.workstream.name}
-                          {task.startDate && ` · ${fmtDate(task.startDate)} – ${fmtDate(task.endDate)}`}
-                        </p>
+                  {tasks.map(task => {
+                    const isFocused = focusedId === task.id
+                    return (
+                      <div
+                        key={task.id}
+                        onClick={() => setFocusedId(isFocused ? null : task.id)}
+                        className={`border rounded-lg px-3 py-2 flex items-center gap-3 cursor-pointer transition-colors ${isFocused ? 'border-blue-500 bg-blue-50 dark:bg-blue-950/40' : 'hover:bg-muted/50'}`}
+                      >
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium truncate">{task.name}</p>
+                          <p className="text-xs text-muted-foreground truncate">
+                            {task.workstream.name}
+                            {task.startDate && ` · ${fmtDate(task.startDate)} – ${fmtDate(task.endDate)}`}
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${PRIORITY_COLORS[task.priority] ?? ''}`}>
+                            {task.priority}
+                          </span>
+                          <span className={`text-xs px-1.5 py-0.5 rounded ${STATUS_COLORS[task.status] ?? ''}`}>
+                            {task.status.replace('_', ' ')}
+                          </span>
+                          <span className={`text-xs font-semibold w-10 text-right ${isFocused ? 'text-blue-600' : 'text-blue-600'}`}>
+                            {task.estimatedHours > 0 ? `${task.estimatedHours}h` : '—'}
+                          </span>
+                        </div>
                       </div>
-                      <div className="flex items-center gap-1.5 shrink-0">
-                        <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${PRIORITY_COLORS[task.priority] ?? ''}`}>
-                          {task.priority}
-                        </span>
-                        <span className={`text-xs px-1.5 py-0.5 rounded ${STATUS_COLORS[task.status] ?? ''}`}>
-                          {task.status.replace('_', ' ')}
-                        </span>
-                        <span className="text-xs font-semibold text-blue-600 w-10 text-right">
-                          {task.estimatedHours > 0 ? `${task.estimatedHours}h` : '—'}
-                        </span>
-                      </div>
-                    </div>
-                  ))}
+                    )
+                  })}
                 </div>
               </div>
             ))
@@ -703,25 +819,32 @@ function EmployeeDetailDialog({ resource, open, onOpenChange, onLogMeeting }: {
                 </span>
               </div>
               <div className="space-y-1.5">
-                {resource.strategicTasks!.map(st => (
-                  <div key={st.id} className="border border-purple-200 dark:border-purple-900 rounded-lg px-3 py-2 flex items-center gap-3">
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium truncate">{st.name}</p>
-                      <p className="text-xs text-muted-foreground truncate">
-                        {st.requestTitle}
-                        {st.startDate && ` · ${fmtDate(st.startDate)} – ${fmtDate(st.endDate)}`}
-                      </p>
+                {resource.strategicTasks!.map(st => {
+                  const isFocused = focusedId === st.id
+                  return (
+                    <div
+                      key={st.id}
+                      onClick={() => setFocusedId(isFocused ? null : st.id)}
+                      className={`border rounded-lg px-3 py-2 flex items-center gap-3 cursor-pointer transition-colors ${isFocused ? 'border-blue-500 bg-blue-50 dark:bg-blue-950/40' : 'border-purple-200 dark:border-purple-900 hover:bg-muted/50'}`}
+                    >
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium truncate">{st.name}</p>
+                        <p className="text-xs text-muted-foreground truncate">
+                          {st.requestTitle}
+                          {st.startDate && ` · ${fmtDate(st.startDate)} – ${fmtDate(st.endDate)}`}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <span className={`text-xs px-1.5 py-0.5 rounded ${STATUS_COLORS[st.status] ?? 'bg-slate-100 text-slate-600'}`}>
+                          {st.status.replace('_', ' ')}
+                        </span>
+                        <span className={`text-xs font-semibold w-10 text-right ${isFocused ? 'text-blue-600' : 'text-purple-600'}`}>
+                          {st.estimatedHours > 0 ? `${st.estimatedHours}h` : '—'}
+                        </span>
+                      </div>
                     </div>
-                    <div className="flex items-center gap-1.5 shrink-0">
-                      <span className={`text-xs px-1.5 py-0.5 rounded ${STATUS_COLORS[st.status] ?? 'bg-slate-100 text-slate-600'}`}>
-                        {st.status.replace('_', ' ')}
-                      </span>
-                      <span className="text-xs font-semibold text-purple-600 w-10 text-right">
-                        {st.estimatedHours > 0 ? `${st.estimatedHours}h` : '—'}
-                      </span>
-                    </div>
-                  </div>
-                ))}
+                  )
+                })}
               </div>
             </div>
           )}
@@ -739,15 +862,22 @@ function EmployeeDetailDialog({ resource, open, onOpenChange, onLogMeeting }: {
                 </span>
               </div>
               <div className="space-y-1.5">
-                {resource.meetings!.map(m => (
-                  <div key={m.id} className="border border-sky-200 dark:border-sky-900 rounded-lg px-3 py-2 flex items-center gap-3">
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium truncate">{m.title}</p>
-                      <p className="text-xs text-muted-foreground">{m.date} · {m.startTime}–{m.endTime}</p>
+                {resource.meetings!.map(m => {
+                  const isFocused = focusedId === m.id
+                  return (
+                    <div
+                      key={m.id}
+                      onClick={() => setFocusedId(isFocused ? null : m.id)}
+                      className={`border rounded-lg px-3 py-2 flex items-center gap-3 cursor-pointer transition-colors ${isFocused ? 'border-blue-500 bg-blue-50 dark:bg-blue-950/40' : 'border-sky-200 dark:border-sky-900 hover:bg-muted/50'}`}
+                    >
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium truncate">{m.title}</p>
+                        <p className="text-xs text-muted-foreground">{m.date} · {m.startTime}–{m.endTime}</p>
+                      </div>
+                      <span className={`text-xs font-semibold w-10 text-right ${isFocused ? 'text-blue-600' : 'text-sky-600'}`}>{m.hours}h</span>
                     </div>
-                    <span className="text-xs font-semibold text-sky-600 w-10 text-right">{m.hours}h</span>
-                  </div>
-                ))}
+                  )
+                })}
               </div>
             </div>
           )}
