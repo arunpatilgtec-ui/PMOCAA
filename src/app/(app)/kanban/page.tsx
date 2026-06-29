@@ -423,7 +423,7 @@ export default function KanbanPage() {
                       <div
                         ref={provided.innerRef}
                         {...provided.droppableProps}
-                        className={`flex-1 min-h-24 rounded-b-lg p-2 space-y-2 transition-colors ${
+                        className={`flex-1 min-h-24 overflow-y-auto rounded-b-lg p-2 space-y-2 transition-colors ${
                           snapshot.isDraggingOver ? 'bg-muted/60 ring-1 ring-primary/20' : 'bg-muted/30'
                         }`}
                       >
