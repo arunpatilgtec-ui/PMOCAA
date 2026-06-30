@@ -572,8 +572,8 @@ export default function ProjectDetailPage() {
         )}
       </div>
 
-      {/* Cost Refresh toggle — TEARDOWN projects, planner/admin/manager only */}
-      {project.type === 'TEARDOWN' && (userIsPlanner || userIsManager) && (
+      {/* Cost Refresh toggle — all projects, planner/admin/manager only */}
+      {(userIsPlanner || userIsManager) && (
         <div className="flex items-center gap-2">
           <Switch
             checked={!!project.costRefresh}
