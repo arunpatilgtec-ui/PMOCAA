@@ -32,6 +32,7 @@ import {
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+import { Switch } from '@/components/ui/switch'
 import { WorkstreamPanel } from '@/components/projects/workstream-panel'
 import { ResourceAllocationDialog } from '@/components/projects/resource-allocation-dialog'
 import { ProductsPanel } from '@/components/projects/products-panel'
@@ -65,6 +66,8 @@ interface Project {
   projectLinks: string[]
   projectClassification?: string
   numberOfProducts?: number
+  costRefresh?: boolean
+  costRefreshOffset?: number
   lead?: { id: string; name: string; email: string }
   planner?: { id: string; name: string; email: string }
   workstreams: Workstream[]
@@ -136,6 +139,11 @@ export default function ProjectDetailPage() {
   const [andonDesc, setAndonDesc] = useState('')
   const [andonSeverity, setAndonSeverity] = useState<string>('HIGH')
   const [andonSaving, setAndonSaving] = useState(false)
+
+  // Cost Refresh toggle
+  const [crWarningOpen, setCrWarningOpen] = useState(false)
+  const [crPendingEnable, setCrPendingEnable] = useState<boolean>(false)
+  const [crToggling, setCrToggling] = useState(false)
 
   const load = useCallback(async () => {
     try {
@@ -449,6 +457,24 @@ export default function ProjectDetailPage() {
     } finally { setAndonSaving(false) }
   }
 
+  async function confirmCostRefresh() {
+    if (!project) return
+    setCrToggling(true)
+    try {
+      const res = await fetch(`/api/projects/${project.id}/cost-refresh`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enable: crPendingEnable }),
+      })
+      if (!res.ok) throw new Error((await res.json()).error)
+      toast.success(crPendingEnable ? 'Cost Refresh enabled — Tear Down tasks cancelled and timeline adjusted' : 'Cost Refresh disabled — Tear Down tasks restored')
+      setCrWarningOpen(false)
+      await load()
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'Failed to update Cost Refresh')
+    } finally { setCrToggling(false) }
+  }
+
   return (
     <div className="p-6 space-y-5">
       {/* Header */}
@@ -545,6 +571,26 @@ export default function ProjectDetailPage() {
           </DropdownMenu>
         )}
       </div>
+
+      {/* Cost Refresh toggle — TEARDOWN projects, planner/admin/manager only */}
+      {project.type === 'TEARDOWN' && (userIsPlanner || userIsManager) && (
+        <div className="flex items-center gap-2">
+          <Switch
+            checked={!!project.costRefresh}
+            onCheckedChange={(checked) => {
+              setCrPendingEnable(checked)
+              setCrWarningOpen(true)
+            }}
+            disabled={crToggling}
+          />
+          <span className="text-sm font-medium">Cost Refresh</span>
+          {project.costRefresh && (
+            <span className="text-xs px-2 py-0.5 rounded bg-amber-100 text-amber-700 font-medium">
+              Teardown skipped · {project.costRefreshOffset}d removed
+            </span>
+          )}
+        </div>
+      )}
 
       {/* Plan action buttons */}
       <div className="flex gap-2 flex-wrap">
@@ -927,6 +973,54 @@ export default function ProjectDetailPage() {
       </Dialog>
 
       {/* ── Delete Confirmation Dialog ── */}
+      {/* Cost Refresh confirmation dialog */}
+      <Dialog open={crWarningOpen} onOpenChange={setCrWarningOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className={crPendingEnable ? 'text-amber-600' : 'text-blue-600'}>
+              {crPendingEnable ? 'Enable Cost Refresh?' : 'Disable Cost Refresh?'}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 text-sm text-muted-foreground">
+            {crPendingEnable ? (
+              <>
+                <p>This will:</p>
+                <ul className="list-disc list-inside space-y-1">
+                  <li>Cancel all <strong>Tear Down</strong> tasks</li>
+                  <li>Shift Costing and subsequent workstream timelines forward</li>
+                </ul>
+                <p className="text-red-600 font-medium flex items-center gap-1">
+                  <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                  Any progress or data saved in Tear Down tasks will be lost and cannot be restored exactly.
+                </p>
+              </>
+            ) : (
+              <>
+                <p>This will:</p>
+                <ul className="list-disc list-inside space-y-1">
+                  <li>Restore <strong>Tear Down</strong> tasks to <em>Planned</em> status</li>
+                  <li>Shift Costing and subsequent workstream timelines back</li>
+                </ul>
+                <p className="text-amber-600 font-medium flex items-center gap-1">
+                  <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                  Tear Down tasks will be reset — any custom edits made before enabling Cost Refresh are gone.
+                </p>
+              </>
+            )}
+          </div>
+          <div className="flex justify-end gap-2 pt-2">
+            <Button variant="outline" onClick={() => setCrWarningOpen(false)} disabled={crToggling}>Cancel</Button>
+            <Button
+              onClick={confirmCostRefresh}
+              disabled={crToggling}
+              className={crPendingEnable ? 'bg-amber-600 hover:bg-amber-700' : 'bg-blue-600 hover:bg-blue-700'}
+            >
+              {crToggling ? 'Updating…' : 'Confirm'}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
       <Dialog open={deleteConfirm} onOpenChange={setDeleteConfirm}>
         <DialogContent className="max-w-sm">
           <DialogHeader>

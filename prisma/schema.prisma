@@ -217,6 +217,8 @@ model Project {
   projectLinks          String[]
   projectClassification String?
   numberOfProducts      Int?
+  costRefresh           Boolean            @default(false)
+  costRefreshOffset     Int                @default(0)
   createdAt             DateTime           @default(now())
   updatedAt             DateTime           @updatedAt
 
