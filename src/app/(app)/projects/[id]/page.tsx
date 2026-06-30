@@ -236,6 +236,19 @@ export default function ProjectDetailPage() {
     }
   }
 
+  async function fixTimelineGaps() {
+    if (!confirm('This will resequence ALL task dates from the project start date with no gaps. Continue?')) return
+    try {
+      const res = await fetch(`/api/projects/${id}/resequence-timeline`, { method: 'POST' })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error)
+      toast.success(`Timeline fixed — ${data.updated} tasks resequenced`)
+      load()
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'Failed to fix timeline')
+    }
+  }
+
   async function syncPerProductTasks() {
     try {
       const res = await fetch(`/api/projects/${id}/sync-product-teardown`, { method: 'POST' })
@@ -542,6 +555,9 @@ export default function ProjectDetailPage() {
                   </DropdownMenuItem>
                   <DropdownMenuItem onClick={syncTemplateTasks}>
                     <Plus className="mr-2 h-4 w-4 text-green-600" /> Sync Template Tasks
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={fixTimelineGaps}>
+                    <CalendarRange className="mr-2 h-4 w-4 text-orange-500" /> Fix Timeline Gaps
                   </DropdownMenuItem>
                   {timelineProducts.length > 0 && (
                     <DropdownMenuItem onClick={syncPerProductTasks}>
