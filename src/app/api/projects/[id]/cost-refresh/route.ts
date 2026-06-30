@@ -23,7 +23,6 @@ export async function POST(req: NextRequest, ctx: RouteContext<'/api/projects/[i
       where: { id },
       select: {
         id: true,
-        costRefresh: true,
         costRefreshOffset: true,
         workstreams: {
           select: {
@@ -40,103 +39,115 @@ export async function POST(req: NextRequest, ctx: RouteContext<'/api/projects/[i
     if (!project) return Response.json({ error: 'Not found' }, { status: 404 })
 
     const teardownWs = project.workstreams.filter((ws) => ws.name === 'Tear Down')
-    const otherWs = project.workstreams.filter((ws) => ws.name !== 'Tear Down')
+    const otherWs    = project.workstreams.filter((ws) => ws.name !== 'Tear Down')
 
     if (enable) {
-      const tdTasks = teardownWs.flatMap((ws) => ws.tasks)
+      const tdTasks     = teardownWs.flatMap((ws) => ws.tasks)
       const tdWithDates = tdTasks.filter((t) => t.startDate && t.endDate)
 
+      // Offset = gap from teardown start to first non-teardown task start
+      // This ensures costing lands exactly where teardown would have started,
+      // regardless of any buffer days between the two workstreams.
       let offsetDays = 0
-      if (tdWithDates.length > 0) {
-        const tdStartMs = Math.min(...tdWithDates.map((t) => new Date(t.startDate!).getTime()))
-        const tdEndMs   = Math.max(...tdWithDates.map((t) => new Date(t.endDate!).getTime()))
-        offsetDays = Math.round((tdEndMs - tdStartMs) / 86_400_000) + 1
+      const otherTasksWithDates = otherWs.flatMap((ws) => ws.tasks).filter((t) => t.startDate)
+      if (tdWithDates.length > 0 && otherTasksWithDates.length > 0) {
+        const tdStartMs    = Math.min(...tdWithDates.map((t) => new Date(t.startDate!).getTime()))
+        const otherStartMs = Math.min(...otherTasksWithDates.map((t) => new Date(t.startDate!).getTime()))
+        if (otherStartMs > tdStartMs) {
+          offsetDays = Math.round((otherStartMs - tdStartMs) / 86_400_000)
+        }
       }
 
-      const ops: ReturnType<typeof prisma.task.update>[] = []
-
-      // Cancel teardown tasks and mark them
-      for (const ws of teardownWs) {
-        for (const task of ws.tasks) {
-          if (task.status === 'CANCELLED') continue
-          ops.push(
-            prisma.task.update({
+      await prisma.$transaction(async (tx) => {
+        // Cancel teardown tasks
+        for (const ws of teardownWs) {
+          for (const task of ws.tasks) {
+            if (task.status === 'CANCELLED') continue
+            await tx.task.update({
               where: { id: task.id },
               data: {
                 status: 'CANCELLED',
                 description: `[CR]${task.description ?? ''}`,
               },
             })
-          )
+          }
         }
-      }
 
-      // Shift non-teardown tasks backward
-      if (offsetDays > 0) {
-        for (const ws of otherWs) {
-          for (const task of ws.tasks) {
-            if (!task.startDate) continue
-            ops.push(
-              prisma.task.update({
+        // Shift non-teardown tasks backward
+        if (offsetDays > 0) {
+          for (const ws of otherWs) {
+            for (const task of ws.tasks) {
+              if (!task.startDate) continue
+              await tx.task.update({
                 where: { id: task.id },
                 data: {
                   startDate: addDays(task.startDate, -offsetDays),
                   ...(task.endDate ? { endDate: addDays(task.endDate, -offsetDays) } : {}),
                 },
               })
-            )
+            }
           }
         }
-      }
 
-      await prisma.$transaction([
-        ...ops,
-        prisma.project.update({ where: { id }, data: { costRefresh: true, costRefreshOffset: offsetDays } }),
-      ])
+        await tx.project.update({
+          where: { id },
+          data: { costRefresh: true, costRefreshOffset: offsetDays },
+        })
+      })
+
+      return Response.json({ ok: true, offsetDays })
     } else {
       const offsetDays = project.costRefreshOffset
 
-      const ops: ReturnType<typeof prisma.task.update>[] = []
-
-      // Restore teardown tasks that were CR-cancelled
-      for (const ws of teardownWs) {
-        for (const task of ws.tasks) {
-          if (!task.description?.startsWith('[CR]')) continue
-          const restoredDesc = task.description.slice(4) || null
-          ops.push(
-            prisma.task.update({
-              where: { id: task.id },
-              data: { status: 'PLANNED', description: restoredDesc },
-            })
-          )
-        }
-      }
-
-      // Shift non-teardown tasks forward
-      if (offsetDays > 0) {
-        for (const ws of otherWs) {
+      await prisma.$transaction(async (tx) => {
+        // Restore CR-cancelled teardown tasks
+        for (const ws of teardownWs) {
           for (const task of ws.tasks) {
-            if (!task.startDate) continue
-            ops.push(
-              prisma.task.update({
+            if (!task.description?.startsWith('[CR]')) continue
+            await tx.task.update({
+              where: { id: task.id },
+              data: {
+                status: 'PLANNED',
+                description: task.description.slice(4) || null,
+              },
+            })
+          }
+        }
+
+        // Shift non-teardown tasks forward — only those that were actually shifted back
+        // (i.e. their current startDate is before the teardown start date, meaning CR moved them).
+        // Tasks that weren't shifted (dates still after teardown window) are left alone.
+        if (offsetDays > 0) {
+          const tdDates = teardownWs.flatMap((ws) => ws.tasks).filter((t) => t.startDate)
+          const tdStartMs = tdDates.length > 0
+            ? Math.min(...tdDates.map((t) => new Date(t.startDate!).getTime()))
+            : null
+
+          for (const ws of otherWs) {
+            for (const task of ws.tasks) {
+              if (!task.startDate) continue
+              const taskStartMs = new Date(task.startDate).getTime()
+              // Only shift if the task currently starts before teardown start (i.e. was shifted by CR)
+              if (tdStartMs !== null && taskStartMs >= tdStartMs) continue
+              await tx.task.update({
                 where: { id: task.id },
                 data: {
                   startDate: addDays(task.startDate, offsetDays),
                   ...(task.endDate ? { endDate: addDays(task.endDate, offsetDays) } : {}),
                 },
               })
-            )
+            }
           }
         }
-      }
 
-      await prisma.$transaction([
-        ...ops,
-        prisma.project.update({ where: { id }, data: { costRefresh: false, costRefreshOffset: 0 } }),
-      ])
+        await tx.project.update({
+          where: { id },
+          data: { costRefresh: false, costRefreshOffset: 0 },
+        })
+      })
+
+      return Response.json({ ok: true })
     }
-
-    return Response.json({ ok: true })
   } catch (err: unknown) {
     if (err instanceof Error && err.message === 'Unauthorized') {
       return Response.json({ error: 'Unauthorized' }, { status: 401 })
