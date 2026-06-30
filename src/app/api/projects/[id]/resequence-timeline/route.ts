@@ -1,11 +1,25 @@
 import { NextRequest } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { requireAuth } from '@/lib/auth'
-import { CATEGORY_TEMPLATES } from '@/lib/project-templates'
-import { addWorkingDays, countWorkingDays } from '@/lib/date-utils'
 
-// Force-resequence ALL task dates from project startDate with no gaps.
-// Unlike sync-template, this overwrites existing dates to fix ordering issues.
+function addCalDays(date: Date, days: number): Date {
+  const d = new Date(date)
+  d.setDate(d.getDate() + days)
+  return d
+}
+
+// Advance to next weekday (Mon–Fri) if date lands on a weekend
+function nextWeekday(date: Date): Date {
+  const d = new Date(date)
+  const dow = d.getDay()
+  if (dow === 6) d.setDate(d.getDate() + 2) // Sat → Mon
+  if (dow === 0) d.setDate(d.getDate() + 1) // Sun → Mon
+  return d
+}
+
+// Shift ALL workstreams so they are back-to-back with no gaps,
+// treating each workstream as a single block.
+// Tasks WITHIN a workstream keep their relative offsets (preserves parallel tasks).
 export async function POST(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const session = await requireAuth()
@@ -25,49 +39,59 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
     })
     if (!project) return Response.json({ error: 'Not found' }, { status: 404 })
 
-    const wsTemplates = project.category ? CATEGORY_TEMPLATES[project.category] : undefined
-
     let updated = 0
+    let prevWsEnd: Date | null = null
 
     await prisma.$transaction(async (tx) => {
-      let cursor = new Date(project.startDate)
-      cursor.setHours(0, 0, 0, 0)
-
       for (const ws of project.workstreams) {
-        const tmplWs = wsTemplates?.find((w) => w.name === ws.name)
+        // Only consider non-cancelled tasks that have dates
+        const datedTasks = ws.tasks.filter(
+          (t) => t.status !== 'CANCELLED' && t.startDate && t.endDate,
+        )
+        if (datedTasks.length === 0) continue
 
-        for (const task of ws.tasks) {
-          // Skip cancelled tasks — they don't occupy timeline space
-          if (task.status === 'CANCELLED') continue
+        // Workstream bounding box
+        const wsStartMs = Math.min(...datedTasks.map((t) => new Date(t.startDate!).getTime()))
+        const wsEndMs   = Math.max(...datedTasks.map((t) => new Date(t.endDate!).getTime()))
+        const wsStart   = new Date(wsStartMs)
+        const wsEnd     = new Date(wsEndMs)
 
-          // Determine working-day duration from existing dates, then from template, then default 1
-          let durationDays = 1
-          if (task.startDate && task.endDate) {
-            durationDays = countWorkingDays(new Date(task.startDate), new Date(task.endDate))
-          } else {
-            const tmplTask = tmplWs?.tasks.find((t) => t.name === task.name)
-            durationDays = tmplTask?.durationDays ?? 1
-          }
-
-          const taskStart = new Date(cursor)
-          const taskEnd   = addWorkingDays(new Date(cursor), durationDays - 1)
-
-          await tx.task.update({
-            where: { id: task.id },
-            data: { startDate: taskStart, endDate: taskEnd },
-          })
-
-          cursor = addWorkingDays(taskEnd, 1)
-          updated++
+        // Where should this workstream start?
+        let newWsStart: Date
+        if (prevWsEnd === null) {
+          newWsStart = nextWeekday(new Date(project.startDate))
+        } else {
+          // Day immediately after previous workstream ends (skip weekends)
+          newWsStart = nextWeekday(addCalDays(prevWsEnd, 1))
         }
+
+        // Calendar-day shift to apply to every task in this workstream
+        const shiftDays = Math.round(
+          (newWsStart.getTime() - wsStart.getTime()) / 86_400_000,
+        )
+
+        if (shiftDays !== 0) {
+          for (const task of ws.tasks) {
+            if (!task.startDate) continue
+            const newStart = addCalDays(task.startDate, shiftDays)
+            const newEnd   = task.endDate
+              ? addCalDays(task.endDate, shiftDays)
+              : newStart // endDate < startDate guard — use startDate as end
+            await tx.task.update({
+              where: { id: task.id },
+              data: { startDate: newStart, endDate: newEnd },
+            })
+            updated++
+          }
+        }
+
+        // Advance cursor to new end of this workstream
+        prevWsEnd = addCalDays(wsEnd, shiftDays)
       }
 
-      // Align project endDate to the last task's end
-      const lastWs = project.workstreams[project.workstreams.length - 1]
-      const lastTask = lastWs?.tasks.filter((t) => t.status !== 'CANCELLED').slice(-1)[0]
-      if (lastTask) {
-        const newEnd = addWorkingDays(new Date(cursor), -1)
-        await tx.project.update({ where: { id }, data: { endDate: newEnd } })
+      // Update project endDate to match the last task's end
+      if (prevWsEnd) {
+        await tx.project.update({ where: { id }, data: { endDate: prevWsEnd } })
       }
     })
 
