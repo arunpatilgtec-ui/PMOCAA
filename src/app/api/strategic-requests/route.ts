@@ -45,6 +45,7 @@ export async function POST(req: NextRequest) {
         startDate: new Date(data.startDate),
         endDate: data.endDate ? new Date(data.endDate) : null,
         submitterId: session.id,
+        fileLinks: Array.isArray(data.fileLinks) ? data.fileLinks : [],
       },
       include: {
         submitter: { select: { id: true, name: true } },

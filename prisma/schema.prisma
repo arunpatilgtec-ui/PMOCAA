@@ -190,6 +190,7 @@ model Request {
   isRecurring  Boolean    @default(false)
   hoursPerDay  Float?
   assignedById String?
+  fileLinks    String[]
 
   submitter  User     @relation("RequestSubmitter", fields: [submitterId], references: [id], onDelete: Cascade)
   assignee   User?    @relation("RequestAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
@@ -487,6 +488,7 @@ model StrategicRequest {
   endDate     DateTime?
   status      StrategicStatus @default(ACTIVE)
   submitterId String
+  fileLinks   String[]
   createdAt   DateTime        @default(now())
   updatedAt   DateTime        @updatedAt
 
