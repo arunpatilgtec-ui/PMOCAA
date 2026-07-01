@@ -1,7 +1,7 @@
 import { NextRequest } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { requireAuth } from '@/lib/auth'
-import { addWorkingDays } from '@/lib/date-utils'
+import { addWorkingDays, sequenceTasks } from '@/lib/date-utils'
 import { CATEGORY_TEMPLATES } from '@/lib/project-templates'
 
 type Ctx = { params: Promise<{ id: string }> }
@@ -37,36 +37,21 @@ export async function POST(_req: NextRequest, ctx: Ctx) {
     const tdTaskTemplates = template.find((ws) => ws.name === 'Tear Down')?.tasks ?? []
     const costTaskTemplates = template.find((ws) => ws.name === 'Costing')?.tasks ?? []
 
-    // Pre-compute sequential dates for each Tear Down subsystem task.
+    // Pre-compute sequential dates for each Tear Down subsystem task using half-day packing.
     // All products share the same dates per subsystem (different teams work in parallel).
-    const tdTemplateDates: Array<{ startDate: Date; endDate: Date }> = []
-    if (project.startDate && tdTaskTemplates.length > 0) {
-      let cursor = addWorkingDays(new Date(project.startDate), 2)
-      for (const task of tdTaskTemplates) {
-        const duration = Math.max(1, Math.ceil(task.durationDays))
-        const taskStart = new Date(cursor)
-        const taskEnd = addWorkingDays(new Date(cursor), duration - 1)
-        tdTemplateDates.push({ startDate: taskStart, endDate: taskEnd })
-        cursor = addWorkingDays(taskEnd, 1)
-      }
-    }
+    const tdAnchor = project.startDate ? addWorkingDays(new Date(project.startDate), 2) : null
+    const tdTemplateDates = tdAnchor && tdTaskTemplates.length > 0
+      ? sequenceTasks(tdTaskTemplates, tdAnchor)
+      : []
 
     // Costing starts the working day after the last Tear Down task ends.
     const tdLastEnd = tdTemplateDates.length > 0
       ? tdTemplateDates[tdTemplateDates.length - 1].endDate
       : (project.startDate ? addWorkingDays(new Date(project.startDate), 6) : null)
 
-    const costTemplateDates: Array<{ startDate: Date; endDate: Date }> = []
-    if (tdLastEnd && costTaskTemplates.length > 0) {
-      let cursor = addWorkingDays(tdLastEnd, 1)
-      for (const task of costTaskTemplates) {
-        const duration = Math.max(1, Math.ceil(task.durationDays))
-        const taskStart = new Date(cursor)
-        const taskEnd = addWorkingDays(new Date(cursor), duration - 1)
-        costTemplateDates.push({ startDate: taskStart, endDate: taskEnd })
-        cursor = addWorkingDays(taskEnd, 1)
-      }
-    }
+    const costTemplateDates = tdLastEnd && costTaskTemplates.length > 0
+      ? sequenceTasks(costTaskTemplates, addWorkingDays(tdLastEnd, 1))
+      : []
 
     let tdWs = project.workstreams.find((w) => w.name === 'Tear Down') ?? null
     let costWs = project.workstreams.find((w) => w.name === 'Costing') ?? null

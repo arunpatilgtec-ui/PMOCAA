@@ -2,7 +2,7 @@ import { NextRequest } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { requireAuth } from '@/lib/auth'
 import { CATEGORY_TEMPLATES, WorkstreamTemplate } from '@/lib/project-templates'
-import { addWorkingDays } from '@/lib/date-utils'
+import { sequenceTasks } from '@/lib/date-utils'
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -25,21 +25,15 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     const startDate = new Date(project.startDate)
     const leadId: string | null = data.leadId || project.leadId || null
 
-    // Compute end date: all workstreams scheduled sequentially
-    let endDate: Date
-    if (wsTemplates) {
-      let cursor = new Date(startDate)
-      cursor.setHours(0, 0, 0, 0)
-      let maxEnd = new Date(cursor)
+    // Pre-compute all task dates: all workstreams scheduled sequentially with half-day packing
+    const allTemplateTasks = wsTemplates ? wsTemplates.flatMap((ws) => ws.tasks) : []
+    const anchor = new Date(startDate)
+    anchor.setHours(0, 0, 0, 0)
+    const allDates = wsTemplates ? sequenceTasks(allTemplateTasks, anchor) : []
 
-      for (const ws of wsTemplates) {
-        for (const task of ws.tasks) {
-          const end = addWorkingDays(new Date(cursor), task.durationDays - 1)
-          if (end > maxEnd) maxEnd = new Date(end)
-          cursor = addWorkingDays(end, 1)
-        }
-      }
-      endDate = maxEnd
+    let endDate: Date
+    if (wsTemplates && allDates.length > 0) {
+      endDate = allDates[allDates.length - 1].endDate
     } else if (data.endDate) {
       endDate = new Date(data.endDate)
     } else {
@@ -62,8 +56,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       await tx.workstream.deleteMany({ where: { projectId: id } })
 
       if (wsTemplates) {
-        let cursor = new Date(startDate)
-        cursor.setHours(0, 0, 0, 0)
+        let dateIdx = 0
         let wsOrder = 0
 
         for (const wsTemplate of wsTemplates) {
@@ -73,8 +66,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
           let taskOrder = 0
           for (const taskTemplate of wsTemplate.tasks) {
-            const taskStart = new Date(cursor)
-            const taskEnd = addWorkingDays(new Date(cursor), taskTemplate.durationDays - 1)
+            const { startDate: taskStart, endDate: taskEnd } = allDates[dateIdx++]
             await tx.task.create({
               data: {
                 name: taskTemplate.name,
@@ -91,7 +83,6 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
                   : {}),
               },
             })
-            cursor = addWorkingDays(taskEnd, 1)
           }
         }
       }

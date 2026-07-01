@@ -1,7 +1,7 @@
 import { NextRequest } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { requireAuth } from '@/lib/auth'
-import { addWorkingDays } from '@/lib/date-utils'
+import { addWorkingDays, sequenceTasks } from '@/lib/date-utils'
 import { CATEGORY_TEMPLATES } from '@/lib/project-templates'
 
 type Ctx = { params: Promise<{ id: string }> }
@@ -38,28 +38,32 @@ export async function POST(_req: NextRequest, ctx: Ctx) {
     const template = project.category ? CATEGORY_TEMPLATES[project.category] : undefined
     if (!template) return Response.json({ error: `No template found for category "${project.category}"` }, { status: 400 })
 
+    // Walk workstreams in template order. cursor advances across workstreams so that
+    // workstream N+1 starts the working day after workstream N ends.
     let cursor = new Date(project.startDate)
     let updated = 0
 
-    // Walk workstreams in template order
     for (const wsTemplate of template) {
       const dbWs = project.workstreams.find((w) => w.name === wsTemplate.name)
-      if (!dbWs) continue
+      if (!dbWs) {
+        // Workstream not in DB — consume its template slots so cursor stays aligned
+        const slots = sequenceTasks(wsTemplate.tasks, cursor)
+        if (slots.length > 0) cursor = addWorkingDays(slots[slots.length - 1].endDate, 1)
+        continue
+      }
 
       const activeTasks = dbWs.tasks.filter((t) => t.status !== 'CANCELLED')
-
-      // Detect whether this workstream uses per-product tasks
       const hasPerProductTasks = activeTasks.some((t) => t.description?.includes('__productTask:'))
 
-      if (hasPerProductTasks) {
-        // Per-product tasks: walk template subsystems in order.
-        // All products' tasks for the same subsystem get the same dates.
-        for (const tmplTask of wsTemplate.tasks) {
-          const duration = Math.max(1, Math.ceil(tmplTask.durationDays))
-          const taskStart = new Date(cursor)
-          const taskEnd = addWorkingDays(new Date(cursor), duration - 1)
+      // Compute dates for each template slot from current cursor, with half-day packing
+      const slots = sequenceTasks(wsTemplate.tasks, cursor)
 
-          // Match tasks whose name ends with " — <subsystem>" (product prefix before the em-dash)
+      if (hasPerProductTasks) {
+        // All products' tasks for the same subsystem share the same slot dates
+        for (let i = 0; i < wsTemplate.tasks.length; i++) {
+          const tmplTask = wsTemplate.tasks[i]
+          const { startDate: taskStart, endDate: taskEnd } = slots[i]
+
           const matchingTasks = activeTasks.filter((t) => {
             const subsystem = t.name.includes(' — ')
               ? t.name.split(' — ').slice(1).join(' — ')
@@ -74,26 +78,32 @@ export async function POST(_req: NextRequest, ctx: Ctx) {
             })
             updated++
           }
-
-          // Always advance cursor by the template slot, even if no matching tasks found
-          cursor = addWorkingDays(taskEnd, 1)
         }
       } else {
-        // Regular tasks: sequential by order, look up duration from template
-        for (const task of activeTasks) {
-          const tmplTask = wsTemplate.tasks.find((t) => t.name === task.name)
-          const duration = Math.max(1, Math.ceil(tmplTask?.durationDays ?? 1))
-          const taskStart = new Date(cursor)
-          const taskEnd = addWorkingDays(new Date(cursor), duration - 1)
+        // Regular tasks: sequence in DB order, using each task's template duration
+        const tasksWithDurations = activeTasks.map((t) => ({
+          id: t.id,
+          durationDays: wsTemplate.tasks.find((tt) => tt.name === t.name)?.durationDays ?? 1,
+        }))
+        const taskSlots = sequenceTasks(tasksWithDurations, cursor)
 
+        for (let i = 0; i < tasksWithDurations.length; i++) {
+          const { startDate: taskStart, endDate: taskEnd } = taskSlots[i]
           await prisma.task.update({
-            where: { id: task.id },
+            where: { id: tasksWithDurations[i].id },
             data: { startDate: taskStart, endDate: taskEnd },
           })
           updated++
-          cursor = addWorkingDays(taskEnd, 1)
+        }
+
+        if (taskSlots.length > 0) {
+          cursor = addWorkingDays(taskSlots[taskSlots.length - 1].endDate, 1)
+          continue // cursor already set, skip the slot-based advance below
         }
       }
+
+      // Advance cursor past the last template slot (per-product path, or no tasks in DB)
+      if (slots.length > 0) cursor = addWorkingDays(slots[slots.length - 1].endDate, 1)
     }
 
     return Response.json({ updated })
