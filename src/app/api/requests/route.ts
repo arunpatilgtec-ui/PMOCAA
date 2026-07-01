@@ -57,6 +57,7 @@ export async function POST(req: NextRequest) {
         hoursPerDay:  data.isRecurring && data.hoursPerDay ? parseFloat(String(data.hoursPerDay)) : null,
         estimatedHours: !data.isRecurring && data.estimatedHours ? parseFloat(String(data.estimatedHours)) : null,
         assignedById: data.assignedById || null,
+        fileLinks: Array.isArray(data.fileLinks) ? data.fileLinks : [],
       },
       include: {
         submitter: { select: { id: true, name: true } },

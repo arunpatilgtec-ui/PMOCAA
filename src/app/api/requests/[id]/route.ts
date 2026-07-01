@@ -158,6 +158,7 @@ export async function PATCH(req: NextRequest, ctx: RouteContext<'/api/requests/[
           ...(data.estimatedHours !== undefined && { estimatedHours: data.estimatedHours ? parseFloat(String(data.estimatedHours)) : null }),
           ...(data.assignedById !== undefined && { assignedById: data.assignedById || null }),
           ...(data.assigneeId !== undefined && { assigneeId: data.assigneeId || null }),
+          ...(data.fileLinks !== undefined && { fileLinks: Array.isArray(data.fileLinks) ? data.fileLinks : [] }),
         },
         include: {
           assignee: { select: { id: true, name: true } },
@@ -230,6 +231,7 @@ export async function PATCH(req: NextRequest, ctx: RouteContext<'/api/requests/[
         ...(data.assignedById !== undefined && { assignedById: data.assignedById || null }),
         ...(data.notes !== undefined && { notes: data.notes }),
         ...(data.estimatedHours !== undefined && { estimatedHours: data.estimatedHours ? parseFloat(data.estimatedHours) : null }),
+        ...(data.fileLinks !== undefined && { fileLinks: Array.isArray(data.fileLinks) ? data.fileLinks : [] }),
       },
       include: {
         assignee: { select: { id: true, name: true } },

@@ -17,6 +17,7 @@ import {
   Plus, Search, ClipboardList, ArrowRight, CheckCircle2,
   XCircle, FolderPlus, Clock, AlertTriangle, Calendar, Repeat, Users, RotateCcw,
   Pencil, Trash2, Target, ListPlus, ChevronDown, ChevronRight, Palmtree, RefreshCw, Video,
+  Link as LinkIcon, X,
 } from 'lucide-react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -33,6 +34,7 @@ interface Request {
   assignee?: { id: string; name: string }
   assignedBy?: { id: string; name: string }
   project?: { id: string; name: string; status: string }
+  fileLinks?: string[]
 }
 
 interface AssignedTask {
@@ -92,6 +94,7 @@ interface StrategicRequest {
   status: string
   submitter: { id: string; name: string }
   tasks: StrategicTaskData[]
+  fileLinks?: string[]
   createdAt: string
 }
 
@@ -180,6 +183,8 @@ export default function RequestsPage() {
   const [reqEndDate,     setReqEndDate]     = useState('')
   const [reqHours,       setReqHours]       = useState('')
   const [formUsers,      setFormUsers]      = useState<User[]>([])
+  const [reqFileLinks,   setReqFileLinks]   = useState<string[]>([])
+  const [reqFileLinkInput, setReqFileLinkInput] = useState('')
 
   // Leave state
   const [leaves,         setLeaves]         = useState<Leave[]>([])
@@ -232,6 +237,8 @@ export default function RequestsPage() {
   const [editSubmitting, setEditSubmitting] = useState(false)
   const [deleteReqId,    setDeleteReqId]    = useState<string | null>(null)
   const [deleteReqBusy,  setDeleteReqBusy]  = useState(false)
+  const [editReqFileLinks, setEditReqFileLinks] = useState<string[]>([])
+  const [editReqFileLinkInput, setEditReqFileLinkInput] = useState('')
 
   // Strategic requests
   const [srRequests,     setSrRequests]     = useState<StrategicRequest[]>([])
@@ -245,6 +252,8 @@ export default function RequestsPage() {
   const [srDesc,         setSrDesc]         = useState('')
   const [srStart,        setSrStart]        = useState('')
   const [srEnd,          setSrEnd]          = useState('')
+  const [srFileLinks,    setSrFileLinks]    = useState<string[]>([])
+  const [srFileLinkInput, setSrFileLinkInput] = useState('')
   // Assign tasks under SR
   const [srSelectedId,   setSrSelectedId]   = useState('')
   const [srTaskRows,     setSrTaskRows]     = useState<SRTaskRow[]>([newTaskRow()])
@@ -255,6 +264,8 @@ export default function RequestsPage() {
   const [editSrStart,    setEditSrStart]    = useState('')
   const [editSrEnd,      setEditSrEnd]      = useState('')
   const [editSrBusy,     setEditSrBusy]     = useState(false)
+  const [editSrFileLinks, setEditSrFileLinks] = useState<string[]>([])
+  const [editSrFileLinkInput, setEditSrFileLinkInput] = useState('')
   // Edit individual strategic task (subtask)
   const [editStSrId,     setEditStSrId]     = useState<string | null>(null)
   const [editStTask,     setEditStTask]     = useState<StrategicTaskData | null>(null)
@@ -413,6 +424,8 @@ export default function RequestsPage() {
     setReqStartDate('')
     setReqEndDate('')
     setReqHours('')
+    setReqFileLinks([])
+    setReqFileLinkInput('')
     setCreateOpen(true)
     fetch('/api/users').then((r) => r.json()).then((d) => setFormUsers(Array.isArray(d) ? d : [])).catch(() => {})
   }
@@ -433,6 +446,7 @@ export default function RequestsPage() {
           endDate: reqEndDate || undefined,
           hoursPerDay: isRecurring && reqHours ? parseFloat(reqHours) : undefined,
           estimatedHours: !isRecurring && reqHours ? parseFloat(reqHours) : undefined,
+          fileLinks: reqFileLinks,
         }),
       })
       if (!res.ok) throw new Error((await res.json()).error || 'Failed')
@@ -510,6 +524,8 @@ export default function RequestsPage() {
     setEditReqAssignedById(req.assignedBy?.id || '')
     setEditReqAssigneeId(req.assignee?.id || '')
     setEditReqStatus(req.status)
+    setEditReqFileLinks(req.fileLinks ?? [])
+    setEditReqFileLinkInput('')
     if (formUsers.length === 0) {
       fetch('/api/users').then(r => r.json()).then(d => setFormUsers(Array.isArray(d) ? d : [])).catch(() => {})
     }
@@ -539,6 +555,7 @@ export default function RequestsPage() {
           estimatedHours: !editReqRecurring && editReqHours ? parseFloat(editReqHours) : null,
           assignedById: editReqAssignedById || null,
           assigneeId: editReqAssigneeId || null,
+          fileLinks: editReqFileLinks,
         }),
       })
       if (!res.ok) throw new Error((await res.json()).error || 'Failed')
@@ -574,6 +591,8 @@ export default function RequestsPage() {
     setSrDesc('')
     setSrStart('')
     setSrEnd('')
+    setSrFileLinks([])
+    setSrFileLinkInput('')
     setSrSelectedId('')
     setSrTaskRows([newTaskRow()])
     setSrOpen(true)
@@ -591,7 +610,7 @@ export default function RequestsPage() {
       const res = await fetch('/api/strategic-requests', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title: srTitle, description: srDesc, startDate: srStart, endDate: srEnd || undefined }),
+        body: JSON.stringify({ title: srTitle, description: srDesc, startDate: srStart, endDate: srEnd || undefined, fileLinks: srFileLinks }),
       })
       if (!res.ok) throw new Error((await res.json()).error || 'Failed')
       toast.success('Strategic request created')
@@ -641,6 +660,8 @@ export default function RequestsPage() {
     setEditSrDesc(sr.description || '')
     setEditSrStart(sr.startDate.slice(0, 10))
     setEditSrEnd(sr.endDate ? sr.endDate.slice(0, 10) : '')
+    setEditSrFileLinks(sr.fileLinks ?? [])
+    setEditSrFileLinkInput('')
   }
 
   async function submitEditSr() {
@@ -650,7 +671,7 @@ export default function RequestsPage() {
       const res = await fetch(`/api/strategic-requests/${editSrId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title: editSrTitle, description: editSrDesc, startDate: editSrStart, endDate: editSrEnd || null }),
+        body: JSON.stringify({ title: editSrTitle, description: editSrDesc, startDate: editSrStart, endDate: editSrEnd || null, fileLinks: editSrFileLinks }),
       })
       if (!res.ok) throw new Error((await res.json()).error || 'Failed')
       toast.success('Strategic request updated')
@@ -906,6 +927,17 @@ export default function RequestsPage() {
                           {req.notes && (
                             <p className="text-xs text-muted-foreground/70 mt-1 italic line-clamp-1">Note: {req.notes}</p>
                           )}
+                          {req.fileLinks && req.fileLinks.length > 0 && (
+                            <div className="flex items-center gap-2 flex-wrap mt-1">
+                              {req.fileLinks.map((link, i) => (
+                                <a key={i} href={link} target="_blank" rel="noopener noreferrer"
+                                   className="text-xs text-blue-600 hover:underline flex items-center gap-1 max-w-[200px] truncate">
+                                  <LinkIcon className="h-3 w-3 shrink-0" />
+                                  <span className="truncate">{link}</span>
+                                </a>
+                              ))}
+                            </div>
+                          )}
                           <div className="flex items-center gap-3 mt-1.5 text-xs text-muted-foreground flex-wrap">
                             <span>By {req.submitter.name}</span>
                             <span>{format(new Date(req.createdAt), 'MMM d, yyyy')}</span>
@@ -1159,6 +1191,17 @@ export default function RequestsPage() {
                         </div>
                         {sr.description && (
                           <p className="text-sm text-muted-foreground mt-1 line-clamp-2">{sr.description}</p>
+                        )}
+                        {sr.fileLinks && sr.fileLinks.length > 0 && (
+                          <div className="flex items-center gap-2 flex-wrap mt-1">
+                            {sr.fileLinks.map((link, i) => (
+                              <a key={i} href={link} target="_blank" rel="noopener noreferrer"
+                                 className="text-xs text-blue-600 hover:underline flex items-center gap-1 max-w-[200px] truncate">
+                                <LinkIcon className="h-3 w-3 shrink-0" />
+                                <span className="truncate">{link}</span>
+                              </a>
+                            ))}
+                          </div>
                         )}
                         <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
                           <span>By {sr.submitter.name}</span>
@@ -1594,6 +1637,40 @@ export default function RequestsPage() {
               <Label>Notes (optional)</Label>
               <Textarea placeholder="Additional context or constraints…" {...sForm.register('notes')} rows={2} />
             </div>
+            <div className="space-y-1.5">
+              <Label>File Links (optional)</Label>
+              <div className="flex gap-2">
+                <Input
+                  placeholder="Paste a Drive / SharePoint link…"
+                  value={reqFileLinkInput}
+                  onChange={e => setReqFileLinkInput(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault()
+                      const url = reqFileLinkInput.trim()
+                      if (url) { setReqFileLinks(prev => [...prev, url]); setReqFileLinkInput('') }
+                    }
+                  }}
+                />
+                <Button type="button" size="sm" variant="outline" onClick={() => {
+                  const url = reqFileLinkInput.trim()
+                  if (url) { setReqFileLinks(prev => [...prev, url]); setReqFileLinkInput('') }
+                }}>Add</Button>
+              </div>
+              {reqFileLinks.length > 0 && (
+                <div className="space-y-1 mt-1">
+                  {reqFileLinks.map((link, i) => (
+                    <div key={i} className="flex items-center gap-2 text-xs bg-muted rounded px-2 py-1">
+                      <LinkIcon className="h-3 w-3 text-muted-foreground shrink-0" />
+                      <span className="truncate flex-1 text-blue-600">{link}</span>
+                      <button type="button" onClick={() => setReqFileLinks(prev => prev.filter((_, j) => j !== i))}>
+                        <X className="h-3 w-3 text-muted-foreground hover:text-red-500" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
             <div className="flex justify-end gap-2">
               <Button type="button" variant="outline" onClick={() => setCreateOpen(false)}>Cancel</Button>
               <Button type="submit" disabled={submitting}>Submit Request</Button>
@@ -1710,6 +1787,40 @@ export default function RequestsPage() {
               <Label>Notes (optional)</Label>
               <Textarea value={editReqNotes} onChange={e => setEditReqNotes(e.target.value)} rows={2} />
             </div>
+            <div className="space-y-1.5">
+              <Label>File Links (optional)</Label>
+              <div className="flex gap-2">
+                <Input
+                  placeholder="Paste a Drive / SharePoint link…"
+                  value={editReqFileLinkInput}
+                  onChange={e => setEditReqFileLinkInput(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault()
+                      const url = editReqFileLinkInput.trim()
+                      if (url) { setEditReqFileLinks(prev => [...prev, url]); setEditReqFileLinkInput('') }
+                    }
+                  }}
+                />
+                <Button type="button" size="sm" variant="outline" onClick={() => {
+                  const url = editReqFileLinkInput.trim()
+                  if (url) { setEditReqFileLinks(prev => [...prev, url]); setEditReqFileLinkInput('') }
+                }}>Add</Button>
+              </div>
+              {editReqFileLinks.length > 0 && (
+                <div className="space-y-1 mt-1">
+                  {editReqFileLinks.map((link, i) => (
+                    <div key={i} className="flex items-center gap-2 text-xs bg-muted rounded px-2 py-1">
+                      <LinkIcon className="h-3 w-3 text-muted-foreground shrink-0" />
+                      <span className="truncate flex-1 text-blue-600">{link}</span>
+                      <button type="button" onClick={() => setEditReqFileLinks(prev => prev.filter((_, j) => j !== i))}>
+                        <X className="h-3 w-3 text-muted-foreground hover:text-red-500" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
             <div className="flex items-center justify-between gap-2">
               <Button variant="ghost" className="text-destructive hover:text-destructive hover:bg-destructive/10"
                 onClick={() => { setDeleteReqId(editReqId); setEditReqId(null) }}>
@@ -1782,6 +1893,40 @@ export default function RequestsPage() {
               <div className="space-y-1.5">
                 <Label>Description</Label>
                 <Textarea placeholder="Describe the strategic objective…" rows={3} value={srDesc} onChange={e => setSrDesc(e.target.value)} />
+              </div>
+              <div className="space-y-1.5">
+                <Label>File Links (optional)</Label>
+                <div className="flex gap-2">
+                  <Input
+                    placeholder="Paste a Drive / SharePoint link…"
+                    value={srFileLinkInput}
+                    onChange={e => setSrFileLinkInput(e.target.value)}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault()
+                        const url = srFileLinkInput.trim()
+                        if (url) { setSrFileLinks(prev => [...prev, url]); setSrFileLinkInput('') }
+                      }
+                    }}
+                  />
+                  <Button type="button" size="sm" variant="outline" onClick={() => {
+                    const url = srFileLinkInput.trim()
+                    if (url) { setSrFileLinks(prev => [...prev, url]); setSrFileLinkInput('') }
+                  }}>Add</Button>
+                </div>
+                {srFileLinks.length > 0 && (
+                  <div className="space-y-1 mt-1">
+                    {srFileLinks.map((link, i) => (
+                      <div key={i} className="flex items-center gap-2 text-xs bg-muted rounded px-2 py-1">
+                        <LinkIcon className="h-3 w-3 text-muted-foreground shrink-0" />
+                        <span className="truncate flex-1 text-blue-600">{link}</span>
+                        <button type="button" onClick={() => setSrFileLinks(prev => prev.filter((_, j) => j !== i))}>
+                          <X className="h-3 w-3 text-muted-foreground hover:text-red-500" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
               <div className="flex justify-end gap-2">
                 <Button variant="outline" onClick={() => setSrOpen(false)}>Cancel</Button>
@@ -1920,6 +2065,40 @@ export default function RequestsPage() {
             <div className="space-y-1.5">
               <Label>Description</Label>
               <Textarea value={editSrDesc} onChange={e => setEditSrDesc(e.target.value)} rows={3} />
+            </div>
+            <div className="space-y-1.5">
+              <Label>File Links (optional)</Label>
+              <div className="flex gap-2">
+                <Input
+                  placeholder="Paste a Drive / SharePoint link…"
+                  value={editSrFileLinkInput}
+                  onChange={e => setEditSrFileLinkInput(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault()
+                      const url = editSrFileLinkInput.trim()
+                      if (url) { setEditSrFileLinks(prev => [...prev, url]); setEditSrFileLinkInput('') }
+                    }
+                  }}
+                />
+                <Button type="button" size="sm" variant="outline" onClick={() => {
+                  const url = editSrFileLinkInput.trim()
+                  if (url) { setEditSrFileLinks(prev => [...prev, url]); setEditSrFileLinkInput('') }
+                }}>Add</Button>
+              </div>
+              {editSrFileLinks.length > 0 && (
+                <div className="space-y-1 mt-1">
+                  {editSrFileLinks.map((link, i) => (
+                    <div key={i} className="flex items-center gap-2 text-xs bg-muted rounded px-2 py-1">
+                      <LinkIcon className="h-3 w-3 text-muted-foreground shrink-0" />
+                      <span className="truncate flex-1 text-blue-600">{link}</span>
+                      <button type="button" onClick={() => setEditSrFileLinks(prev => prev.filter((_, j) => j !== i))}>
+                        <X className="h-3 w-3 text-muted-foreground hover:text-red-500" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
             <div className="flex justify-end gap-2">
               <Button variant="outline" onClick={() => setEditSrId(null)}>Cancel</Button>
