@@ -63,6 +63,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             newCount > prevUnreadRef.current &&
             typeof Notification !== 'undefined' &&
             Notification.permission === 'granted' &&
+            localStorage.getItem('pmo-notif-enabled') !== 'false' &&
             document.visibilityState === 'hidden'
           ) {
             const diff = newCount - prevUnreadRef.current

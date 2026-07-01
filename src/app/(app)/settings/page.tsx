@@ -1,13 +1,15 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useAuthStore } from '@/store/auth'
 import { toast } from 'sonner'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Eye, EyeOff, KeyRound, CheckCircle2 } from 'lucide-react'
+import { Eye, EyeOff, KeyRound, CheckCircle2, Bell, BellOff } from 'lucide-react'
+
+const NOTIF_PREF_KEY = 'pmo-notif-enabled'
 
 export default function SettingsPage() {
   const { user, setUser } = useAuthStore()
@@ -20,6 +22,38 @@ export default function SettingsPage() {
   const [showConfirm, setShowConfirm] = useState(false)
   const [saving,      setSaving]      = useState(false)
   const [done,        setDone]        = useState(false)
+
+  // Notification preference state
+  const [notifPermission, setNotifPermission] = useState<NotificationPermission | 'unsupported' | null>(null)
+  const [notifEnabled,    setNotifEnabled]    = useState(true)
+
+  useEffect(() => {
+    if (typeof Notification === 'undefined') {
+      setNotifPermission('unsupported')
+    } else {
+      setNotifPermission(Notification.permission)
+    }
+    const stored = localStorage.getItem(NOTIF_PREF_KEY)
+    setNotifEnabled(stored !== 'false')
+  }, [])
+
+  async function requestNotifPermission() {
+    if (typeof Notification === 'undefined') return
+    const result = await Notification.requestPermission()
+    setNotifPermission(result)
+    if (result === 'granted') {
+      localStorage.setItem(NOTIF_PREF_KEY, 'true')
+      setNotifEnabled(true)
+      toast.success('Desktop notifications enabled')
+    }
+  }
+
+  function toggleNotifEnabled() {
+    const next = !notifEnabled
+    setNotifEnabled(next)
+    localStorage.setItem(NOTIF_PREF_KEY, String(next))
+    toast.success(next ? 'Desktop notifications enabled' : 'Desktop notifications disabled')
+  }
 
   const mismatch = newPwd && confirmPwd && newPwd !== confirmPwd
   const tooShort = newPwd.length > 0 && newPwd.length < 6
@@ -141,6 +175,71 @@ export default function SettingsPage() {
           )}
         </CardContent>
       </Card>
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="flex items-center gap-2 text-base">
+            <Bell className="h-4 w-4 text-blue-500" /> Desktop Notifications
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          {notifPermission === null && (
+            <p className="text-sm text-muted-foreground">Loading…</p>
+          )}
+
+          {notifPermission === 'unsupported' && (
+            <p className="text-sm text-muted-foreground">Your browser does not support desktop notifications.</p>
+          )}
+
+          {notifPermission === 'default' && (
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-sm font-medium">Enable desktop notifications</p>
+                <p className="text-xs text-muted-foreground mt-0.5">Get alerted when new notifications arrive, even when the tab is in the background.</p>
+              </div>
+              <Button size="sm" onClick={requestNotifPermission} className="shrink-0">Enable</Button>
+            </div>
+          )}
+
+          {notifPermission === 'granted' && (
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-sm font-medium flex items-center gap-2">
+                  {notifEnabled ? <Bell className="h-4 w-4 text-green-500" /> : <BellOff className="h-4 w-4 text-muted-foreground" />}
+                  {notifEnabled ? 'Notifications are on' : 'Notifications are off'}
+                </p>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  {notifEnabled
+                    ? 'You will receive desktop alerts when new notifications arrive while this tab is in the background.'
+                    : 'Desktop alerts are currently disabled. Turn them on to get alerted in the background.'}
+                </p>
+              </div>
+              <button
+                onClick={toggleNotifEnabled}
+                className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors focus-visible:outline-none ${
+                  notifEnabled ? 'bg-blue-600' : 'bg-muted-foreground/30'
+                }`}
+                aria-label={notifEnabled ? 'Disable notifications' : 'Enable notifications'}
+              >
+                <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
+                  notifEnabled ? 'translate-x-6' : 'translate-x-1'
+                }`} />
+              </button>
+            </div>
+          )}
+
+          {notifPermission === 'denied' && (
+            <div className="space-y-1">
+              <p className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+                <BellOff className="h-4 w-4" /> Notifications are blocked by the browser
+              </p>
+              <p className="text-xs text-muted-foreground">
+                To enable, click the lock / info icon in your browser&apos;s address bar and set Notifications to <strong>Allow</strong>, then reload the page.
+              </p>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
     </div>
   )
 }
