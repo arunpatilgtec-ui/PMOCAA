@@ -56,6 +56,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         if (res.ok) {
           const data = await res.json()
           const newCount: number = data.unreadCount || 0
+          const notifs: Array<{ title: string; message: string }> = data.notifications ?? []
           // Fire desktop notification for newly arrived notifications when tab is hidden
           if (
             prevUnreadRef.current !== null &&
@@ -65,8 +66,15 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             document.visibilityState === 'hidden'
           ) {
             const diff = newCount - prevUnreadRef.current
-            new Notification('PMO Portal', {
-              body: `You have ${diff} new notification${diff !== 1 ? 's' : ''}`,
+            const latest = notifs[0]
+            const notifTitle = latest?.title ?? 'New notification'
+            const bodyParts = [
+              latest?.message,
+              diff > 1 ? `+${diff - 1} more` : null,
+              `${newCount} unread`,
+            ].filter(Boolean)
+            new Notification(notifTitle, {
+              body: bodyParts.join(' · '),
               icon: '/favicon.ico',
             })
           }
