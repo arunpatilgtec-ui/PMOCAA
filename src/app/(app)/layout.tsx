@@ -1,12 +1,12 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { useAuthStore } from '@/store/auth'
 import { SidebarNav } from '@/components/layout/sidebar-nav'
 import { ThemeToggle } from '@/components/ui/theme-toggle'
-import { BarChart3, Menu } from 'lucide-react'
+import { BarChart3, Bell, Menu, X } from 'lucide-react'
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter()
@@ -15,6 +15,18 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const [pendingRequestsCount, setPendingRequestsCount] = useState(0)
   const [checking,    setChecking]    = useState(true)
   const [mobileOpen,  setMobileOpen]  = useState(false)
+  const [notifPermission,      setNotifPermission]      = useState<NotificationPermission | 'unsupported' | null>(null)
+  const [notifBannerDismissed, setNotifBannerDismissed] = useState(false)
+  const prevUnreadRef = useRef<number | null>(null)
+
+  // Check notification API support and current permission
+  useEffect(() => {
+    if (typeof Notification === 'undefined') {
+      setNotifPermission('unsupported')
+    } else {
+      setNotifPermission(Notification.permission)
+    }
+  }, [])
 
   useEffect(() => {
     async function checkAuth() {
@@ -43,7 +55,23 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         const res = await fetch('/api/notifications?unread=true')
         if (res.ok) {
           const data = await res.json()
-          setUnreadCount(data.unreadCount || 0)
+          const newCount: number = data.unreadCount || 0
+          // Fire desktop notification for newly arrived notifications when tab is hidden
+          if (
+            prevUnreadRef.current !== null &&
+            newCount > prevUnreadRef.current &&
+            typeof Notification !== 'undefined' &&
+            Notification.permission === 'granted' &&
+            document.visibilityState === 'hidden'
+          ) {
+            const diff = newCount - prevUnreadRef.current
+            new Notification('PMO Portal', {
+              body: `You have ${diff} new notification${diff !== 1 ? 's' : ''}`,
+              icon: '/favicon.ico',
+            })
+          }
+          prevUnreadRef.current = newCount
+          setUnreadCount(newCount)
         }
       } catch {}
       if (['ADMIN', 'MANAGER', 'PLANNER'].includes(user.role)) {
@@ -60,6 +88,12 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     const interval = setInterval(fetchCounts, 30000)
     return () => clearInterval(interval)
   }, [user])
+
+  async function requestNotifPermission() {
+    if (typeof Notification === 'undefined') return
+    const result = await Notification.requestPermission()
+    setNotifPermission(result)
+  }
 
   if (checking) {
     return (
@@ -109,6 +143,23 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             <ThemeToggle />
           </div>
         </header>
+
+        {/* Desktop notifications prompt — shown once until enabled or dismissed */}
+        {notifPermission === 'default' && !notifBannerDismissed && (
+          <div className="shrink-0 bg-blue-50 dark:bg-blue-950/60 border-b border-blue-200 dark:border-blue-800 px-4 py-2 flex items-center gap-3 text-sm text-blue-700 dark:text-blue-300">
+            <Bell className="h-4 w-4 shrink-0" />
+            <span>Get desktop alerts when new notifications arrive</span>
+            <button
+              onClick={requestNotifPermission}
+              className="ml-auto text-xs font-semibold px-2.5 py-1 rounded bg-blue-600 text-white hover:bg-blue-700 shrink-0"
+            >
+              Enable
+            </button>
+            <button onClick={() => setNotifBannerDismissed(true)} className="text-blue-400 hover:text-blue-600 shrink-0">
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        )}
 
         {/* Password-reset alert */}
         {user?.mustChangePassword && (
