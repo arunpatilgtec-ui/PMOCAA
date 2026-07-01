@@ -252,6 +252,18 @@ export default function ProjectDetailPage() {
     }
   }
 
+  async function repairTimeline() {
+    try {
+      const res = await fetch(`/api/projects/${id}/repair-timeline`, { method: 'POST' })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error)
+      toast.success(`Timeline repaired — ${data.updated} task(s) re-sequenced`)
+      load()
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'Repair failed')
+    }
+  }
+
   function openEditProject() {
     if (!project) return
     setEditName(project.name)
@@ -548,6 +560,9 @@ export default function ProjectDetailPage() {
                       <Plus className="mr-2 h-4 w-4 text-purple-600" /> Sync Per-Product Tasks
                     </DropdownMenuItem>
                   )}
+                  <DropdownMenuItem onClick={repairTimeline}>
+                    <CalendarRange className="mr-2 h-4 w-4 text-orange-600" /> Repair Timeline
+                  </DropdownMenuItem>
                   <DropdownMenuItem onClick={openEditTimeline}>
                     <CalendarRange className="mr-2 h-4 w-4" /> Edit Timeline
                   </DropdownMenuItem>

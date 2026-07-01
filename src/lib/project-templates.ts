@@ -131,11 +131,11 @@ const DISHWASHER_TEMPLATE: WorkstreamTemplate[] = [
   {
     name: 'Tear Down',
     tasks: [
-      t('Packaging & Lit.', 0.5),
-      t('Racks', 0.5),
+      t('Packaging & Lit.', 1),
+      t('Racks', 1),
       t('Water Delivery System', 1),
-      t('Door & Aesthetics, Dry System', 0.5),
-      t('Control System', 0.5),
+      t('Door & Aesthetics, Dry System', 1),
+      t('Control System', 1),
       t('Wash System', 1),
       t('Tub & Chassis System', 1),
     ],
@@ -143,11 +143,11 @@ const DISHWASHER_TEMPLATE: WorkstreamTemplate[] = [
   {
     name: 'Costing',
     tasks: [
-      t('Packaging', 0.5),
-      t('Racks', 0.5),
+      t('Packaging', 1),
+      t('Racks', 1),
       t('Water Delivery System', 1),
-      t('Door & Aesthetics', 0.5),
-      t('Control System', 0.5),
+      t('Door & Aesthetics', 1),
+      t('Control System', 1),
       t('Wash System', 1),
       t('Tub & Chassis System', 1),
     ],

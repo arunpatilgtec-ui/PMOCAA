@@ -37,13 +37,36 @@ export async function POST(_req: NextRequest, ctx: Ctx) {
     const tdTaskTemplates = template.find((ws) => ws.name === 'Tear Down')?.tasks ?? []
     const costTaskTemplates = template.find((ws) => ws.name === 'Costing')?.tasks ?? []
 
-    // Date windows relative to project start
-    // Teardown: working days 3–7 (after 2 planning days)
-    const tdStart = project.startDate ? addWorkingDays(new Date(project.startDate), 2) : null
-    const tdEnd = project.startDate ? addWorkingDays(new Date(project.startDate), 6) : null
-    // Costing: working days 8–12 (after teardown)
-    const costStart = project.startDate ? addWorkingDays(new Date(project.startDate), 7) : null
-    const costEnd = project.startDate ? addWorkingDays(new Date(project.startDate), 11) : null
+    // Pre-compute sequential dates for each Tear Down subsystem task.
+    // All products share the same dates per subsystem (different teams work in parallel).
+    const tdTemplateDates: Array<{ startDate: Date; endDate: Date }> = []
+    if (project.startDate && tdTaskTemplates.length > 0) {
+      let cursor = addWorkingDays(new Date(project.startDate), 2)
+      for (const task of tdTaskTemplates) {
+        const duration = Math.max(1, Math.ceil(task.durationDays))
+        const taskStart = new Date(cursor)
+        const taskEnd = addWorkingDays(new Date(cursor), duration - 1)
+        tdTemplateDates.push({ startDate: taskStart, endDate: taskEnd })
+        cursor = addWorkingDays(taskEnd, 1)
+      }
+    }
+
+    // Costing starts the working day after the last Tear Down task ends.
+    const tdLastEnd = tdTemplateDates.length > 0
+      ? tdTemplateDates[tdTemplateDates.length - 1].endDate
+      : (project.startDate ? addWorkingDays(new Date(project.startDate), 6) : null)
+
+    const costTemplateDates: Array<{ startDate: Date; endDate: Date }> = []
+    if (tdLastEnd && costTaskTemplates.length > 0) {
+      let cursor = addWorkingDays(tdLastEnd, 1)
+      for (const task of costTaskTemplates) {
+        const duration = Math.max(1, Math.ceil(task.durationDays))
+        const taskStart = new Date(cursor)
+        const taskEnd = addWorkingDays(new Date(cursor), duration - 1)
+        costTemplateDates.push({ startDate: taskStart, endDate: taskEnd })
+        cursor = addWorkingDays(taskEnd, 1)
+      }
+    }
 
     let tdWs = project.workstreams.find((w) => w.name === 'Tear Down') ?? null
     let costWs = project.workstreams.find((w) => w.name === 'Costing') ?? null
@@ -65,13 +88,13 @@ export async function POST(_req: NextRequest, ctx: Ctx) {
           tdWs = created
         }
         await prisma.task.createMany({
-          data: tdTaskTemplates.map((task) => ({
+          data: tdTaskTemplates.map((task, i) => ({
             workstreamId: tdWs!.id,
             name: `${productLabel} — ${task.name}`,
             description: `__productTask:${product.id}:teardown__`,
             ownerId: product.leadId ?? null,
-            startDate: tdStart,
-            endDate: tdEnd,
+            startDate: tdTemplateDates[i]?.startDate ?? null,
+            endDate: tdTemplateDates[i]?.endDate ?? null,
             estimatedHours: task.estimatedHours,
             effortHours: 0,
           })),
@@ -90,13 +113,13 @@ export async function POST(_req: NextRequest, ctx: Ctx) {
           costWs = created
         }
         await prisma.task.createMany({
-          data: costTaskTemplates.map((task) => ({
+          data: costTaskTemplates.map((task, i) => ({
             workstreamId: costWs!.id,
             name: `${productLabel} — ${task.name}`,
             description: `__productTask:${product.id}:costing__`,
             ownerId: product.leadId ?? null,
-            startDate: costStart,
-            endDate: costEnd,
+            startDate: costTemplateDates[i]?.startDate ?? null,
+            endDate: costTemplateDates[i]?.endDate ?? null,
             estimatedHours: task.estimatedHours,
             effortHours: 0,
           })),
