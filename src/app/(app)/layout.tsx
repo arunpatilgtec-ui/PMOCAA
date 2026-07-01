@@ -74,10 +74,11 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
               diff > 1 ? `+${diff - 1} more` : null,
               `${newCount} unread`,
             ].filter(Boolean)
-            new Notification(notifTitle, {
+            const n = new Notification(notifTitle, {
               body: bodyParts.join(' · '),
               icon: '/favicon.ico',
             })
+            setTimeout(() => n.close(), 20000)
           }
           prevUnreadRef.current = newCount
           setUnreadCount(newCount)
