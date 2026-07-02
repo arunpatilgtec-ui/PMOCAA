@@ -262,21 +262,24 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
         }
       }
 
-      // Update ownerId on template tasks based on assigned costing types
+      // Update ownerId on template tasks: match each task's base name against each resource's
+      // costingTypes using bidirectional includes (handles "Packaging & Lit." → task "Packaging",
+      // "Tub & Chassis" → task "Tub & Chassis System", etc.)
       if (costingTasks.length > 0) {
-        const pcbUser = newResources.find((r) => r.costingTypes?.includes('PCB'))?.userId ?? null
-        const harnessUser = newResources.find((r) => r.costingTypes?.includes('HARNESS'))?.userId ?? null
-        const mechanicalUser = newResources.find((r) => r.costingTypes?.includes('MECHANICAL'))?.userId ?? null
-
-        console.error('[COSTING] owners pcb=%s harness=%s mechanical=%s', pcbUser, harnessUser, mechanicalUser)
-
+        const prefix = `${productLabel} — `
         await Promise.all(
           costingTasks.map((task) => {
-            const n = task.name.toLowerCase()
-            const ownerId = n.includes('pcb') ? pcbUser
-              : n.includes('harness') ? harnessUser
-              : mechanicalUser
-            console.error('[COSTING] task=%s -> ownerId=%s', task.name, ownerId)
+            const baseName = task.name.startsWith(prefix)
+              ? task.name.slice(prefix.length).toLowerCase()
+              : task.name.toLowerCase()
+            const match = newResources.find((r) =>
+              r.costingTypes?.some((ct) => {
+                const c = ct.toLowerCase()
+                return c === baseName || c.includes(baseName) || baseName.includes(c)
+              })
+            )
+            const ownerId = match?.userId ?? null
+            console.error('[COSTING] task=%s baseName=%s -> ownerId=%s', task.name, baseName, ownerId)
             return prisma.task.update({ where: { id: task.id }, data: { ownerId } })
           })
         )
