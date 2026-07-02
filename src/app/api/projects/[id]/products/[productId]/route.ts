@@ -203,40 +203,51 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
         select: { id: true, name: true },
       })
 
-      // Auto-create template tasks if they don't exist yet (removes dependency on Sync Per-Product Tasks)
-      if (costingTasks.length === 0 && proj?.category) {
+      // Ensure all template tasks exist — create any that are missing (handles both fresh products
+      // and products where the template gained new tasks like PCB/Harness after initial sync).
+      if (proj?.category) {
         const template = CATEGORY_TEMPLATES[proj.category]
         const tdTaskTemplates = template?.find((ws) => ws.name === 'Tear Down')?.tasks ?? []
         const costTaskTemplates = template?.find((ws) => ws.name === 'Costing')?.tasks ?? []
 
         if (costTaskTemplates.length > 0) {
-          const tdAnchor = proj.startDate ? addWorkingDays(new Date(proj.startDate), 2) : null
-          const tdDates = tdAnchor && tdTaskTemplates.length > 0 ? sequenceTasks(tdTaskTemplates, tdAnchor) : []
-          const tdLastEnd = tdDates.length > 0
-            ? tdDates[tdDates.length - 1].endDate
-            : (proj.startDate ? addWorkingDays(new Date(proj.startDate), 6) : null)
-          const costDates = tdLastEnd ? sequenceTasks(costTaskTemplates, addWorkingDays(tdLastEnd, 1)) : []
+          const existingNames = new Set(costingTasks.map((t) => t.name))
+          const missingTasks = costTaskTemplates.filter(
+            (task) => !existingNames.has(`${productLabel} — ${task.name}`)
+          )
 
-          await prisma.task.createMany({
-            data: costTaskTemplates.map((task, i) => ({
-              workstreamId: costingWs.id,
-              name: `${productLabel} — ${task.name}`,
-              description: `__productTask:${productId}:costing__`,
-              ownerId: null,
-              startDate: costDates[i]?.startDate ?? null,
-              endDate: costDates[i]?.endDate ?? null,
-              estimatedHours: task.estimatedHours,
-              effortHours: 0,
-            })),
-          })
+          if (missingTasks.length > 0) {
+            const tdAnchor = proj.startDate ? addWorkingDays(new Date(proj.startDate), 2) : null
+            const tdDates = tdAnchor && tdTaskTemplates.length > 0 ? sequenceTasks(tdTaskTemplates, tdAnchor) : []
+            const tdLastEnd = tdDates.length > 0
+              ? tdDates[tdDates.length - 1].endDate
+              : (proj.startDate ? addWorkingDays(new Date(proj.startDate), 6) : null)
+            const allCostDates = tdLastEnd ? sequenceTasks(costTaskTemplates, addWorkingDays(tdLastEnd, 1)) : []
 
-          costingTasks = await prisma.task.findMany({
-            where: {
-              workstreamId: costingWs.id,
-              description: `__productTask:${productId}:costing__`,
-            },
-            select: { id: true, name: true },
-          })
+            await prisma.task.createMany({
+              data: missingTasks.map((task) => {
+                const i = costTaskTemplates.findIndex((t) => t.name === task.name)
+                return {
+                  workstreamId: costingWs.id,
+                  name: `${productLabel} — ${task.name}`,
+                  description: `__productTask:${productId}:costing__`,
+                  ownerId: null,
+                  startDate: allCostDates[i]?.startDate ?? null,
+                  endDate: allCostDates[i]?.endDate ?? null,
+                  estimatedHours: task.estimatedHours,
+                  effortHours: 0,
+                }
+              }),
+            })
+
+            costingTasks = await prisma.task.findMany({
+              where: {
+                workstreamId: costingWs.id,
+                description: `__productTask:${productId}:costing__`,
+              },
+              select: { id: true, name: true },
+            })
+          }
         }
       }
 
