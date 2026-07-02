@@ -241,8 +241,11 @@ export default function ProjectDetailPage() {
       const res = await fetch(`/api/projects/${id}/sync-product-teardown`, { method: 'POST' })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error)
-      if (data.migrated > 0) {
-        toast.success(`Per-product tasks synced for ${data.migrated} workstream(s)`)
+      if (data.migrated > 0 || data.ownersUpdated > 0) {
+        const parts = []
+        if (data.migrated > 0) parts.push(`${data.migrated} workstream(s) created`)
+        if (data.ownersUpdated > 0) parts.push(`${data.ownersUpdated} owner(s) reassigned`)
+        toast.success(`Per-product tasks synced — ${parts.join(', ')}`)
         load()
       } else {
         toast.info('Per-product tasks already up to date')

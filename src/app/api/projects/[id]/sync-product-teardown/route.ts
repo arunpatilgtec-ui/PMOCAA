@@ -6,8 +6,9 @@ import { CATEGORY_TEMPLATES } from '@/lib/project-templates'
 
 type Ctx = { params: Promise<{ id: string }> }
 
-// Generates per-product teardown AND costing tasks for existing products that don't have them.
-// Safe to call repeatedly — skips products that already have per-product tasks.
+// Generates per-product teardown AND costing tasks for existing products that don't have them,
+// and re-syncs costing task owners from each product's current resource assignments.
+// Safe to call repeatedly.
 export async function POST(_req: NextRequest, ctx: Ctx) {
   try {
     await requireAuth()
@@ -19,12 +20,18 @@ export async function POST(_req: NextRequest, ctx: Ctx) {
         category: true,
         startDate: true,
         products: {
-          select: { id: true, brand: true, modelNo: true, leadId: true },
+          select: {
+            id: true,
+            brand: true,
+            modelNo: true,
+            leadId: true,
+            resources: { select: { userId: true, costingTypes: true } },
+          },
           orderBy: { order: 'asc' },
         },
         workstreams: {
           where: { name: { in: ['Tear Down', 'Costing'] } },
-          include: { tasks: { select: { id: true, description: true } } },
+          include: { tasks: { select: { id: true, name: true, description: true } } },
         },
       },
     })
@@ -56,6 +63,7 @@ export async function POST(_req: NextRequest, ctx: Ctx) {
     let tdWs = project.workstreams.find((w) => w.name === 'Tear Down') ?? null
     let costWs = project.workstreams.find((w) => w.name === 'Costing') ?? null
     let migrated = 0
+    let ownersUpdated = 0
 
     for (const product of project.products) {
       const productLabel = `${product.brand}${product.modelNo ? ` ${product.modelNo}` : ''}`
@@ -68,7 +76,7 @@ export async function POST(_req: NextRequest, ctx: Ctx) {
           const order = await prisma.workstream.count({ where: { projectId: id } })
           const created = await prisma.workstream.create({
             data: { projectId: id, name: 'Tear Down', order },
-            include: { tasks: { select: { id: true, description: true } } },
+            include: { tasks: { select: { id: true, name: true, description: true } } },
           })
           tdWs = created
         }
@@ -93,7 +101,7 @@ export async function POST(_req: NextRequest, ctx: Ctx) {
           const order = await prisma.workstream.count({ where: { projectId: id } })
           const created = await prisma.workstream.create({
             data: { projectId: id, name: 'Costing', order },
-            include: { tasks: { select: { id: true, description: true } } },
+            include: { tasks: { select: { id: true, name: true, description: true } } },
           })
           costWs = created
         }
@@ -109,11 +117,43 @@ export async function POST(_req: NextRequest, ctx: Ctx) {
             effortHours: 0,
           })),
         })
+        const newlyCreated = await prisma.task.findMany({
+          where: { workstreamId: costWs.id, description: `__productTask:${product.id}:costing__` },
+          select: { id: true, name: true, description: true },
+        })
+        costWs.tasks.push(...newlyCreated.filter((nt) => !costWs!.tasks.some((t) => t.id === nt.id)))
         migrated++
+      }
+
+      // Re-sync costing task owners from the product's current resource assignments — matches
+      // each task's base name against each resource's costingTypes (subsystem names, or Harness/PCB).
+      const productCostTasks = costWs?.tasks.filter(
+        (t) => t.description?.includes(`__productTask:${product.id}:costing__`)
+      ) ?? []
+      if (productCostTasks.length > 0) {
+        const prefix = `${productLabel} — `
+        const results = await Promise.all(
+          productCostTasks.map((task) => {
+            const baseName = task.name.startsWith(prefix)
+              ? task.name.slice(prefix.length).toLowerCase()
+              : task.name.toLowerCase()
+            const match = product.resources.find((r) =>
+              r.costingTypes?.some((ct) => {
+                const c = ct.toLowerCase()
+                return c === baseName || c.includes(baseName) || baseName.includes(c)
+              })
+            )
+            return prisma.task.updateMany({
+              where: { id: task.id, NOT: { ownerId: match?.userId ?? null } },
+              data: { ownerId: match?.userId ?? null },
+            })
+          })
+        )
+        ownersUpdated += results.reduce((sum, r) => sum + r.count, 0)
       }
     }
 
-    return Response.json({ migrated })
+    return Response.json({ migrated, ownersUpdated })
   } catch (err: unknown) {
     if (err instanceof Error && err.message === 'Unauthorized') {
       return Response.json({ error: 'Unauthorized' }, { status: 401 })
