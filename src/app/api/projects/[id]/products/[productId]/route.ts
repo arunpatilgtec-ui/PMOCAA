@@ -186,6 +186,10 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
         },
       })
 
+      console.error('[COSTING] wsId=%s category=%s productLabel=%s resources=%j',
+        costingWs.id, proj?.category, productLabel,
+        newResources.map((r) => ({ uid: r.userId, cts: r.costingTypes })))
+
       // Remove any stale user×costingType tasks left over from old code
       await prisma.task.deleteMany({
         where: {
@@ -203,6 +207,8 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
         select: { id: true, name: true },
       })
 
+      console.error('[COSTING] existingTasks=%d: %j', costingTasks.length, costingTasks.map((t) => t.name))
+
       // Ensure all template tasks exist — create any that are missing (handles both fresh products
       // and products where the template gained new tasks like PCB/Harness after initial sync).
       if (proj?.category) {
@@ -210,11 +216,15 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
         const tdTaskTemplates = template?.find((ws) => ws.name === 'Tear Down')?.tasks ?? []
         const costTaskTemplates = template?.find((ws) => ws.name === 'Costing')?.tasks ?? []
 
+        console.error('[COSTING] templateTaskCount=%d', costTaskTemplates.length)
+
         if (costTaskTemplates.length > 0) {
           const existingNames = new Set(costingTasks.map((t) => t.name))
           const missingTasks = costTaskTemplates.filter(
             (task) => !existingNames.has(`${productLabel} — ${task.name}`)
           )
+
+          console.error('[COSTING] missingTasks=%j', missingTasks.map((t) => t.name))
 
           if (missingTasks.length > 0) {
             const tdAnchor = proj.startDate ? addWorkingDays(new Date(proj.startDate), 2) : null
@@ -247,6 +257,7 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
               },
               select: { id: true, name: true },
             })
+            console.error('[COSTING] afterCreate taskCount=%d', costingTasks.length)
           }
         }
       }
@@ -257,12 +268,15 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
         const harnessUser = newResources.find((r) => r.costingTypes?.includes('HARNESS'))?.userId ?? null
         const mechanicalUser = newResources.find((r) => r.costingTypes?.includes('MECHANICAL'))?.userId ?? null
 
+        console.error('[COSTING] owners pcb=%s harness=%s mechanical=%s', pcbUser, harnessUser, mechanicalUser)
+
         await Promise.all(
           costingTasks.map((task) => {
             const n = task.name.toLowerCase()
             const ownerId = n.includes('pcb') ? pcbUser
               : n.includes('harness') ? harnessUser
               : mechanicalUser
+            console.error('[COSTING] task=%s -> ownerId=%s', task.name, ownerId)
             return prisma.task.update({ where: { id: task.id }, data: { ownerId } })
           })
         )
