@@ -172,42 +172,44 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
           })
       }
 
-      // Sync per-product costing tasks — one task per (user × costingType),
-      // visible in Kanban/Gantt/Utilization just like BOB tasks.
+      // Sync per-product costing task owners — update ownerId on existing template
+      // tasks only; never overwrite dates, status, or pctComplete.
       const existingCostingWs = await prisma.workstream.findFirst({
         where: { projectId: id, name: { in: ['Costing', 'Product Costing'] } },
       })
-      const costingWsForSync = existingCostingWs ?? await prisma.workstream.create({
-        data: {
-          projectId: id,
-          name: 'Costing',
-          order: await prisma.workstream.count({ where: { projectId: id } }),
-        },
-      })
+      if (existingCostingWs) {
+        // Remove any stale user×costingType tasks left over from old code
+        await prisma.task.deleteMany({
+          where: {
+            workstreamId: existingCostingWs.id,
+            description: { contains: `__productTask:${productId}:costing:` },
+          },
+        })
 
-      // Remove stale per-product costing tasks for this product
-      await prisma.task.deleteMany({
-        where: {
-          workstreamId: costingWsForSync.id,
-          description: { contains: `__productTask:${productId}:costing:` },
-        },
-      })
+        // Find existing template-based costing tasks for this product
+        const costingTasks = await prisma.task.findMany({
+          where: {
+            workstreamId: existingCostingWs.id,
+            description: `__productTask:${productId}:costing__`,
+          },
+          select: { id: true, name: true },
+        })
 
-      // Re-create: one task per assigned user per costingType
-      const costingTaskRows = newResources.flatMap((nr) =>
-        (nr.costingTypes ?? []).map((ct) => ({
-          workstreamId: costingWsForSync.id,
-          name: `${productLabel} — ${ct}`,
-          description: `__productTask:${productId}:costing:${ct}__`,
-          ownerId: nr.userId,
-          startDate: proj?.startDate ?? null,
-          endDate: proj?.endDate ?? null,
-          estimatedHours: 8,
-          effortHours: 8,
-        }))
-      )
-      if (costingTaskRows.length > 0) {
-        await prisma.task.createMany({ data: costingTaskRows })
+        if (costingTasks.length > 0) {
+          const pcbUser = newResources.find((r) => r.costingTypes?.includes('PCB'))?.userId ?? null
+          const harnessUser = newResources.find((r) => r.costingTypes?.includes('HARNESS'))?.userId ?? null
+          const mechanicalUser = newResources.find((r) => r.costingTypes?.includes('MECHANICAL'))?.userId ?? null
+
+          await Promise.all(
+            costingTasks.map((task) => {
+              const n = task.name.toLowerCase()
+              const ownerId = n.includes('pcb') ? pcbUser
+                : n.includes('harness') ? harnessUser
+                : mechanicalUser
+              return prisma.task.update({ where: { id: task.id }, data: { ownerId } })
+            })
+          )
+        }
       }
     }
 

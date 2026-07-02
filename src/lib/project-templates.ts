@@ -150,6 +150,8 @@ const DISHWASHER_TEMPLATE: WorkstreamTemplate[] = [
       t('Control System', 0.5),
       t('Wash System', 1),
       t('Tub & Chassis System', 1),
+      t('PCB', 1),
+      t('Harness', 1),
     ],
   },
   {
