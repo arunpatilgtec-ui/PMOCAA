@@ -313,7 +313,7 @@ export default function KanbanPage() {
   }, [])
 
   const stopAutoScroll = useCallback(() => {
-    window.removeEventListener('mousemove', handleDragPointerMove)
+    window.removeEventListener('mousemove', handleDragPointerMove, true)
     if (autoScrollTimerRef.current !== null) {
       clearInterval(autoScrollTimerRef.current)
       autoScrollTimerRef.current = null
@@ -323,7 +323,11 @@ export default function KanbanPage() {
   }, [handleDragPointerMove])
 
   const onDragStart = useCallback(() => {
-    window.addEventListener('mousemove', handleDragPointerMove)
+    // Capture phase: @hello-pangea/dnd's own mouse sensor also listens on window
+    // during a drag, and if it ever stops propagation of the bubble-phase event,
+    // a bubble-phase listener here would silently never see it. Capture always
+    // fires first regardless.
+    window.addEventListener('mousemove', handleDragPointerMove, true)
     autoScrollTimerRef.current = setInterval(runAutoScroll, AUTO_SCROLL_TICK_MS)
   }, [handleDragPointerMove, runAutoScroll])
 
@@ -587,7 +591,11 @@ export default function KanbanPage() {
           ))}
         </div>
       ) : (
-        <DragDropContext onDragStart={onDragStart} onDragEnd={onDragEnd}>
+        <DragDropContext
+          onDragStart={onDragStart}
+          onDragEnd={onDragEnd}
+          autoScrollerOptions={{ disabled: true }}
+        >
           <div ref={boardScrollRef} className="flex gap-4 overflow-x-auto pb-4 flex-1 min-h-0">
             {COLUMNS.map((col) => {
               const colTasks = getColumnTasks(col.id)
