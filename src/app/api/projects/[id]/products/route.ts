@@ -2,7 +2,7 @@ import { NextRequest } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { requireAuth } from '@/lib/auth'
 import { addWorkingDays } from '@/lib/date-utils'
-import { CATEGORY_TEMPLATES } from '@/lib/project-templates'
+import { getCategoryTemplate } from '@/lib/project-templates'
 
 // DW: Planning(2) + TearDown(5) + Costing(5) = 12 working days before BOB
 const DW_BOB_OFFSET = 12
@@ -41,7 +41,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
 
     const project = await prisma.project.findUnique({
       where: { id },
-      select: { leadId: true, startDate: true, endDate: true, category: true },
+      select: { leadId: true, startDate: true, endDate: true, category: true, productType: true },
     })
     if (!project) return Response.json({ error: 'Not found' }, { status: 404 })
     const canManage =
@@ -147,7 +147,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     }
 
     // Create per-product teardown tasks using the category template
-    const template = project.category ? CATEGORY_TEMPLATES[project.category] : undefined
+    const template = await getCategoryTemplate(project.category, project.productType)
     const tdTaskTemplates = template?.find((ws) => ws.name === 'Tear Down')?.tasks ?? []
     if (tdTaskTemplates.length > 0) {
       const existingTdWs = await prisma.workstream.findFirst({ where: { projectId: id, name: 'Tear Down' } })
@@ -170,6 +170,8 @@ export async function POST(req: NextRequest, ctx: Ctx) {
             workstreamId: tdWs.id,
             name: `${productLabel} — ${task.name}`,
             description: `__productTask:${product.id}:teardown__`,
+            productId: product.id,
+            productSubsystem: task.name,
             ownerId: assignedOwnerId,
             assignedById: session.id,
             startDate: tdStart,

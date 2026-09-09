@@ -8,9 +8,9 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Loader2 } from 'lucide-react'
+import { useTemplateConfig } from '@/lib/use-template-config'
 
-const PROJECT_TYPES = ['DTV', 'NPI', 'Architecture', 'Cost Improvement', 'Cost Avoidance', 'Teardown'] as const
-type ProjectTypeOption = (typeof PROJECT_TYPES)[number]
+type ProjectTypeOption = string
 
 export function CreateProjectDialog({
   open,
@@ -21,14 +21,17 @@ export function CreateProjectDialog({
   onOpenChange: (v: boolean) => void
   onCreated: (projectId?: string) => void
 }) {
+  const { projectTypes } = useTemplateConfig()
   const [loading, setLoading] = useState(false)
   const [name, setName] = useState('')
   const [projectType, setProjectType] = useState<ProjectTypeOption | ''>('')
   const [numberOfProducts, setNumberOfProducts] = useState('')
   const [startDate, setStartDate] = useState('')
+  const [quarter, setQuarter] = useState<string>('')
+  const [region, setRegion] = useState<string>('')
 
   function reset() {
-    setName(''); setProjectType(''); setNumberOfProducts(''); setStartDate('')
+    setName(''); setProjectType(''); setNumberOfProducts(''); setStartDate(''); setQuarter(''); setRegion('')
   }
 
   function handleClose(v: boolean) {
@@ -56,6 +59,8 @@ export function CreateProjectDialog({
           endDate: startDate,
           projectClassification: isTeardown ? undefined : projectType,
           numberOfProducts: numberOfProducts ? parseInt(numberOfProducts, 10) : undefined,
+          quarter: quarter || undefined,
+          region: region || undefined,
         }),
       })
       if (!res.ok) throw new Error((await res.json()).error)
@@ -98,8 +103,8 @@ export function CreateProjectDialog({
                 <SelectValue placeholder="Select type…">{projectType || null}</SelectValue>
               </SelectTrigger>
               <SelectContent>
-                {PROJECT_TYPES.map((t) => (
-                  <SelectItem key={t} value={t}>{t}</SelectItem>
+                {projectTypes.map((t) => (
+                  <SelectItem key={t.id} value={t.name}>{t.name}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
@@ -120,6 +125,38 @@ export function CreateProjectDialog({
             <div className="space-y-1.5">
               <Label>Start Date *</Label>
               <Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label>Quarter</Label>
+              <Select value={quarter} onValueChange={(v) => setQuarter(v ?? '')}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select quarter…">{quarter || null}</SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="Q1">Q1</SelectItem>
+                  <SelectItem value="Q2">Q2</SelectItem>
+                  <SelectItem value="Q3">Q3</SelectItem>
+                  <SelectItem value="Q4">Q4</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label>Region</Label>
+              <Select value={region} onValueChange={(v) => setRegion(v ?? '')}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select region…">{region || null}</SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="ASIA">ASIA</SelectItem>
+                  <SelectItem value="LAR">LAR</SelectItem>
+                  <SelectItem value="NAR">NAR</SelectItem>
+                  <SelectItem value="EMEA">EMEA</SelectItem>
+                  <SelectItem value="OTHER">Other</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
           </div>
 

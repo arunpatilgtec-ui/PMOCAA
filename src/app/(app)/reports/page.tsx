@@ -6,8 +6,11 @@ import { Badge } from '@/components/ui/badge'
 import { Progress } from '@/components/ui/progress'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Input } from '@/components/ui/input'
-import { BarChart3, Target, Users, FolderKanban, User, Clock, CalendarDays, TrendingUp } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { BarChart3, Target, Users, FolderKanban, User, Clock, CalendarDays, TrendingUp, Download } from 'lucide-react'
 import { useAuthStore } from '@/store/auth'
+import { YearFilter, ALL_YEARS, rangeOverlapsYear, QuarterFilter, ALL_QUARTERS, matchesQuarter, RegionFilter, ALL_REGIONS, matchesRegion } from '@/components/filters/year-filter'
+import { downloadCsv } from '@/lib/csv-export'
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -53,6 +56,9 @@ interface MyTask {
 
 interface Project {
   id: string; name: string; type: string; status: string; priority: string
+  startDate?: string; endDate?: string
+  quarter?: string | null
+  region?: string | null
   planner?: { id: string; name: string }
   workstreams: Array<{ tasks: Array<{ id: string; status: string }> }>
   allocations: Array<{ allocationPct: number; userId: string }>
@@ -446,6 +452,9 @@ export default function ReportsPage() {
   const [projects,  setProjects]  = useState<Project[]>([])
   const [resources, setResources] = useState<PortfolioResource[]>([])
   const [loading,   setLoading]   = useState(true)
+  const [yearFilter, setYearFilter] = useState(ALL_YEARS)
+  const [quarterFilter, setQuarterFilter] = useState(ALL_QUARTERS)
+  const [regionFilter, setRegionFilter] = useState(ALL_REGIONS)
   const loadInFlightRef = useRef(false)
 
   useEffect(() => {
@@ -490,20 +499,26 @@ export default function ReportsPage() {
   if (loading) return <div className="p-6"><Skeleton className="h-96 rounded-lg" /></div>
 
   // ── Portfolio view (managers / planners / admins) ──
+  const yearProjects = projects.filter(p => rangeOverlapsYear(p.startDate, p.endDate, yearFilter) && matchesQuarter(p.quarter, quarterFilter) && matchesRegion(p.region, regionFilter))
+  const projectYears = [...new Set(projects.flatMap(p => [
+    p.startDate ? new Date(p.startDate).getFullYear() : null,
+    p.endDate ? new Date(p.endDate).getFullYear() : null,
+  ].filter((y): y is number => y !== null)))]
+
   const byStatus = {
-    PLANNING:  projects.filter(p => p.status === 'PLANNING').length,
-    ACTIVE:    projects.filter(p => p.status === 'ACTIVE').length,
-    ON_HOLD:   projects.filter(p => p.status === 'ON_HOLD').length,
-    COMPLETED: projects.filter(p => p.status === 'COMPLETED').length,
-    CANCELLED: projects.filter(p => p.status === 'CANCELLED').length,
+    PLANNING:  yearProjects.filter(p => p.status === 'PLANNING').length,
+    ACTIVE:    yearProjects.filter(p => p.status === 'ACTIVE').length,
+    ON_HOLD:   yearProjects.filter(p => p.status === 'ON_HOLD').length,
+    COMPLETED: yearProjects.filter(p => p.status === 'COMPLETED').length,
+    CANCELLED: yearProjects.filter(p => p.status === 'CANCELLED').length,
   }
 
   const byType = {
-    TEARDOWN: projects.filter(p => p.type === 'TEARDOWN').length,
-    OTHER:    projects.filter(p => p.type === 'OTHER').length,
+    TEARDOWN: yearProjects.filter(p => p.type === 'TEARDOWN').length,
+    OTHER:    yearProjects.filter(p => p.type === 'OTHER').length,
   }
 
-  const allTasks = projects.flatMap(p => p.workstreams.flatMap(ws => ws.tasks))
+  const allTasks = yearProjects.flatMap(p => p.workstreams.flatMap(ws => ws.tasks))
   const tasksByStatus = {
     BACKLOG:     allTasks.filter(t => t.status === 'BACKLOG').length,
     PLANNED:     allTasks.filter(t => t.status === 'PLANNED').length,
@@ -517,19 +532,83 @@ export default function ReportsPage() {
   const avgUtilization = resources.length
     ? Math.round(resources.reduce((s, r) => s + r.utilizationPct, 0) / resources.length) : 0
 
+  function exportProjectsCsv() {
+    downloadCsv(
+      `portfolio-projects-${yearFilter}`,
+      yearProjects.map((p) => {
+        const tasks = p.workstreams.flatMap((ws) => ws.tasks)
+        const completed = tasks.filter((t) => t.status === 'COMPLETED').length
+        return {
+          name: p.name,
+          type: p.type,
+          status: p.status,
+          priority: p.priority,
+          startDate: p.startDate ? p.startDate.slice(0, 10) : '',
+          endDate: p.endDate ? p.endDate.slice(0, 10) : '',
+          planner: p.planner?.name ?? '',
+          taskCount: tasks.length,
+          tasksCompleted: completed,
+          allocationPct: p.allocations.reduce((s, a) => s + a.allocationPct, 0),
+        }
+      }),
+      [
+        { key: 'name', label: 'Project' },
+        { key: 'type', label: 'Type' },
+        { key: 'status', label: 'Status' },
+        { key: 'priority', label: 'Priority' },
+        { key: 'startDate', label: 'Start Date' },
+        { key: 'endDate', label: 'End Date' },
+        { key: 'planner', label: 'Planner' },
+        { key: 'taskCount', label: 'Total Tasks' },
+        { key: 'tasksCompleted', label: 'Tasks Completed' },
+        { key: 'allocationPct', label: 'Total Allocation %' },
+      ]
+    )
+  }
+
+  function exportResourcesCsv() {
+    downloadCsv(
+      'resource-utilization',
+      resources.map((r) => ({
+        name: r.name,
+        role: r.role,
+        utilizationPct: r.utilizationPct,
+        activeTasks: r.activeTasks,
+        overloaded: r.isOverloaded ? 'Yes' : 'No',
+      })),
+      [
+        { key: 'name', label: 'Name' },
+        { key: 'role', label: 'Role' },
+        { key: 'utilizationPct', label: 'Utilization %' },
+        { key: 'activeTasks', label: 'Active Tasks' },
+        { key: 'overloaded', label: 'Overloaded' },
+      ]
+    )
+  }
+
   return (
     <div className="p-6 space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold flex items-center gap-2">
-          <BarChart3 className="h-6 w-6 text-blue-500" /> Portfolio Reports
-        </h1>
-        <p className="text-muted-foreground text-sm">Snapshot as of today</p>
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div>
+          <h1 className="text-2xl font-bold flex items-center gap-2">
+            <BarChart3 className="h-6 w-6 text-blue-500" /> Portfolio Reports
+          </h1>
+          <p className="text-muted-foreground text-sm">Snapshot as of today</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <QuarterFilter value={quarterFilter} onChange={setQuarterFilter} className="h-9 w-28" />
+          <RegionFilter value={regionFilter} onChange={setRegionFilter} className="h-9 w-28" />
+          <YearFilter value={yearFilter} onChange={setYearFilter} years={projectYears} />
+          <Button variant="outline" size="sm" className="h-8 text-xs" onClick={exportProjectsCsv} disabled={yearProjects.length === 0}>
+            <Download className="h-3.5 w-3.5 mr-1" /> Export CSV
+          </Button>
+        </div>
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <Card><CardContent className="p-4">
           <p className="text-xs text-muted-foreground">Total Projects</p>
-          <p className="text-3xl font-bold mt-1">{projects.length}</p>
+          <p className="text-3xl font-bold mt-1">{yearProjects.length}</p>
           <p className="text-xs text-muted-foreground mt-1">{byStatus.ACTIVE} active</p>
         </CardContent></Card>
         <Card><CardContent className="p-4">
@@ -563,7 +642,7 @@ export default function ReportsPage() {
                   <span className="text-muted-foreground">{status.replace('_', ' ')}</span>
                   <span className="font-medium">{count}</span>
                 </div>
-                <Progress value={projects.length ? (count / projects.length) * 100 : 0} className="h-1.5" />
+                <Progress value={yearProjects.length ? (count / yearProjects.length) * 100 : 0} className="h-1.5" />
               </div>
             ))}
           </CardContent>
@@ -594,7 +673,7 @@ export default function ReportsPage() {
             {Object.entries(byType).map(([type, count]) => (
               <div key={type} className="flex items-center gap-4">
                 <div className="w-24 text-sm text-muted-foreground">{type}</div>
-                <Progress value={projects.length ? (count / projects.length) * 100 : 0} className="flex-1 h-3" />
+                <Progress value={yearProjects.length ? (count / yearProjects.length) * 100 : 0} className="flex-1 h-3" />
                 <div className="w-10 text-right text-sm font-medium">{count}</div>
               </div>
             ))}
@@ -605,6 +684,9 @@ export default function ReportsPage() {
           <CardHeader className="pb-3">
             <CardTitle className="text-base flex items-center gap-2">
               <Users className="h-4 w-4 text-purple-500" /> Resource Utilization
+              <Button variant="ghost" size="sm" className="h-6 text-xs ml-auto" onClick={exportResourcesCsv} disabled={resources.length === 0}>
+                <Download className="h-3 w-3 mr-1" /> CSV
+              </Button>
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-2">

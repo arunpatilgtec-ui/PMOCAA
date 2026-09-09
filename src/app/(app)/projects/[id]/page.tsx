@@ -27,8 +27,8 @@ import {
   Link as LinkIcon, Plus, X, Wand2,
 } from 'lucide-react'
 import {
-  ALL_CATEGORIES, CATEGORY_TYPES, CATEGORY_TYPE_LABELS,
-} from '@/lib/project-templates'
+  useTemplateConfig,
+} from '@/lib/use-template-config'
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
@@ -63,6 +63,8 @@ interface Project {
   planStatus: string  // 'DRAFT' | 'SUBMITTED' | 'APPROVED'
   category?: string
   productType?: string
+  quarter?: string
+  region?: string
   projectLinks: string[]
   projectClassification?: string
   numberOfProducts?: number
@@ -99,6 +101,9 @@ export default function ProjectDetailPage() {
   const [editLeadId, setEditLeadId] = useState<string>('')
   const [editCategory, setEditCategory] = useState('')
   const [editProductType, setEditProductType] = useState('')
+  const [editQuarter, setEditQuarter] = useState('')
+  const [editRegion, setEditRegion] = useState('')
+  const { allCategoryNames, getModelTypes } = useTemplateConfig()
   const [editUsers, setEditUsers] = useState<Array<{ id: string; name: string; role: string }>>([])
   const [editSaving, setEditSaving] = useState(false)
 
@@ -290,6 +295,8 @@ export default function ProjectDetailPage() {
     setEditLeadId(project.leadId || '')
     setEditCategory(project.category || '')
     setEditProductType(project.productType || '')
+    setEditQuarter(project.quarter || '')
+    setEditRegion(project.region || '')
     setEditProjectOpen(true)
     if (canEditProject && editUsers.length === 0) {
       fetch('/api/users')
@@ -306,6 +313,8 @@ export default function ProjectDetailPage() {
         body.leadId = editLeadId || null
         body.category = editCategory || null
         body.productType = editProductType || null
+        body.quarter = editQuarter || null
+        body.region = editRegion || null
       }
       const res = await fetch(`/api/projects/${id}`, {
         method: 'PATCH',
@@ -526,6 +535,16 @@ export default function ProjectDetailPage() {
             {project.category && (
               <Badge variant="outline" className="text-xs text-blue-600 border-blue-300">
                 {project.category}{project.productType ? ` · ${project.productType}` : ''}
+              </Badge>
+            )}
+            {project.quarter && (
+              <Badge variant="outline" className="text-xs text-purple-600 border-purple-300">
+                {project.quarter}
+              </Badge>
+            )}
+            {project.region && (
+              <Badge variant="outline" className="text-xs text-teal-600 border-teal-300">
+                {project.region}
               </Badge>
             )}
             {project.projectClassification && (
@@ -945,13 +964,13 @@ export default function ProjectDetailPage() {
                     <SelectTrigger><SelectValue placeholder="Not set" /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="none">Not set</SelectItem>
-                      {ALL_CATEGORIES.map((c) => (
+                      {allCategoryNames.map((c) => (
                         <SelectItem key={c} value={c}>{c}</SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
                 </div>
-                {editCategory && editCategory !== 'Other' && (CATEGORY_TYPES[editCategory] ?? []).length > 0 && (
+                {editCategory && editCategory !== 'Other' && getModelTypes(editCategory).length > 0 && (
                   <div className="space-y-1.5">
                     <Label>Product Type</Label>
                     <Select
@@ -961,15 +980,48 @@ export default function ProjectDetailPage() {
                       <SelectTrigger><SelectValue placeholder="Not set" /></SelectTrigger>
                       <SelectContent>
                         <SelectItem value="none">Not set</SelectItem>
-                        {(CATEGORY_TYPES[editCategory] ?? []).map((t) => (
-                          <SelectItem key={t} value={t}>
-                            {(CATEGORY_TYPE_LABELS[editCategory] ?? {})[t] || t}
+                        {getModelTypes(editCategory).map((t) => (
+                          <SelectItem key={t.code} value={t.code}>
+                            {t.label || t.code}
                           </SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
                   </div>
                 )}
+                <div className="space-y-1.5">
+                  <Label>Quarter</Label>
+                  <Select
+                    value={editQuarter || 'none'}
+                    onValueChange={(v) => { const s = v as string | null; setEditQuarter(!s || s === 'none' ? '' : s) }}
+                  >
+                    <SelectTrigger><SelectValue placeholder="Not set" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">Not set</SelectItem>
+                      <SelectItem value="Q1">Q1</SelectItem>
+                      <SelectItem value="Q2">Q2</SelectItem>
+                      <SelectItem value="Q3">Q3</SelectItem>
+                      <SelectItem value="Q4">Q4</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Region</Label>
+                  <Select
+                    value={editRegion || 'none'}
+                    onValueChange={(v) => { const s = v as string | null; setEditRegion(!s || s === 'none' ? '' : s) }}
+                  >
+                    <SelectTrigger><SelectValue placeholder="Not set" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">Not set</SelectItem>
+                      <SelectItem value="ASIA">ASIA</SelectItem>
+                      <SelectItem value="LAR">LAR</SelectItem>
+                      <SelectItem value="NAR">NAR</SelectItem>
+                      <SelectItem value="EMEA">EMEA</SelectItem>
+                      <SelectItem value="OTHER">Other</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
               </>
             )}
             <div className="flex justify-end gap-2 pt-1">

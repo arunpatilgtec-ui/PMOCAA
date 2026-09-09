@@ -17,6 +17,7 @@ import {
   ClipboardList, Users, Scale,
 } from 'lucide-react'
 import { format } from 'date-fns'
+import { useTemplateConfig } from '@/lib/use-template-config'
 
 interface ProductUser { id: string; name: string; role: string }
 
@@ -29,6 +30,7 @@ interface Product {
   id: string; brand: string; modelNo: string; leadId?: string; resourceCount?: number; order: number
   lead?: ProductUser
   resources: ProductResource[]
+  excludedSubsystems: string[]
 }
 
 interface HistoryEntry {
@@ -44,6 +46,7 @@ interface ProjectInfo {
   id: string
   leadId?: string
   category?: string
+  productType?: string
   numberOfProducts?: number
   allocations: Array<{ userId: string; user: ProductUser }>
 }
@@ -57,22 +60,8 @@ interface ProductFormState {
 }
 
 
-// ── Subsystem sets per category ──────────────────────────────────────────────
-
-const SUBSYSTEMS_BY_CATEGORY: Record<string, string[]> = {
-  Refrigeration: [
-    'Cabinet', 'Compressor', 'Evaporator', 'Condenser', 'Liner',
-    'Door', 'Harness', 'PCB', 'Foam', 'Thermoformed Parts', 'Motors', 'Lighting',
-  ],
-  Cooking: ['Chassis', 'Cooktop', 'Accessories', 'Cavity', 'Controls', 'Drawer', 'UI Console', 'Door'],
-  Dishwasher: ['Packaging & Lit.', 'Racks', 'Water Delivery', 'Door & Aesthetics', 'Control System', 'Wash System', 'Tub & Chassis'],
-  Laundry: ['Aesthetics', 'Structures', 'Performance Enablers', 'SES'],
-  KASA: ['Packaging', 'Steam & Milk Frother Asm', 'Aesthetics & Cabinet', 'Brewing System', 'Grinding System', 'Heating System', 'Filling & Distribution System', 'Controls'],
-  'Food Disposer': ['Accessories', 'Aesthetic', 'Structure', 'Water & Heating', 'Control'],
-}
-
-const COSTING_TYPES = ['MECHANICAL', 'HARNESS', 'PCB'] as const
-const COSTING_LABELS: Record<string, string> = { MECHANICAL: 'Mechanical', HARNESS: 'Harness', PCB: 'PCB' }
+// Subsystem sets and costing types are admin-editable — see the "Templates"
+// settings page and the useTemplateConfig() hook (src/lib/use-template-config.ts).
 
 
 function emptyForm(): ProductFormState {
@@ -81,7 +70,7 @@ function emptyForm(): ProductFormState {
 
 // ── History action description ────────────────────────────────────────────────
 
-function describeAction(entry: HistoryEntry): { label: string; detail: string } {
+function describeAction(entry: HistoryEntry, costingLabels: Record<string, string>): { label: string; detail: string } {
   const d = entry.data
   const target = entry.targetUser?.name ?? (d.userName as string) ?? '?'
 
@@ -93,7 +82,7 @@ function describeAction(entry: HistoryEntry): { label: string; detail: string } 
       const cts = (d.costingTypes as string[]) ?? []
       const parts = []
       if (subs.length) parts.push(subs.join(', '))
-      if (cts.length) parts.push(`Costing: ${cts.map((c) => COSTING_LABELS[c] || c).join(', ')}`)
+      if (cts.length) parts.push(`Costing: ${cts.map((c) => costingLabels[c] || c).join(', ')}`)
       return { label: `${target} assigned`, detail: parts.join(' · ') || 'No subsystems' }
     }
     case 'RESOURCE_REMOVED':
@@ -107,12 +96,20 @@ function describeAction(entry: HistoryEntry): { label: string; detail: string } 
       }
     }
     case 'COSTING_CHANGED': {
-      const from = ((d.from as string[]) ?? []).map((c) => COSTING_LABELS[c] || c)
-      const to = ((d.to as string[]) ?? []).map((c) => COSTING_LABELS[c] || c)
+      const from = ((d.from as string[]) ?? []).map((c) => costingLabels[c] || c)
+      const to = ((d.to as string[]) ?? []).map((c) => costingLabels[c] || c)
       return {
         label: `${target} — costing updated`,
         detail: `${from.join(', ') || 'none'} → ${to.join(', ') || 'none'}`,
       }
+    }
+    case 'SUBSYSTEMS_EXCLUDED': {
+      const subs = (d.subsystems as string[]) ?? []
+      return { label: 'Marked not applicable', detail: subs.join(', ') }
+    }
+    case 'SUBSYSTEMS_INCLUDED': {
+      const subs = (d.subsystems as string[]) ?? []
+      return { label: 'Re-enabled subsystem', detail: subs.join(', ') }
     }
     case 'LEAD_ASSIGNED':
       return { label: 'Lead assigned', detail: d.toName as string ?? '—' }
@@ -131,6 +128,8 @@ function describeAction(entry: HistoryEntry): { label: string; detail: string } 
 function ProductHistoryPanel({ productId, projectId }: { productId: string; projectId: string }) {
   const [history, setHistory] = useState<HistoryEntry[]>([])
   const [loading, setLoading] = useState(true)
+  const { costingTypes } = useTemplateConfig()
+  const costingLabels = Object.fromEntries(costingTypes.map((c) => [c.code, c.label]))
 
   useEffect(() => {
     const fetchHistory = async () => {
@@ -151,7 +150,7 @@ function ProductHistoryPanel({ productId, projectId }: { productId: string; proj
   return (
     <div className="space-y-2">
       {history.map((entry) => {
-        const { label, detail } = describeAction(entry)
+        const { label, detail } = describeAction(entry, costingLabels)
         return (
           <div key={entry.id} className="flex gap-3 text-xs">
             <div className="w-[90px] shrink-0 text-muted-foreground tabular-nums">
@@ -179,6 +178,7 @@ function ProductDetailView({
   onEdit,
   onDelete,
   deletingId,
+  onToggleExclude,
 }: {
   product: Product
   projectId: string
@@ -187,7 +187,12 @@ function ProductDetailView({
   onEdit: (p: Product, e: React.MouseEvent) => void
   onDelete: (p: Product) => void
   deletingId: string | null
+  onToggleExclude: (subsystem: string, exclude: boolean) => void
 }) {
+  const excluded = product.excludedSubsystems ?? []
+  const activeSubsystems = subsystems.filter((s) => !excluded.includes(s))
+  const { costingTypes } = useTemplateConfig()
+  const costingLabels = Object.fromEntries(costingTypes.map((c) => [c.code, c.label]))
 
   return (
     <div className="space-y-4">
@@ -238,10 +243,10 @@ function ProductDetailView({
         <div className="space-y-2">
           <div className="flex items-center gap-2">
             <h3 className="text-sm font-semibold">Subsystem Assignments</h3>
-            <Badge variant="secondary" className="text-xs">{subsystems.length}</Badge>
+            <Badge variant="secondary" className="text-xs">{activeSubsystems.length}</Badge>
           </div>
           <div className="rounded-lg border border-border divide-y divide-border">
-            {subsystems.map((sub) => {
+            {activeSubsystems.map((sub) => {
               const assignedResources = product.resources.filter((r) => r.subsystems.includes(sub))
               return (
                 <div key={sub} className="flex items-center gap-3 px-3 py-2.5">
@@ -263,10 +268,43 @@ function ProductDetailView({
                   ) : (
                     <span className="text-xs text-muted-foreground italic">Unassigned</span>
                   )}
+                  {canManage && (
+                    <Button
+                      variant="ghost" size="sm"
+                      className="h-6 text-[11px] px-1.5 text-muted-foreground hover:text-red-500 shrink-0"
+                      title="This product doesn't have this subsystem — removes its teardown/costing tasks"
+                      onClick={() => onToggleExclude(sub, true)}
+                    >
+                      N/A
+                    </Button>
+                  )}
                 </div>
               )
             })}
           </div>
+          {excluded.length > 0 && (
+            <div className="rounded-lg border border-dashed border-border/60 divide-y divide-border/60">
+              {excluded.map((sub) => (
+                <div key={sub} className="flex items-center gap-3 px-3 py-2 opacity-60">
+                  <div className="h-2 w-2 rounded-full shrink-0 bg-muted-foreground/40" />
+                  <div className="flex-1 min-w-0">
+                    <span className="text-sm line-through">{sub}</span>
+                    <span className="text-[10px] text-muted-foreground ml-1.5 not-italic">not applicable to this product</span>
+                  </div>
+                  {canManage && (
+                    <Button
+                      variant="ghost" size="sm"
+                      className="h-6 text-[11px] px-1.5 text-muted-foreground hover:text-blue-500 shrink-0"
+                      title="Re-enable this subsystem for this product"
+                      onClick={() => onToggleExclude(sub, false)}
+                    >
+                      Re-enable
+                    </Button>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
@@ -303,7 +341,7 @@ function ProductDetailView({
                   <div className="flex flex-wrap gap-1 mt-1">
                     <span className="text-xs text-muted-foreground mr-0.5">Costing:</span>
                     {r.costingTypes.map((c) => (
-                      <span key={c} className="text-xs px-1.5 py-0.5 rounded bg-orange-50 dark:bg-orange-950/40 text-orange-700 dark:text-orange-300 border border-orange-200 dark:border-orange-800">{COSTING_LABELS[c] || c}</span>
+                      <span key={c} className="text-xs px-1.5 py-0.5 rounded bg-orange-50 dark:bg-orange-950/40 text-orange-700 dark:text-orange-300 border border-orange-200 dark:border-orange-800">{costingLabels[c] || c}</span>
                     ))}
                   </div>
                 )}
@@ -312,14 +350,14 @@ function ProductDetailView({
           </div>
 
           {/* Workload distribution */}
-          {product.resources.length >= 2 && subsystems.length > 0 && (
+          {product.resources.length >= 2 && activeSubsystems.length > 0 && (
             <div className="pt-2 space-y-1.5">
               <div className="flex items-center gap-1.5">
                 <Scale className="h-3 w-3 text-muted-foreground" />
                 <p className="text-xs font-medium text-muted-foreground">Workload Distribution</p>
               </div>
               {product.resources.map((r) => {
-                const pct = Math.round((r.subsystems.length / subsystems.length) * 100)
+                const pct = Math.round((r.subsystems.length / activeSubsystems.length) * 100)
                 return (
                   <div key={r.id} className="flex items-center gap-2">
                     <span className="text-xs w-20 truncate shrink-0 text-foreground/70">{r.user.name.split(' ')[0]}</span>
@@ -327,7 +365,7 @@ function ProductDetailView({
                       <div className="h-full bg-blue-500 rounded-full" style={{ width: `${pct}%` }} />
                     </div>
                     <span className="text-xs text-muted-foreground shrink-0 tabular-nums w-16 text-right">
-                      {r.subsystems.length}/{subsystems.length} · {pct}%
+                      {r.subsystems.length}/{activeSubsystems.length} · {pct}%
                     </span>
                   </div>
                 )
@@ -373,7 +411,16 @@ export function ProductsPanel({
     ['ADMIN', 'PLANNER', 'MANAGER'].includes(user?.role || '') ||
     (user?.role === 'PROJECT_LEAD' && user.id === project.leadId)
 
-  const subsystems = SUBSYSTEMS_BY_CATEGORY[project.category ?? ''] ?? []
+  const { getSubsystems, costingTypes } = useTemplateConfig()
+  const subsystems = getSubsystems(project.category, project.productType)
+  // The edit form only offers subsystems this specific product hasn't been
+  // marked "not applicable" for — excluded ones are managed via the N/A
+  // toggle in ProductDetailView instead.
+  const formSubsystems = editingProduct
+    ? subsystems.filter((s) => !(editingProduct.excludedSubsystems ?? []).includes(s))
+    : subsystems
+  const costingLabels = Object.fromEntries(costingTypes.map((c) => [c.code, c.label]))
+  const costingCodes = costingTypes.map((c) => c.code)
   const allocatedUsers = project.allocations.map((a) => a.user)
 
   const [allUsers, setAllUsers] = useState<ProductUser[]>([])
@@ -508,7 +555,7 @@ export function ProductsPanel({
   }
 
   function autoDistribute() {
-    if (subsystems.length === 0) return
+    if (formSubsystems.length === 0) return
     const filledCount = form.resources.filter((r) => r.userId).length
     if (filledCount < 2) return
 
@@ -517,17 +564,35 @@ export function ProductsPanel({
       const mechanical = filled.filter(({ r }) => r.costingTypes.length > 0)
       const targets = mechanical.length > 0 ? mechanical : filled
       const n = targets.length
-      const chunkSize = Math.floor(subsystems.length / n)
-      const remainder = subsystems.length % n
+      const chunkSize = Math.floor(formSubsystems.length / n)
+      const remainder = formSubsystems.length % n
 
       const next = f.resources.map((r) => ({ ...r, subsystems: [] as string[] }))
       targets.forEach(({ i }, ti) => {
         const start = ti * chunkSize + Math.min(ti, remainder)
         const size = chunkSize + (ti < remainder ? 1 : 0)
-        next[i] = { ...next[i], subsystems: subsystems.slice(start, start + size) }
+        next[i] = { ...next[i], subsystems: formSubsystems.slice(start, start + size) }
       })
       return { ...f, resources: next }
     })
+  }
+
+  async function toggleExcludeSubsystem(product: Product, subsystem: string, exclude: boolean) {
+    const current = product.excludedSubsystems ?? []
+    const next = exclude ? [...current, subsystem] : current.filter((s) => s !== subsystem)
+    try {
+      const res = await fetch(`/api/projects/${project.id}/products/${product.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ excludedSubsystems: next }),
+      })
+      if (!res.ok) throw new Error((await res.json()).error)
+      toast.success(exclude ? `${subsystem} marked not applicable` : `${subsystem} re-enabled`)
+      load()
+      onRefresh()
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'Failed to update')
+    }
   }
 
   const leadOptions = allUsers.length > 0 ? allUsers : allocatedUsers
@@ -592,6 +657,7 @@ export function ProductsPanel({
             onEdit={openEdit}
             onDelete={(p) => setDeleteConfirm(p)}
             deletingId={deletingId}
+            onToggleExclude={(sub, exclude) => toggleExcludeSubsystem(selectedProduct, sub, exclude)}
           />
         ) : null}
       </div>
@@ -668,7 +734,7 @@ export function ProductsPanel({
               <div className="flex items-center justify-between">
                 <Label>Assigned Resources</Label>
                 <div className="flex items-center gap-1.5">
-                  {form.resources.filter((r) => r.userId).length >= 2 && subsystems.length > 0 && (
+                  {form.resources.filter((r) => r.userId).length >= 2 && formSubsystems.length > 0 && (
                     <Button
                       type="button" variant="outline" size="sm"
                       className="h-6 text-xs gap-1 text-blue-600 border-blue-200 hover:bg-blue-50"
@@ -710,9 +776,9 @@ export function ProductsPanel({
                           </SelectContent>
                         </Select>
                       </div>
-                      {subsystems.length > 0 && r.subsystems.length > 0 && (
+                      {formSubsystems.length > 0 && r.subsystems.length > 0 && (
                         <span className="text-xs font-semibold text-blue-600 shrink-0 tabular-nums">
-                          {Math.round((r.subsystems.length / subsystems.length) * 100)}%
+                          {Math.round((r.subsystems.length / formSubsystems.length) * 100)}%
                         </span>
                       )}
                       <Button
@@ -724,11 +790,11 @@ export function ProductsPanel({
                       </Button>
                     </div>
 
-                    {subsystems.length > 0 && (
+                    {formSubsystems.length > 0 && (
                       <div className="space-y-1.5">
                         <Label className="text-xs text-muted-foreground">Subsystems</Label>
                         <div className="flex flex-wrap gap-1.5">
-                          {subsystems.map((sub) => (
+                          {formSubsystems.map((sub) => (
                             <button
                               key={sub} type="button"
                               onClick={() => toggleSubsystem(i, sub)}
@@ -748,9 +814,9 @@ export function ProductsPanel({
                     <div className="space-y-1.5">
                       <Label className="text-xs text-muted-foreground">Costing Responsibility</Label>
                       <div className="flex flex-wrap gap-1.5">
-                        {(subsystems.length > 0
-                          ? [...new Set([...subsystems, 'Harness', 'PCB'])]
-                          : COSTING_TYPES
+                        {(formSubsystems.length > 0
+                          ? [...new Set([...formSubsystems, 'Harness', 'PCB'])]
+                          : costingCodes
                         ).map((ct) => (
                           <button
                             key={ct} type="button"
@@ -761,7 +827,7 @@ export function ProductsPanel({
                                 : 'border-border hover:border-orange-400 text-muted-foreground hover:text-foreground'
                             }`}
                           >
-                            {COSTING_LABELS[ct] || ct}
+                            {costingLabels[ct] || ct}
                           </button>
                         ))}
                       </div>

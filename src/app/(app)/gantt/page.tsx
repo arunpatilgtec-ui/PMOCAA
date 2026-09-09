@@ -20,6 +20,9 @@ import {
 } from 'lucide-react'
 import { useAuthStore } from '@/store/auth'
 import { toast } from 'sonner'
+import { YearFilter, ALL_YEARS, rangeOverlapsYear, QuarterFilter, ALL_QUARTERS, matchesQuarter, RegionFilter, ALL_REGIONS, matchesRegion } from '@/components/filters/year-filter'
+import { checkCapacityConflicts, type CapacityDay } from '@/lib/capacity-check'
+import { CapacityConflictDialog } from '@/components/capacity-conflict-dialog'
 
 interface Task {
   id: string; name: string; status: string; priority: string
@@ -43,6 +46,8 @@ interface Project {
   description?: string
   planStatus?: string
   leadId?: string | null
+  quarter?: string | null
+  region?: string | null
 }
 
 interface EditForm {
@@ -98,11 +103,18 @@ export default function GanttPage() {
   const [viewMode, setViewMode] = useState<ViewMode>('tasks')
   const [selectedProject, setSelectedProject] = useState<string>(projectId || 'ALL')
   const [ownerFilter, setOwnerFilter] = useState<string>(searchParams.get('owner') ?? 'ALL')
+  const [yearFilter, setYearFilter] = useState(ALL_YEARS)
+  const [quarterFilter, setQuarterFilter] = useState(ALL_QUARTERS)
+  const [regionFilter, setRegionFilter] = useState(ALL_REGIONS)
   const [viewStart, setViewStart] = useState(() => { const d = new Date(); d.setDate(1); d.setHours(0, 0, 0, 0); return d })
   const [zoom, setZoom] = useState(1)
   const [editForm, setEditForm] = useState<EditForm | null>(null)
   const [editSaving, setEditSaving] = useState(false)
   const [userSearch, setUserSearch] = useState('')
+  const [capacityChecking, setCapacityChecking] = useState(false)
+  const [capacityOpen,     setCapacityOpen]     = useState(false)
+  const [capacityDays,     setCapacityDays]     = useState<CapacityDay[]>([])
+  const [capacityPerson,   setCapacityPerson]   = useState('')
   const [isDragging, setIsDragging] = useState(false)
   const [tasksInvalidated, setTasksInvalidated] = useState(0)
 
@@ -398,6 +410,39 @@ export default function GanttPage() {
 
   async function saveEdit() {
     if (!editForm) return
+    const task = localTasks.find(t => t.id === editForm.taskId)
+    const ownerChanged = !!editForm.ownerId && editForm.ownerId !== (task?.ownerId ?? '')
+    if (!task?._isStrategic && ownerChanged && editForm.startDate && editForm.endDate) {
+      setCapacityChecking(true)
+      try {
+        const full = await fetch(`/api/tasks/${editForm.taskId}`).then(r => r.json())
+        const hours = Math.max(full.estimatedHours || 0, full.effortHours || 0)
+        if (hours > 0) {
+          const conflicts = await checkCapacityConflicts({
+            userIds: [editForm.ownerId],
+            startDate: editForm.startDate,
+            endDate: editForm.endDate,
+            totalHours: hours,
+          })
+          if (conflicts.days.length > 0) {
+            setCapacityPerson(conflicts.person)
+            setCapacityDays(conflicts.days)
+            setCapacityOpen(true)
+            return
+          }
+        }
+      } catch {
+        toast.error('Could not check capacity')
+        return
+      } finally {
+        setCapacityChecking(false)
+      }
+    }
+    await doSaveEdit()
+  }
+
+  async function doSaveEdit() {
+    if (!editForm) return
     setEditSaving(true)
     try {
       const task = localTasks.find(t => t.id === editForm.taskId)
@@ -532,9 +577,15 @@ export default function GanttPage() {
   const days = eachDayOfInterval({ start: viewStart, end: viewEnd })
   const today = new Date(); today.setHours(0, 0, 0, 0)
 
-  const ownerFilteredTasks = ownerFilter && ownerFilter !== 'ALL'
+  const projectQuarterById = new Map(projects.map(p => [p.id, p.quarter]))
+  const projectRegionById = new Map(projects.map(p => [p.id, p.region]))
+  const ownerFilteredTasks = (ownerFilter && ownerFilter !== 'ALL'
     ? localTasks.filter(t => t.owner?.id === ownerFilter)
     : localTasks
+  )
+    .filter(t => rangeOverlapsYear(t.startDate, t.endDate, yearFilter))
+    .filter(t => matchesQuarter(projectQuarterById.get(t.workstream.project.id), quarterFilter))
+    .filter(t => matchesRegion(projectRegionById.get(t.workstream.project.id), regionFilter))
   const tasksWithDates = ownerFilteredTasks.filter(t => t.startDate && t.endDate)
   const tasksWithoutDates = ownerFilteredTasks.filter(t => !t.startDate || !t.endDate)
 
@@ -565,6 +616,9 @@ export default function GanttPage() {
 
   const sortedProjects = [...projects]
     .filter(p => p.name !== '__direct_assignments__')
+    .filter(p => rangeOverlapsYear(p.startDate, p.endDate, yearFilter))
+    .filter(p => matchesQuarter(p.quarter, quarterFilter))
+    .filter(p => matchesRegion(p.region, regionFilter))
     .sort((a, b) => {
       const pa = PRIORITY_RANK[a.priority ?? ''] ?? 0, pb = PRIORITY_RANK[b.priority ?? ''] ?? 0
       if (pb !== pa) return pb - pa
@@ -752,6 +806,9 @@ export default function GanttPage() {
               </SelectContent>
             </Select>
           )}
+          <QuarterFilter value={quarterFilter} onChange={setQuarterFilter} className="w-28 h-8 text-sm" />
+          <RegionFilter value={regionFilter} onChange={setRegionFilter} className="w-28 h-8 text-sm" />
+          <YearFilter value={yearFilter} onChange={setYearFilter} className="w-32 h-8 text-sm" />
 
           <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => setViewStart(d => addDays(d, -30))}><ChevronLeft className="h-4 w-4" /></Button>
           <Button variant="outline" size="sm" className="h-8 text-xs" onClick={() => setViewStart(new Date(today.getFullYear(), today.getMonth(), 1))}>Today</Button>
@@ -1032,9 +1089,9 @@ export default function GanttPage() {
                 Cancel
               </Button>
               <Button size="sm" className="flex-1 bg-blue-600 hover:bg-blue-700"
-                onClick={saveEdit} disabled={editSaving}>
+                onClick={saveEdit} disabled={editSaving || capacityChecking}>
                 <Save className="h-3.5 w-3.5 mr-1.5" />
-                {editSaving ? 'Saving…' : 'Save'}
+                {capacityChecking ? 'Checking capacity…' : editSaving ? 'Saving…' : 'Save'}
               </Button>
             </div>
           </div>
@@ -1098,6 +1155,31 @@ export default function GanttPage() {
           </div>
         )
       })()}
+
+      <CapacityConflictDialog
+        open={capacityOpen}
+        onOpenChange={setCapacityOpen}
+        personLabel={capacityPerson}
+        days={capacityDays}
+        onDaysChange={setCapacityDays}
+        refetch={async () => {
+          if (!editForm?.ownerId || !editForm.startDate || !editForm.endDate) return []
+          const full = await fetch(`/api/tasks/${editForm.taskId}`).then(r => r.json())
+          const conflicts = await checkCapacityConflicts({
+            userIds: [editForm.ownerId],
+            startDate: editForm.startDate,
+            endDate: editForm.endDate,
+            totalHours: Math.max(full.estimatedHours || 0, full.effortHours || 0),
+          })
+          return conflicts.days
+        }}
+        onProceed={async () => { setCapacityOpen(false); await doSaveEdit() }}
+        proceeding={editSaving}
+        proceedLabel="Assign anyway"
+        proceedingLabel="Saving..."
+        currentUserId={user?.id}
+        currentUserRole={user?.role}
+      />
     </div>
   )
 }

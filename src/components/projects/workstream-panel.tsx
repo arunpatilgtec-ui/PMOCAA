@@ -19,6 +19,8 @@ import {
 } from 'lucide-react'
 import { format } from 'date-fns'
 import { CreateTaskDialog } from './create-task-dialog'
+import { checkCapacityConflicts, type CapacityDay } from '@/lib/capacity-check'
+import { CapacityConflictDialog } from '@/components/capacity-conflict-dialog'
 
 interface OwnerHistoryEntry {
   id: string
@@ -94,6 +96,11 @@ export function WorkstreamPanel({ project, onRefresh, productId, onlyDeliverable
   const [taskEdits, setTaskEdits] = useState<Record<string, Partial<Task>>>({})
   const [savingTask, setSavingTask] = useState<string | null>(null)
   const [allUsers, setAllUsers] = useState<Array<{ id: string; name: string }>>([])
+  const [capacityChecking, setCapacityChecking] = useState<string | null>(null)
+  const [capacityOpen,     setCapacityOpen]     = useState(false)
+  const [capacityDays,     setCapacityDays]     = useState<CapacityDay[]>([])
+  const [capacityPerson,   setCapacityPerson]   = useState('')
+  const [pendingAssign,    setPendingAssign]    = useState<{ taskId: string; ownerId: string | null } | null>(null)
 
   useEffect(() => {
     fetch('/api/users')
@@ -182,7 +189,39 @@ export function WorkstreamPanel({ project, onRefresh, productId, onlyDeliverable
     }
   }
 
-  async function assignTask(taskId: string, ownerId: string | null) {
+  async function assignTask(task: Task, ownerId: string | null) {
+    // Reassigning to someone (not unassigning) with a scheduled date range
+    // and hours — check whether it would push them over capacity first.
+    if (ownerId && task.startDate && task.endDate) {
+      const hours = Math.max(task.estimatedHours || 0, task.effortHours || 0)
+      if (hours > 0) {
+        setCapacityChecking(task.id)
+        try {
+          const conflicts = await checkCapacityConflicts({
+            userIds: [ownerId],
+            startDate: task.startDate.slice(0, 10),
+            endDate: task.endDate.slice(0, 10),
+            totalHours: hours,
+          })
+          if (conflicts.days.length > 0) {
+            setPendingAssign({ taskId: task.id, ownerId })
+            setCapacityPerson(conflicts.person)
+            setCapacityDays(conflicts.days)
+            setCapacityOpen(true)
+            return
+          }
+        } catch {
+          toast.error('Could not check capacity')
+          return
+        } finally {
+          setCapacityChecking(null)
+        }
+      }
+    }
+    await doAssignTask(task.id, ownerId)
+  }
+
+  async function doAssignTask(taskId: string, ownerId: string | null) {
     try {
       await fetch(`/api/tasks/${taskId}`, {
         method: 'PATCH',
@@ -319,7 +358,7 @@ export function WorkstreamPanel({ project, onRefresh, productId, onlyDeliverable
                               {canAssignTasks ? (
                                 <Select
                                   value={task.owner?.id || 'unassigned'}
-                                  onValueChange={(v) => assignTask(task.id, v === 'unassigned' ? null : v)}
+                                  onValueChange={(v) => assignTask(task, v === 'unassigned' ? null : v)}
                                 >
                                   <SelectTrigger className="h-7 w-auto min-w-0 border-0 bg-transparent p-0 shadow-none focus:ring-0">
                                     <Avatar className="h-6 w-6 cursor-pointer">
@@ -546,6 +585,36 @@ export function WorkstreamPanel({ project, onRefresh, productId, onlyDeliverable
           allowedUsers={isProjectLead ? project.allocations.map((a) => a.user) : undefined}
         />
       )}
+
+      <CapacityConflictDialog
+        open={capacityOpen}
+        onOpenChange={setCapacityOpen}
+        personLabel={capacityPerson}
+        days={capacityDays}
+        onDaysChange={setCapacityDays}
+        refetch={async () => {
+          if (!pendingAssign?.ownerId) return []
+          const task = project.workstreams.flatMap((ws) => ws.tasks).find((t) => t.id === pendingAssign.taskId)
+          if (!task?.startDate || !task?.endDate) return []
+          const conflicts = await checkCapacityConflicts({
+            userIds: [pendingAssign.ownerId],
+            startDate: task.startDate.slice(0, 10),
+            endDate: task.endDate.slice(0, 10),
+            totalHours: Math.max(task.estimatedHours || 0, task.effortHours || 0),
+          })
+          return conflicts.days
+        }}
+        onProceed={async () => {
+          setCapacityOpen(false)
+          if (pendingAssign) await doAssignTask(pendingAssign.taskId, pendingAssign.ownerId)
+          setPendingAssign(null)
+        }}
+        proceeding={!!capacityChecking}
+        proceedLabel="Assign anyway"
+        proceedingLabel="Assigning..."
+        currentUserId={user?.id}
+        currentUserRole={user?.role}
+      />
     </div>
   )
 }

@@ -11,10 +11,8 @@ import {
 import {
   Loader2, X, Plus, ChevronRight, ChevronLeft, Wand2, Check, Calendar, Layers, AlertTriangle,
 } from 'lucide-react'
-import {
-  ALL_CATEGORIES, CATEGORY_TEMPLATES, CATEGORY_TYPES, CATEGORY_TYPE_LABELS,
-} from '@/lib/project-templates'
-import { addWorkingDays } from '@/lib/date-utils'
+import { useTemplateConfig } from '@/lib/use-template-config'
+import { sequenceTasks } from '@/lib/date-utils'
 import { format } from 'date-fns'
 
 interface User {
@@ -55,6 +53,7 @@ export function ProjectSetupWizard({
   const [step, setStep] = useState(1)
   const [submitting, setSubmitting] = useState(false)
   const [users, setUsers] = useState<User[]>([])
+  const { allCategoryNames, getWorkstreams, getModelTypes } = useTemplateConfig()
 
   // Step: Category
   const [category, setCategory] = useState('')
@@ -83,24 +82,22 @@ export function ProjectSetupWizard({
       .catch(() => {})
   }, [])
 
-  const hasTemplate = !!(category && CATEGORY_TEMPLATES[category])
+  const categoryWorkstreams = getWorkstreams(category, productType)
+  const hasTemplate = !!(category && categoryWorkstreams.length > 0)
+  const allTemplateTasks = categoryWorkstreams.flatMap((ws) => ws.tasks)
   let previewEndDate: Date | null = null
   if (hasTemplate && startDate) {
-    let cursor = new Date(startDate)
-    for (const ws of CATEGORY_TEMPLATES[category]) {
-      for (const task of ws.tasks) {
-        cursor = addWorkingDays(cursor, task.durationDays)
-      }
-    }
-    previewEndDate = cursor
+    const slots = sequenceTasks(allTemplateTasks, new Date(startDate))
+    previewEndDate = slots.reduce((m, s) => (s.endDate > m ? s.endDate : m), slots[0]?.endDate ?? new Date(startDate))
   }
 
-  const productTypeOptions = category ? (CATEGORY_TYPES[category] ?? []) : []
-  const productTypeLabels = category ? (CATEGORY_TYPE_LABELS[category] ?? {}) : {}
+  const categoryModelTypes = getModelTypes(category)
+  const productTypeOptions = categoryModelTypes.map((m) => m.code)
+  const productTypeLabels = Object.fromEntries(categoryModelTypes.map((m) => [m.code, m.label]))
   const taskCount = hasTemplate
-    ? CATEGORY_TEMPLATES[category].reduce((s, ws) => s + ws.tasks.length, 0)
+    ? categoryWorkstreams.reduce((s, ws) => s + ws.tasks.length, 0)
     : 0
-  const workstreamCount = hasTemplate ? CATEGORY_TEMPLATES[category].length : 0
+  const workstreamCount = hasTemplate ? categoryWorkstreams.length : 0
 
   function canProceed() {
     if (currentStepName === 'Category') return !!category
@@ -233,7 +230,7 @@ export function ProjectSetupWizard({
                 >
                   <SelectTrigger><SelectValue placeholder="Select category…" /></SelectTrigger>
                   <SelectContent>
-                    {ALL_CATEGORIES.filter((c) => c !== 'Other').map((c) => (
+                    {allCategoryNames.filter((c) => c !== 'Other').map((c) => (
                       <SelectItem key={c} value={c}>{c}</SelectItem>
                     ))}
                     <SelectItem value="Other">Other (no auto-schedule)</SelectItem>
@@ -530,7 +527,7 @@ export function ProjectSetupWizard({
                     Phases &amp; Tasks
                   </p>
                   <div className="space-y-1 max-h-56 overflow-y-auto pr-1">
-                    {CATEGORY_TEMPLATES[category].map((ws) => (
+                    {categoryWorkstreams.map((ws) => (
                       <div key={ws.name} className="rounded-md border border-border/60 overflow-hidden">
                         <div className="flex items-center justify-between text-xs py-1.5 px-2.5 bg-muted/30">
                           <span className="flex items-center gap-1.5 font-semibold">

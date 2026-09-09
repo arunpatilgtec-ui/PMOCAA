@@ -22,6 +22,9 @@ import { Textarea } from '@/components/ui/textarea'
 import { Calendar, Clock, GripVertical, User2, Briefcase, RotateCcw, History } from 'lucide-react'
 import { format } from 'date-fns'
 import { useAuthStore } from '@/store/auth'
+import { YearFilter, ALL_YEARS, rangeOverlapsYear, QuarterFilter, ALL_QUARTERS, matchesQuarter, RegionFilter, ALL_REGIONS, matchesRegion } from '@/components/filters/year-filter'
+import { checkCapacityConflicts, type CapacityDay } from '@/lib/capacity-check'
+import { CapacityConflictDialog } from '@/components/capacity-conflict-dialog'
 
 interface HistoryEntry {
   id: string
@@ -84,7 +87,7 @@ interface Task {
   _submitterId?: string | null
 }
 
-interface Project { id: string; name: string }
+interface Project { id: string; name: string; quarter?: string | null; region?: string | null }
 
 const COLUMNS = [
   { id: 'BACKLOG',     label: 'Backlog',      color: 'bg-slate-100 dark:bg-slate-800' },
@@ -127,6 +130,9 @@ export default function KanbanPage() {
   const [projectFilter, setProjectFilter] = useState<string | null>('ALL')
   const [ownerFilter, setOwnerFilter] = useState<string | null>(searchParams.get('owner') ?? 'ME')
   const [completedDateFilter, setCompletedDateFilter] = useState('')
+  const [yearFilter, setYearFilter] = useState(ALL_YEARS)
+  const [quarterFilter, setQuarterFilter] = useState(ALL_QUARTERS)
+  const [regionFilter, setRegionFilter] = useState(ALL_REGIONS)
   const [allUsers, setAllUsers] = useState<Array<{ id: string; name: string }>>([])
 
   useEffect(() => {
@@ -155,6 +161,10 @@ export default function KanbanPage() {
   const [userOptions, setUserOptions] = useState<UserOption[]>([])
   const [editAssigneeId, setEditAssigneeId] = useState<string | null>(null)
   const [savingAssignee, setSavingAssignee] = useState(false)
+  const [capacityChecking, setCapacityChecking] = useState(false)
+  const [capacityOpen,     setCapacityOpen]     = useState(false)
+  const [capacityDays,     setCapacityDays]     = useState<CapacityDay[]>([])
+  const [capacityPerson,   setCapacityPerson]   = useState('')
 
   // Strategic task detail (simple read-only view)
   const [strategicDetailTask, setStrategicDetailTask] = useState<Task | null>(null)
@@ -224,14 +234,21 @@ export default function KanbanPage() {
     return () => window.removeEventListener('storage', onStorage)
   }, [])
 
+  const projectQuarterById = new Map(projects.map(p => [p.id, p.quarter]))
+  const projectRegionById = new Map(projects.map(p => [p.id, p.region]))
   const filteredTasks = tasks.filter((t) => {
     if (projectFilter && projectFilter !== 'ALL' && t.workstream.project.id !== projectFilter) return false
+    if (!matchesQuarter(projectQuarterById.get(t.workstream.project.id), quarterFilter)) return false
+    if (!matchesRegion(projectRegionById.get(t.workstream.project.id), regionFilter)) return false
     // "My Tasks" includes work owned by the user and work they assigned.
     // Assigned work must stay visible when its owner submits it for review so
     // the assigner can approve it or request rework.
     if (ownerFilter === 'ME' && t.owner?.id !== user?.id && t.assignedById !== user?.id) return false
     if (ownerFilter === 'UNASSIGNED' && t.owner) return false
     if (ownerFilter && !['ALL', 'ME', 'UNASSIGNED'].includes(ownerFilter) && t.owner?.id !== ownerFilter) return false
+    // Unscheduled tasks (no dates yet, e.g. fresh Backlog items) stay visible
+    // regardless of the selected year rather than disappearing entirely.
+    if (yearFilter !== ALL_YEARS && (t.startDate || t.endDate) && !rangeOverlapsYear(t.startDate, t.endDate, yearFilter)) return false
     return true
   })
 
@@ -406,6 +423,34 @@ export default function KanbanPage() {
 
   async function saveAssignee() {
     if (!detailFull) return
+    const hours = Math.max(detailFull.estimatedHours || 0, detailFull.effortHours || 0)
+    if (editAssigneeId && editAssigneeId !== detailFull.ownerId && detailFull.startDate && detailFull.endDate && hours > 0) {
+      setCapacityChecking(true)
+      try {
+        const conflicts = await checkCapacityConflicts({
+          userIds: [editAssigneeId],
+          startDate: detailFull.startDate.slice(0, 10),
+          endDate: detailFull.endDate.slice(0, 10),
+          totalHours: hours,
+        })
+        if (conflicts.days.length > 0) {
+          setCapacityPerson(conflicts.person)
+          setCapacityDays(conflicts.days)
+          setCapacityOpen(true)
+          return
+        }
+      } catch {
+        toast.error('Could not check capacity')
+        return
+      } finally {
+        setCapacityChecking(false)
+      }
+    }
+    await doSaveAssignee()
+  }
+
+  async function doSaveAssignee() {
+    if (!detailFull) return
     setSavingAssignee(true)
     try {
       const res = await fetch(`/api/tasks/${detailFull.id}`, {
@@ -508,6 +553,9 @@ export default function KanbanPage() {
               </SelectContent>
             </Select>
           )}
+          <QuarterFilter value={quarterFilter} onChange={setQuarterFilter} className="w-28 h-8 text-sm" />
+          <RegionFilter value={regionFilter} onChange={setRegionFilter} className="w-28 h-8 text-sm" />
+          <YearFilter value={yearFilter} onChange={setYearFilter} className="w-32 h-8 text-sm" />
           <div className="flex items-center gap-1.5">
             <label htmlFor="completed-date-filter" className="text-xs text-muted-foreground whitespace-nowrap">
               Completed on
@@ -876,9 +924,9 @@ export default function KanbanPage() {
                             size="sm"
                             className="h-7 text-xs"
                             onClick={saveAssignee}
-                            disabled={savingAssignee}
+                            disabled={savingAssignee || capacityChecking}
                           >
-                            {savingAssignee ? 'Saving…' : 'Save Assignee'}
+                            {capacityChecking ? 'Checking capacity…' : savingAssignee ? 'Saving…' : 'Save Assignee'}
                           </Button>
                         )}
                       </div>
@@ -1175,6 +1223,30 @@ export default function KanbanPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <CapacityConflictDialog
+        open={capacityOpen}
+        onOpenChange={setCapacityOpen}
+        personLabel={capacityPerson}
+        days={capacityDays}
+        onDaysChange={setCapacityDays}
+        refetch={async () => {
+          if (!detailFull || !editAssigneeId || !detailFull.startDate || !detailFull.endDate) return []
+          const conflicts = await checkCapacityConflicts({
+            userIds: [editAssigneeId],
+            startDate: detailFull.startDate.slice(0, 10),
+            endDate: detailFull.endDate.slice(0, 10),
+            totalHours: Math.max(detailFull.estimatedHours || 0, detailFull.effortHours || 0),
+          })
+          return conflicts.days
+        }}
+        onProceed={async () => { setCapacityOpen(false); await doSaveAssignee() }}
+        proceeding={savingAssignee}
+        proceedLabel="Assign anyway"
+        proceedingLabel="Assigning..."
+        currentUserId={user?.id}
+        currentUserRole={user?.role}
+      />
     </div>
   )
 }

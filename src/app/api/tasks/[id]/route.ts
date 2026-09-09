@@ -2,6 +2,7 @@ import type { NextRequest } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { requireAuth } from '@/lib/auth'
 import { notifyTaskAssigned } from '@/lib/notifications'
+import { syncProductResourceFromTask } from '@/lib/product-resource-sync'
 
 const REVIEWER_ROLES = new Set(['ADMIN', 'MANAGER', 'PLANNER', 'PROJECT_LEAD', 'WORKSTREAM_LEAD'])
 
@@ -185,6 +186,21 @@ export async function PATCH(req: NextRequest, ctx: RouteContext<'/api/tasks/[id]
         session.id,
         task.workstream.project.id
       ).catch(console.error)
+    }
+
+    // Reassigning a product-linked teardown/costing task (e.g. from the
+    // Timeline or Kanban board) also updates that Product's ProductResource
+    // entries, so the Products tab reflects it and a later Products edit
+    // won't regenerate this task's owner back to something stale.
+    if (ownerChanged && existing.productId && existing.productSubsystem) {
+      await syncProductResourceFromTask({
+        productId: existing.productId,
+        subsystem: existing.productSubsystem,
+        isCosting: (existing.description ?? '').includes(':costing__'),
+        fromUserId: existing.ownerId,
+        toUserId: task.ownerId,
+        changedById: session.id,
+      }).catch(console.error)
     }
 
     // Status-change notifications

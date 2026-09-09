@@ -17,13 +17,19 @@ import {
 } from '@/components/ui/dialog'
 import { Label } from '@/components/ui/label'
 import {
-  Plus, Search, FolderKanban, Calendar, Users, AlertCircle, Copy,
+  Plus, Search, FolderKanban, Calendar, Users, AlertCircle, Copy, Download, Loader2, Upload,
 } from 'lucide-react'
 import { format, isPast } from 'date-fns'
+import { toast } from 'sonner'
 import { CreateProjectDialog } from '@/components/projects/create-project-dialog'
+import { ImportProjectsDialog } from '@/components/projects/import-projects-dialog'
+import { YearFilter, ALL_YEARS, rangeOverlapsYear, QuarterFilter, ALL_QUARTERS, matchesQuarter, RegionFilter, ALL_REGIONS, matchesRegion } from '@/components/filters/year-filter'
+import { downloadCsv } from '@/lib/csv-export'
 
 interface Project {
   id: string; name: string; type: string; status: string; priority: string
+  quarter?: string
+  region?: string
   startDate: string; endDate: string
   lead?: { id: string; name: string }
   planner?: { id: string; name: string }
@@ -63,7 +69,11 @@ export default function ProjectsPage() {
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<string | null>('ALL')
   const [typeFilter, setTypeFilter] = useState<string | null>('ALL')
+  const [yearFilter, setYearFilter] = useState(ALL_YEARS)
+  const [quarterFilter, setQuarterFilter] = useState(ALL_QUARTERS)
+  const [regionFilter, setRegionFilter] = useState(ALL_REGIONS)
   const [createOpen, setCreateOpen] = useState(false)
+  const [importOpen, setImportOpen] = useState(false)
 
   // Duplicate project — Step 1: name + date
   const [dupSource, setDupSource] = useState<Project | null>(null)
@@ -76,6 +86,92 @@ export default function ProjectsPage() {
   const [dupProjectId, setDupProjectId] = useState<string | null>(null)
   const [dupProductEdits, setDupProductEdits] = useState<Record<string, { brand: string; modelNo: string }>>({})
   const [dupProductSaving, setDupProductSaving] = useState(false)
+
+  // Full project export (tasks/timeline/resources) — id currently exporting, for a per-card spinner
+  const [exportingId, setExportingId] = useState<string | null>(null)
+
+  async function exportProject(e: React.MouseEvent, project: Project) {
+    e.preventDefault()
+    e.stopPropagation()
+    if (exportingId) return
+    setExportingId(project.id)
+    try {
+      const [full, products] = await Promise.all([
+        fetch(`/api/projects/${project.id}`).then((r) => { if (!r.ok) throw new Error(); return r.json() }),
+        fetch(`/api/projects/${project.id}/products`).then((r) => { if (!r.ok) throw new Error(); return r.json() }),
+      ])
+
+      const productLabel = new Map<string, string>(
+        (Array.isArray(products) ? products : []).map((p: { id: string; brand: string; modelNo: string }) =>
+          [p.id, `${p.brand}${p.modelNo ? ` ${p.modelNo}` : ''}`]
+        )
+      )
+
+      const taskRows = (full.workstreams ?? []).flatMap((ws: {
+        name: string
+        tasks: Array<{
+          name: string; status: string; priority: string
+          productId?: string | null; productSubsystem?: string | null
+          owner?: { name: string } | null
+          startDate?: string | null; endDate?: string | null
+          actualStartDate?: string | null; actualEndDate?: string | null
+          estimatedHours: number; effortHours: number; pctComplete?: number | null
+        }>
+      }) => ws.tasks.map((t) => ({
+        workstream: ws.name,
+        product: t.productId ? (productLabel.get(t.productId) ?? '') : '',
+        subsystem: t.productSubsystem ?? '',
+        task: t.name,
+        status: t.status,
+        priority: t.priority,
+        owner: t.owner?.name ?? '',
+        startDate: t.startDate ? t.startDate.slice(0, 10) : '',
+        endDate: t.endDate ? t.endDate.slice(0, 10) : '',
+        actualStartDate: t.actualStartDate ? t.actualStartDate.slice(0, 10) : '',
+        actualEndDate: t.actualEndDate ? t.actualEndDate.slice(0, 10) : '',
+        estimatedHours: t.estimatedHours ?? 0,
+        effortHours: t.effortHours ?? 0,
+        pctComplete: t.pctComplete ?? '',
+      })))
+
+      const safeName = project.name.replace(/[^\w.-]+/g, '_')
+
+      downloadCsv(`${safeName}-tasks`, taskRows, [
+        { key: 'workstream', label: 'Workstream' },
+        { key: 'product', label: 'Product' },
+        { key: 'subsystem', label: 'Subsystem' },
+        { key: 'task', label: 'Task' },
+        { key: 'status', label: 'Status' },
+        { key: 'priority', label: 'Priority' },
+        { key: 'owner', label: 'Owner' },
+        { key: 'startDate', label: 'Start Date' },
+        { key: 'endDate', label: 'End Date' },
+        { key: 'actualStartDate', label: 'Actual Start' },
+        { key: 'actualEndDate', label: 'Actual End' },
+        { key: 'estimatedHours', label: 'Estimated Hours' },
+        { key: 'effortHours', label: 'Effort Hours' },
+        { key: 'pctComplete', label: '% Complete' },
+      ])
+
+      const resourceRows = (full.allocations ?? []).map((a: { user: { name: string; role: string }; allocationPct: number }) => ({
+        name: a.user.name,
+        role: a.user.role,
+        allocationPct: a.allocationPct,
+      }))
+
+      downloadCsv(`${safeName}-resources`, resourceRows, [
+        { key: 'name', label: 'Name' },
+        { key: 'role', label: 'Role' },
+        { key: 'allocationPct', label: 'Allocation %' },
+      ])
+
+      toast.success(`Exported ${project.name}`)
+    } catch {
+      toast.error('Failed to export project')
+    } finally {
+      setExportingId(null)
+    }
+  }
 
   function openDuplicate(e: React.MouseEvent, project: Project) {
     e.preventDefault()
@@ -176,8 +272,14 @@ export default function ProjectsPage() {
     const matchSearch = p.name.toLowerCase().includes(search.toLowerCase())
     const matchStatus = statusFilter === 'ALL' || p.status === statusFilter
     const matchType = typeFilter === 'ALL' || p.type === typeFilter
-    return matchSearch && matchStatus && matchType
+    const matchYear = rangeOverlapsYear(p.startDate, p.endDate, yearFilter)
+    const matchQuarter = matchesQuarter(p.quarter, quarterFilter)
+    const matchRegion = matchesRegion(p.region, regionFilter)
+    return matchSearch && matchStatus && matchType && matchYear && matchQuarter && matchRegion
   })
+  const projectYears = [...new Set(projects.flatMap((p) => [
+    new Date(p.startDate).getFullYear(), new Date(p.endDate).getFullYear(),
+  ]))]
 
   function getProgress(p: Project) {
     const tasks = p.workstreams.flatMap((w) => w.tasks)
@@ -213,9 +315,14 @@ export default function ProjectsPage() {
           )}
 
           {user && canCreateProject(user.role) && (
-            <Button onClick={() => setCreateOpen(true)} size="sm">
-              <Plus className="mr-1 h-4 w-4" /> New Project
-            </Button>
+            <>
+              <Button onClick={() => setImportOpen(true)} size="sm" variant="outline">
+                <Upload className="mr-1 h-4 w-4" /> Import CSV
+              </Button>
+              <Button onClick={() => setCreateOpen(true)} size="sm">
+                <Plus className="mr-1 h-4 w-4" /> New Project
+              </Button>
+            </>
           )}
         </div>
       </div>
@@ -249,6 +356,9 @@ export default function ProjectsPage() {
             <SelectItem value="OTHER">Other</SelectItem>
           </SelectContent>
         </Select>
+        <YearFilter value={yearFilter} onChange={setYearFilter} years={projectYears} className="w-36" />
+        <QuarterFilter value={quarterFilter} onChange={setQuarterFilter} className="w-32" />
+        <RegionFilter value={regionFilter} onChange={setRegionFilter} className="w-32" />
       </div>
 
       {loadError && !loading ? (
@@ -287,6 +397,16 @@ export default function ProjectsPage() {
                     <div className="flex items-start justify-between gap-2">
                       <h3 className="font-semibold text-sm leading-tight line-clamp-2">{p.name}</h3>
                       <div className="flex items-center gap-1 shrink-0">
+                        <button
+                          onClick={(e) => exportProject(e, p)}
+                          disabled={exportingId === p.id}
+                          className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
+                          title="Export project data (tasks, timeline, resources) as CSV"
+                        >
+                          {exportingId === p.id
+                            ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            : <Download className="h-3.5 w-3.5" />}
+                        </button>
                         {canDuplicate && (
                           <button
                             onClick={(e) => openDuplicate(e, p)}
@@ -368,6 +488,12 @@ export default function ProjectsPage() {
           load()
           if (projectId) router.push(`/projects/${projectId}`)
         }}
+      />
+
+      <ImportProjectsDialog
+        open={importOpen}
+        onOpenChange={setImportOpen}
+        onImported={load}
       />
 
       {/* Step 1: name + start date */}

@@ -70,6 +70,14 @@ export async function requireAuth(): Promise<SessionUser> {
   return session
 }
 
+export async function requireAdmin(): Promise<SessionUser> {
+  const session = await requireAuth()
+  if (session.role !== 'ADMIN') {
+    throw new Error('Forbidden')
+  }
+  return session
+}
+
 export async function createSession(userId: string): Promise<string> {
   const user = await prisma.user.findUniqueOrThrow({ where: { id: userId } })
   const token = signToken({

@@ -7,6 +7,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { differenceInDays, format, startOfYear, endOfYear, eachMonthOfInterval, getDaysInMonth, addYears, subYears } from 'date-fns'
+import { rangeOverlapsYear, QuarterFilter, ALL_QUARTERS, matchesQuarter, RegionFilter, ALL_REGIONS, matchesRegion } from '@/components/filters/year-filter'
 
 interface Task {
   id: string; status: string; priority: string
@@ -18,6 +19,8 @@ interface Project {
   status: string; priority?: string
   startDate?: string; endDate?: string
   description?: string
+  quarter?: string | null
+  region?: string | null
   lead?: { id: string; name: string }
   planner?: { id: string; name: string }
   workstreams?: Array<{ tasks: Array<{ id: string; status: string }> }>
@@ -58,6 +61,8 @@ export default function TimelinePage() {
   const [year, setYear] = useState(new Date().getFullYear())
   const [filterStatus, setFilterStatus] = useState('ALL')
   const [filterPriority, setFilterPriority] = useState('ALL')
+  const [filterQuarter, setFilterQuarter] = useState(ALL_QUARTERS)
+  const [filterRegion, setFilterRegion] = useState(ALL_REGIONS)
 
   useEffect(() => {
     Promise.all([fetch('/api/projects'), fetch('/api/tasks')])
@@ -111,6 +116,9 @@ export default function TimelinePage() {
     return projects
       .filter(p => filterStatus === 'ALL' || p.status === filterStatus || (filterStatus === 'ACTIVE' && p.status === 'IN_PROGRESS'))
       .filter(p => filterPriority === 'ALL' || p.priority === filterPriority)
+      .filter(p => rangeOverlapsYear(p.startDate, p.endDate, String(year)))
+      .filter(p => matchesQuarter(p.quarter, filterQuarter))
+      .filter(p => matchesRegion(p.region, filterRegion))
       .sort((a, b) => {
         const pa = PRIORITY_RANK[a.priority ?? ''] ?? 0
         const pb = PRIORITY_RANK[b.priority ?? ''] ?? 0
@@ -119,7 +127,7 @@ export default function TimelinePage() {
         const statusOrd: Record<string, number> = { ACTIVE: 5, IN_PROGRESS: 5, PLANNING: 4, ON_HOLD: 3, COMPLETED: 2, CANCELLED: 1 }
         return (statusOrd[b.status] ?? 0) - (statusOrd[a.status] ?? 0)
       })
-  }, [projects, filterStatus, filterPriority])
+  }, [projects, filterStatus, filterPriority, filterQuarter, filterRegion, year])
 
   const stats = useMemo(() => ({
     total: projects.length,
@@ -190,8 +198,10 @@ export default function TimelinePage() {
               <SelectItem value="LOW">Low</SelectItem>
             </SelectContent>
           </Select>
-          {(filterStatus !== 'ALL' || filterPriority !== 'ALL') && (
-            <Button variant="ghost" size="sm" className="h-8 text-xs" onClick={() => { setFilterStatus('ALL'); setFilterPriority('ALL') }}>
+          <QuarterFilter value={filterQuarter} onChange={setFilterQuarter} className="h-8 w-28 text-xs" />
+          <RegionFilter value={filterRegion} onChange={setFilterRegion} className="h-8 w-28 text-xs" />
+          {(filterStatus !== 'ALL' || filterPriority !== 'ALL' || filterQuarter !== ALL_QUARTERS || filterRegion !== ALL_REGIONS) && (
+            <Button variant="ghost" size="sm" className="h-8 text-xs" onClick={() => { setFilterStatus('ALL'); setFilterPriority('ALL'); setFilterQuarter(ALL_QUARTERS); setFilterRegion(ALL_REGIONS) }}>
               Clear filters
             </Button>
           )}

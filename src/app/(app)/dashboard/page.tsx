@@ -25,6 +25,8 @@ import Link from 'next/link'
 import Image from 'next/image'
 import { format, isPast } from 'date-fns'
 import { motion, type Variants } from 'framer-motion'
+import { YearFilter, ALL_YEARS, rangeOverlapsYear, QuarterFilter, ALL_QUARTERS, matchesQuarter, RegionFilter, ALL_REGIONS, matchesRegion } from '@/components/filters/year-filter'
+import { ProjectStatusAnalysis } from '@/components/dashboard/project-status-analysis'
 
 interface Project {
   id: string
@@ -32,6 +34,9 @@ interface Project {
   type: string
   status: string
   priority: string
+  category?: string | null
+  quarter?: string | null
+  region?: string | null
   startDate: string
   endDate: string
   lead?: { id: string; name: string; avatarUrl?: string }
@@ -201,6 +206,17 @@ export default function DashboardPage() {
   const [pendingApprovals, setPendingApprovals] = useState(0)
   const [loading, setLoading] = useState(true)
   const loadInFlightRef = useRef(false)
+  const [banner, setBanner] = useState<{ title: string; imageUrl: string } | null>(null)
+  const [yearFilter, setYearFilter] = useState(ALL_YEARS)
+  const [quarterFilter, setQuarterFilter] = useState(ALL_QUARTERS)
+  const [regionFilter, setRegionFilter] = useState(ALL_REGIONS)
+
+  useEffect(() => {
+    fetch('/api/config/dashboard-banner')
+      .then((r) => r.json())
+      .then((d) => { if (d) setBanner(d) })
+      .catch(() => {})
+  }, [])
 
   const isResource  = user?.role === 'RESOURCE'
   const canManage   = !!user && ['ADMIN', 'MANAGER', 'PLANNER'].includes(user.role)
@@ -257,15 +273,26 @@ export default function DashboardPage() {
     return () => clearInterval(interval)
   }, [isResource])
 
-  const activeProjects = projects.filter((p) => p.status === 'ACTIVE')
-  const delayedProjects = projects.filter(isProjectDelayed)
+  const yearProjects = projects.filter((p) => rangeOverlapsYear(p.startDate, p.endDate, yearFilter) && matchesQuarter(p.quarter, quarterFilter) && matchesRegion(p.region, regionFilter))
+  const yearTasks = myTasks.filter((t) => {
+    const proj = t.workstream?.project ? projects.find(p => p.id === t.workstream.project.id) : undefined
+    return (yearFilter === ALL_YEARS || !t.startDate && !t.endDate || rangeOverlapsYear(t.startDate, t.endDate, yearFilter))
+      && matchesQuarter(proj?.quarter, quarterFilter)
+      && matchesRegion(proj?.region, regionFilter)
+  })
+  const projectYears = [...new Set(projects.flatMap((p) => [
+    new Date(p.startDate).getFullYear(), new Date(p.endDate).getFullYear(),
+  ]))]
+
+  const activeProjects = yearProjects.filter((p) => p.status === 'ACTIVE')
+  const delayedProjects = yearProjects.filter(isProjectDelayed)
   const overloadedResources = resources.filter((r) => r.isOverloaded)
 
-  const activeTasks = myTasks.filter((t) => !['COMPLETED', 'CANCELLED'].includes(t.status))
-  const inProgressTasks = myTasks.filter((t) => t.status === 'IN_PROGRESS')
-  const plannedTasks = myTasks.filter((t) => t.status === 'PLANNED')
-  const reviewTasks = myTasks.filter((t) => t.status === 'REVIEW' || t.status === 'REWORK')
-  const completedTasks = myTasks.filter((t) => t.status === 'COMPLETED')
+  const activeTasks = yearTasks.filter((t) => !['COMPLETED', 'CANCELLED'].includes(t.status))
+  const inProgressTasks = yearTasks.filter((t) => t.status === 'IN_PROGRESS')
+  const plannedTasks = yearTasks.filter((t) => t.status === 'PLANNED')
+  const reviewTasks = yearTasks.filter((t) => t.status === 'REVIEW' || t.status === 'REWORK')
+  const completedTasks = yearTasks.filter((t) => t.status === 'COMPLETED')
 
   const stats = isResource
     ? [
@@ -310,17 +337,25 @@ export default function DashboardPage() {
     >
       {/* Header */}
       <motion.div
+        className="flex items-start justify-between gap-3 flex-wrap"
         initial={{ opacity: 0, y: -12 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.4 }}
       >
-        <h1 className="text-2xl sm:text-3xl font-bold text-foreground">
-          {greeting},{' '}
-          <span className="text-primary">{user?.name?.split(' ')[0]}</span>
-        </h1>
-        <p className="text-muted-foreground text-sm mt-1">
-          {format(new Date(), 'EEEE, MMMM d, yyyy')}
-        </p>
+        <div>
+          <h1 className="text-2xl sm:text-3xl font-bold text-foreground">
+            {greeting},{' '}
+            <span className="text-primary">{user?.name?.split(' ')[0]}</span>
+          </h1>
+          <p className="text-muted-foreground text-sm mt-1">
+            {format(new Date(), 'EEEE, MMMM d, yyyy')}
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <QuarterFilter value={quarterFilter} onChange={setQuarterFilter} className="h-9 w-28" />
+          <RegionFilter value={regionFilter} onChange={setRegionFilter} className="h-9 w-28" />
+          <YearFilter value={yearFilter} onChange={setYearFilter} years={projectYears} />
+        </div>
       </motion.div>
 
       {/* Stat cards */}
@@ -556,27 +591,33 @@ export default function DashboardPage() {
         </div>
       </motion.div>
 
+      {banner && (
+        <motion.div variants={item} initial="hidden" animate="show">
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base font-semibold">{banner.title}</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="overflow-x-auto rounded-lg border bg-white">
+                <Image
+                  src={banner.imageUrl}
+                  alt={banner.title}
+                  width={1200}
+                  height={667}
+                  unoptimized
+                  className="h-auto w-full min-w-[900px]"
+                />
+              </div>
+              <p className="mt-2 text-xs text-muted-foreground sm:hidden">
+                Scroll horizontally to view the full project plan.
+              </p>
+            </CardContent>
+          </Card>
+        </motion.div>
+      )}
+
       <motion.div variants={item} initial="hidden" animate="show">
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base font-semibold">2026 CAA Project Plan</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="overflow-x-auto rounded-lg border bg-white">
-              <Image
-                src="/caa-project-plan-2026.png"
-                alt="CAA revised 2026 annual project plan organized by quarter"
-                width={1200}
-                height={667}
-                unoptimized
-                className="h-auto w-full min-w-[900px]"
-              />
-            </div>
-            <p className="mt-2 text-xs text-muted-foreground sm:hidden">
-              Scroll horizontally to view the full project plan.
-            </p>
-          </CardContent>
-        </Card>
+        <ProjectStatusAnalysis projects={projects} />
       </motion.div>
     </motion.div>
   )

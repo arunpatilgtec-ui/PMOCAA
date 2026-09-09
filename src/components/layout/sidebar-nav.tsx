@@ -24,6 +24,7 @@ import {
   ListOrdered,
   CalendarRange,
   Layers,
+  LayoutTemplate,
 } from 'lucide-react'
 import { useState } from 'react'
 import { Badge } from '@/components/ui/badge'
@@ -52,6 +53,9 @@ const navItems: NavItem[] = [
   { label: 'Documents',     href: '/documents',     icon: FileText },
   { label: 'Notifications', href: '/notifications', icon: Bell },
   { label: 'Settings',      href: '/settings',      icon: Settings },
+  { label: 'Updates',       href: '/settings/templates', icon: LayoutTemplate, roles: ['ADMIN'] },
+  // "Admin" (/settings/workload) is intentionally not listed here -- reachable
+  // only by navigating there directly, and gated by its own passphrase prompt.
   { label: 'Users',         href: '/users',         icon: UserCog,       roles: ['ADMIN'] },
 ]
 

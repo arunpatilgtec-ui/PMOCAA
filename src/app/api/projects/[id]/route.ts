@@ -77,6 +77,8 @@ export async function PATCH(req: NextRequest, ctx: RouteContext<'/api/projects/[
       if (data.leadId !== undefined) updateData.leadId = data.leadId
       if (data.category !== undefined) updateData.category = data.category
       if (data.productType !== undefined) updateData.productType = data.productType
+      if (data.quarter !== undefined) updateData.quarter = data.quarter || null
+      if (data.region !== undefined) updateData.region = data.region || null
     }
 
     // Timeline: planner/admin/manager, or the project lead once edit access has been granted

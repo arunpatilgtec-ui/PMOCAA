@@ -2,7 +2,7 @@ import type { NextRequest } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { requireAuth } from '@/lib/auth'
 import { addWorkingDays, sequenceTasks } from '@/lib/date-utils'
-import { CATEGORY_TEMPLATES, WorkstreamTemplate } from '@/lib/project-templates'
+import { getCategoryTemplate, WorkstreamTemplate } from '@/lib/project-templates'
 
 type Ctx = { params: Promise<{ id: string }> }
 
@@ -79,6 +79,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       select: {
         id: true,
         category: true,
+        productType: true,
         startDate: true,
         workstreams: {
           orderBy: { order: 'asc' },
@@ -94,7 +95,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
 
     if (!project) return Response.json({ error: 'Not found' }, { status: 404 })
 
-    const template = project.category ? CATEGORY_TEMPLATES[project.category] : undefined
+    const template = await getCategoryTemplate(project.category, project.productType)
     const teardownWs = project.workstreams.filter((ws) => ws.name === 'Tear Down')
 
     await prisma.$transaction(async (tx) => {

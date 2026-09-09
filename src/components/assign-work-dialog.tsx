@@ -10,6 +10,9 @@ import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { ClipboardCheck, Clock, Calendar, Check, Users } from 'lucide-react'
+import { useAuthStore } from '@/store/auth'
+import { checkCapacityConflicts, type CapacityDay } from '@/lib/capacity-check'
+import { CapacityConflictDialog } from '@/components/capacity-conflict-dialog'
 
 interface User {
   id: string; name: string; role: string; capacityPct: number
@@ -37,6 +40,7 @@ const ROLE_LABELS: Record<string, string> = {
 }
 
 export function AssignWorkDialog({ open, onOpenChange, prefillUserId, prefillName, onAssigned }: AssignWorkDialogProps) {
+  const { user: currentUser } = useAuthStore()
   const [users,       setUsers]       = useState<User[]>([])
   const [submitting,  setSubmitting]  = useState(false)
 
@@ -48,6 +52,11 @@ export function AssignWorkDialog({ open, onOpenChange, prefillUserId, prefillNam
   const [endDate,         setEndDate]         = useState('')
   const [priority,        setPriority]        = useState('MEDIUM')
 
+  const [capacityChecking, setCapacityChecking] = useState(false)
+  const [capacityOpen,     setCapacityOpen]     = useState(false)
+  const [capacityDays,     setCapacityDays]     = useState<CapacityDay[]>([])
+  const [capacityPerson,   setCapacityPerson]   = useState('')
+
   useEffect(() => {
     if (!open) return
     fetch('/api/users').then(r => r.json()).then(d => setUsers(Array.isArray(d) ? d.filter((u: User & { isActive: boolean }) => u.isActive) : []))
@@ -57,11 +66,41 @@ export function AssignWorkDialog({ open, onOpenChange, prefillUserId, prefillNam
     if (prefillUserId) setAssigneeIds([prefillUserId])
   }, [prefillUserId])
 
+  function runCapacityCheck() {
+    return checkCapacityConflicts({
+      userIds: assigneeIds,
+      startDate: startDate || endDate,
+      endDate,
+      totalHours: parseFloat(estimatedHours) || 0,
+    })
+  }
+
   async function submit() {
     if (!title.trim()) { toast.error('Task title is required'); return }
     if (assigneeIds.length === 0) { toast.error('Please select at least one assignee'); return }
     if (!endDate)      { toast.error('Due date is required'); return }
 
+    if (estimatedHours && parseFloat(estimatedHours) > 0) {
+      setCapacityChecking(true)
+      try {
+        const conflicts = await runCapacityCheck()
+        if (conflicts.days.length > 0) {
+          setCapacityPerson(conflicts.person)
+          setCapacityDays(conflicts.days)
+          setCapacityOpen(true)
+          return
+        }
+      } catch (e: unknown) {
+        toast.error(e instanceof Error ? e.message : 'Could not check capacity')
+        return
+      } finally {
+        setCapacityChecking(false)
+      }
+    }
+    await doSubmit()
+  }
+
+  async function doSubmit() {
     setSubmitting(true)
     try {
       const res = await fetch('/api/assignments', {
@@ -87,6 +126,7 @@ export function AssignWorkDialog({ open, onOpenChange, prefillUserId, prefillNam
     : 0
 
   return (
+    <>
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-lg">
         <DialogHeader>
@@ -205,13 +245,29 @@ export function AssignWorkDialog({ open, onOpenChange, prefillUserId, prefillNam
 
           <div className="flex justify-end gap-2 pt-1">
             <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
-            <Button onClick={submit} disabled={submitting} className="bg-blue-600 hover:bg-blue-700">
+            <Button onClick={submit} disabled={submitting || capacityChecking} className="bg-blue-600 hover:bg-blue-700">
               <ClipboardCheck className="mr-1.5 h-4 w-4" />
-              {submitting ? 'Assigning…' : 'Assign Work'}
+              {capacityChecking ? 'Checking capacity…' : submitting ? 'Assigning…' : 'Assign Work'}
             </Button>
           </div>
         </div>
       </DialogContent>
     </Dialog>
+
+    <CapacityConflictDialog
+      open={capacityOpen}
+      onOpenChange={setCapacityOpen}
+      personLabel={capacityPerson}
+      days={capacityDays}
+      onDaysChange={setCapacityDays}
+      refetch={async () => (await runCapacityCheck()).days}
+      onProceed={async () => { setCapacityOpen(false); await doSubmit() }}
+      proceeding={submitting}
+      proceedLabel="Assign anyway"
+      proceedingLabel="Assigning..."
+      currentUserId={currentUser?.id}
+      currentUserRole={currentUser?.role}
+    />
+    </>
   )
 }

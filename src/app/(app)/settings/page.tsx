@@ -1,20 +1,98 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { useAuthStore } from '@/store/auth'
 import { toast } from 'sonner'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Eye, EyeOff, KeyRound, CheckCircle2, Bell, BellOff, LifeBuoy, ExternalLink, ClipboardList } from 'lucide-react'
 
 const NOTIF_PREF_KEY = 'pmo-notif-enabled'
 const TICKET_FORM_URL = 'https://docs.google.com/forms/d/e/1FAIpQLSckMABzfJh04w1zj-IPsMOQxUV5Vtv7__n7bytikaXGMK-N_A/viewform'
 const TICKET_STATUS_URL = 'https://docs.google.com/spreadsheets/d/1pSdc4SaOho7iiFgn5NCwiZ4-t1MGo_IWEKiX5aJmeAo/edit?gid=2070436635#gid=2070436635'
 
+// Hidden control for changing the shared Admin-panel passphrase (see
+// /settings/workload). Only ever rendered for ADMIN users, and even then as a
+// deliberately inconspicuous mark rather than a labeled button.
+function AdminPasscodeDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
+  const [isSet, setIsSet] = useState<boolean | null>(null)
+  const [newPasscode, setNewPasscode] = useState('')
+  const [confirmPasscode, setConfirmPasscode] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    if (!open) return
+    setNewPasscode(''); setConfirmPasscode('')
+    fetch('/api/admin/panel-passcode')
+      .then((r) => r.json())
+      .then((d) => setIsSet(!!d.isSet))
+      .catch(() => setIsSet(null))
+  }, [open])
+
+  const mismatch = newPasscode && confirmPasscode && newPasscode !== confirmPasscode
+  const canSubmit = newPasscode.length >= 6 && newPasscode === confirmPasscode && !saving
+
+  async function submit() {
+    if (!canSubmit) return
+    setSaving(true)
+    try {
+      const res = await fetch('/api/admin/panel-passcode', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ newPasscode }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error)
+      toast.success(isSet ? 'Admin panel passphrase changed' : 'Admin panel passphrase set')
+      onOpenChange(false)
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'Failed to save')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-sm">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2 text-base">
+            <KeyRound className="h-4 w-4 text-blue-500" /> Admin Panel Passphrase
+          </DialogTitle>
+        </DialogHeader>
+        <div className="space-y-3">
+          {isSet === null ? (
+            <p className="text-sm text-muted-foreground">Loading…</p>
+          ) : (
+            <>
+              <div className="space-y-1.5">
+                <Label className="text-xs">{isSet ? 'New' : ''} Passphrase</Label>
+                <Input type="password" placeholder="At least 6 characters" value={newPasscode} onChange={(e) => setNewPasscode(e.target.value)} />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs">Confirm</Label>
+                <Input type="password" value={confirmPasscode} onChange={(e) => setConfirmPasscode(e.target.value)} />
+                {mismatch && <p className="text-red-500 text-xs">Passphrases do not match</p>}
+              </div>
+              <Button className="w-full" onClick={submit} disabled={!canSubmit}>
+                {saving ? 'Saving…' : isSet ? 'Change Passphrase' : 'Set Passphrase'}
+              </Button>
+            </>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 export default function SettingsPage() {
   const { user, setUser } = useAuthStore()
+  const router = useRouter()
+  const [passcodeDialogOpen, setPasscodeDialogOpen] = useState(false)
 
   const [currentPwd,  setCurrentPwd]  = useState('')
   const [newPwd,      setNewPwd]      = useState('')
@@ -288,6 +366,25 @@ export default function SettingsPage() {
         </CardContent>
       </Card>
 
+      {user?.role === 'ADMIN' && (
+        <div className="flex items-center justify-center gap-3 py-1">
+          <button
+            onClick={() => router.push('/settings/workload')}
+            className="text-[10px] text-muted-foreground/30 hover:text-muted-foreground/50 transition-colors"
+            aria-label="Admin panel"
+          >
+            ·
+          </button>
+          <button
+            onClick={() => setPasscodeDialogOpen(true)}
+            className="text-[10px] text-muted-foreground/30 hover:text-muted-foreground/50 transition-colors"
+            aria-label="Admin panel passphrase"
+          >
+            ·
+          </button>
+        </div>
+      )}
+      <AdminPasscodeDialog open={passcodeDialogOpen} onOpenChange={setPasscodeDialogOpen} />
     </div>
   )
 }

@@ -1,7 +1,7 @@
 import { NextRequest } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { requireAuth } from '@/lib/auth'
-import { CATEGORY_TEMPLATES, WorkstreamTemplate } from '@/lib/project-templates'
+import { getCategoryTemplate, WorkstreamTemplate } from '@/lib/project-templates'
 import { sequenceTasks } from '@/lib/date-utils'
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -17,10 +17,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     const project = await prisma.project.findUnique({ where: { id } })
     if (!project) return Response.json({ error: 'Not found' }, { status: 404 })
 
-    const wsTemplates: WorkstreamTemplate[] | undefined =
-      data.category && CATEGORY_TEMPLATES[data.category]
-        ? CATEGORY_TEMPLATES[data.category]
-        : undefined
+    const productType: string | null = data.productType !== undefined ? data.productType || null : project.productType
+    const wsTemplates: WorkstreamTemplate[] | undefined = await getCategoryTemplate(data.category, productType)
 
     const startDate = new Date(project.startDate)
     const leadId: string | null = data.leadId || project.leadId || null

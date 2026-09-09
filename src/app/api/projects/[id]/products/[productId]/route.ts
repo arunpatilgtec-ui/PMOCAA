@@ -2,7 +2,7 @@ import { NextRequest } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { requireAuth } from '@/lib/auth'
 import { addWorkingDays, sequenceTasks } from '@/lib/date-utils'
-import { CATEGORY_TEMPLATES } from '@/lib/project-templates'
+import { getCategoryTemplate } from '@/lib/project-templates'
 
 const DW_BOB_OFFSET = 12
 const DW_BOB_DURATION = 2
@@ -46,6 +46,64 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
       changedById: string
       data: Record<string, string | string[] | null>
     }> = []
+
+    // Diff excluded subsystems (subsystems that don't apply to THIS brand/model).
+    // Newly excluded ones get their linked teardown/costing tasks removed and
+    // stripped from every resource's assignment, for this product only.
+    const effectiveExcluded: string[] = Array.isArray(data.excludedSubsystems)
+      ? data.excludedSubsystems
+      : current.excludedSubsystems
+    if (data.excludedSubsystems !== undefined) {
+      const oldExcluded = new Set(current.excludedSubsystems)
+      const newExcluded = new Set(effectiveExcluded)
+      const newlyExcluded = [...newExcluded].filter((s) => !oldExcluded.has(s))
+      const newlyIncluded = [...oldExcluded].filter((s) => !newExcluded.has(s))
+
+      if (newlyExcluded.length > 0) {
+        await prisma.task.deleteMany({
+          where: {
+            productId,
+            productSubsystem: { in: newlyExcluded },
+            status: { in: ['BACKLOG', 'PLANNED'] },
+          },
+        })
+        for (const r of current.resources) {
+          const nextSubs = r.subsystems.filter((s) => !newExcluded.has(s))
+          const nextCosts = r.costingTypes.filter((c) => !newExcluded.has(c))
+          if (nextSubs.length !== r.subsystems.length || nextCosts.length !== r.costingTypes.length) {
+            if (nextSubs.length === 0 && nextCosts.length === 0) {
+              await prisma.productResource.delete({ where: { id: r.id } })
+            } else {
+              await prisma.productResource.update({
+                where: { id: r.id },
+                data: { subsystems: nextSubs, costingTypes: nextCosts },
+              })
+            }
+          }
+        }
+        historyEntries.push({
+          productId, action: 'SUBSYSTEMS_EXCLUDED', changedById: session.id,
+          data: { subsystems: newlyExcluded },
+        })
+      }
+      if (newlyIncluded.length > 0) {
+        historyEntries.push({
+          productId, action: 'SUBSYSTEMS_INCLUDED', changedById: session.id,
+          data: { subsystems: newlyIncluded },
+        })
+      }
+
+      // If the caller only toggled exclusions (didn't also submit a resources
+      // list), still run the regeneration block below using the CURRENT
+      // resources so newly-included subsystems get their tasks recreated.
+      if (data.resources === undefined) {
+        data.resources = current.resources.map((r) => ({
+          userId: r.userId,
+          subsystems: r.subsystems.filter((s) => !newExcluded.has(s)),
+          costingTypes: r.costingTypes.filter((c) => !newExcluded.has(c)),
+        }))
+      }
+    }
 
     // Diff resources
     if (data.resources !== undefined) {
@@ -125,7 +183,7 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
       // Fetch project dates and product record needed for BOB task dates
       const proj = await prisma.project.findUnique({
         where: { id },
-        select: { startDate: true, endDate: true, category: true },
+        select: { startDate: true, endDate: true, category: true, productType: true },
       })
       const productRecord = await prisma.product.findUnique({ where: { id: productId }, select: { brand: true, modelNo: true } })
 
@@ -145,8 +203,10 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
       // resources; each person receives an identical linked task with an equal share
       // of the template hours. Work already in progress is preserved unchanged.
       if (proj?.category) {
-        const teardownTemplates = CATEGORY_TEMPLATES[proj.category]
-          ?.find((workstream) => workstream.name === 'Tear Down')?.tasks ?? []
+        const excludedSet = new Set(effectiveExcluded)
+        const teardownTemplates = ((await getCategoryTemplate(proj.category, proj.productType))
+          ?.find((workstream) => workstream.name === 'Tear Down')?.tasks ?? [])
+          .filter((t) => !excludedSet.has(t.name))
         if (teardownTemplates.length > 0) {
           const existingTeardownWs = await prisma.workstream.findFirst({ where: { projectId: id, name: 'Tear Down' } })
           const teardownWs = existingTeardownWs ?? await prisma.workstream.create({
@@ -187,6 +247,8 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
               workstreamId: teardownWs.id,
               name: taskName,
               description: `__productTask:${productId}:teardown__`,
+              productId,
+              productSubsystem: templateTask.name,
               ownerId: assignedOwnerId,
               assignedById: session.id,
               startDate: teardownDates[index]?.startDate ?? null,
@@ -270,11 +332,27 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
       // Ensure all template tasks exist — create any that are missing (handles both fresh products
       // and products where the template gained new tasks like PCB/Harness after initial sync).
       if (proj?.category) {
-        const template = CATEGORY_TEMPLATES[proj.category]
-        const tdTaskTemplates = template?.find((ws) => ws.name === 'Tear Down')?.tasks ?? []
-        const costTaskTemplates = template?.find((ws) => ws.name === 'Costing')?.tasks ?? []
+        const excludedSet = new Set(effectiveExcluded)
+        const template = await getCategoryTemplate(proj.category, proj.productType)
+        const tdTaskTemplates = (template?.find((ws) => ws.name === 'Tear Down')?.tasks ?? [])
+          .filter((t) => !excludedSet.has(t.name))
+        const costTaskTemplates = (template?.find((ws) => ws.name === 'Costing')?.tasks ?? [])
+          .filter((t) => !excludedSet.has(t.name))
 
         console.error('[COSTING] templateTaskCount=%d', costTaskTemplates.length)
+
+        // Excluded subsystems: remove any not-yet-progressed costing tasks too
+        // (the general "ensure exists" logic below only adds, never removes).
+        if (effectiveExcluded.length > 0) {
+          await prisma.task.deleteMany({
+            where: {
+              workstreamId: costingWs.id,
+              productId,
+              productSubsystem: { in: effectiveExcluded },
+              status: { in: ['BACKLOG', 'PLANNED'] },
+            },
+          })
+        }
 
         if (costTaskTemplates.length > 0) {
           const existingNames = new Set(costingTasks.map((t) => t.name))
@@ -299,6 +377,8 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
                   workstreamId: costingWs.id,
                   name: `${productLabel} — ${task.name}`,
                   description: `__productTask:${productId}:costing__`,
+                  productId,
+                  productSubsystem: task.name,
                   ownerId: null,
                   startDate: allCostDates[i]?.startDate ?? null,
                   endDate: allCostDates[i]?.endDate ?? null,
@@ -382,6 +462,7 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
           resourceCount: data.resourceCount ? parseInt(String(data.resourceCount), 10) : null,
         }),
         ...(data.order !== undefined && { order: data.order }),
+        ...(Array.isArray(data.excludedSubsystems) && { excludedSubsystems: data.excludedSubsystems }),
       },
       include: {
         lead: { select: { id: true, name: true, role: true } },

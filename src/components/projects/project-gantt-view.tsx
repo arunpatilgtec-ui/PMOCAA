@@ -494,7 +494,7 @@ export function ProjectGanttView({
 
                   {/* Timeline area */}
                   <div
-                    className="relative flex-1 select-none"
+                    className="relative flex-1"
                     style={{ height: ROW_H }}
                   >
                     {days.map((day, di) => isWeekend(day) ? (

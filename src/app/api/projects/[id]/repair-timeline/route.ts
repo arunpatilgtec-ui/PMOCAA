@@ -2,7 +2,7 @@ import { NextRequest } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { requireAuth } from '@/lib/auth'
 import { addWorkingDays, sequenceTasks } from '@/lib/date-utils'
-import { CATEGORY_TEMPLATES } from '@/lib/project-templates'
+import { getCategoryTemplate } from '@/lib/project-templates'
 
 type Ctx = { params: Promise<{ id: string }> }
 
@@ -20,6 +20,7 @@ export async function POST(_req: NextRequest, ctx: Ctx) {
       where: { id },
       select: {
         category: true,
+        productType: true,
         startDate: true,
         workstreams: {
           orderBy: { order: 'asc' },
@@ -35,7 +36,7 @@ export async function POST(_req: NextRequest, ctx: Ctx) {
     if (!project) return Response.json({ error: 'Not found' }, { status: 404 })
     if (!project.startDate) return Response.json({ error: 'Project has no start date' }, { status: 400 })
 
-    const template = project.category ? CATEGORY_TEMPLATES[project.category] : undefined
+    const template = await getCategoryTemplate(project.category, project.productType)
     if (!template) return Response.json({ error: `No template found for category "${project.category}"` }, { status: 400 })
 
     // Walk workstreams in template order. cursor advances across workstreams so that

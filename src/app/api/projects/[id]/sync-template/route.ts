@@ -1,7 +1,7 @@
 import { NextRequest } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { requireAuth } from '@/lib/auth'
-import { CATEGORY_TEMPLATES } from '@/lib/project-templates'
+import { getCategoryTemplate } from '@/lib/project-templates'
 import { addWorkingDays } from '@/lib/date-utils'
 
 // Adds missing template tasks AND fills in dates for existing undated tasks.
@@ -25,7 +25,7 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
     })
     if (!project) return Response.json({ error: 'Not found' }, { status: 404 })
 
-    const wsTemplates = project.category ? CATEGORY_TEMPLATES[project.category] : undefined
+    const wsTemplates = await getCategoryTemplate(project.category, project.productType)
     if (!wsTemplates) return Response.json({ added: 0, updated: 0 })
 
     const leadId: string | null = project.leadId || null

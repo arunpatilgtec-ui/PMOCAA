@@ -15,6 +15,9 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select'
 import { Loader2 } from 'lucide-react'
+import { useAuthStore } from '@/store/auth'
+import { checkCapacityConflicts, type CapacityDay } from '@/lib/capacity-check'
+import { CapacityConflictDialog } from '@/components/capacity-conflict-dialog'
 
 const schema = z.object({
   name: z.string().min(1, 'Name required'),
@@ -39,9 +42,16 @@ export function CreateTaskDialog({
   onCreated: () => void
   allowedUsers?: Array<{ id: string; name: string; role: string }>
 }) {
+  const { user: currentUser } = useAuthStore()
   const [loading, setLoading] = useState(false)
   const [fetchedUsers, setFetchedUsers] = useState<User[]>([])
   const users = allowedUsers ?? fetchedUsers
+
+  const [capacityChecking, setCapacityChecking] = useState(false)
+  const [capacityOpen,     setCapacityOpen]     = useState(false)
+  const [capacityDays,     setCapacityDays]     = useState<CapacityDay[]>([])
+  const [capacityPerson,   setCapacityPerson]   = useState('')
+  const [pendingData,      setPendingData]      = useState<FormData | null>(null)
 
   const { register, handleSubmit, setValue, reset, formState: { errors } } = useForm<FormData>({
     resolver: zodResolver(schema),
@@ -61,7 +71,38 @@ export function CreateTaskDialog({
     }
   }, [open, allowedUsers])
 
+  function runCapacityCheck(data: FormData) {
+    return checkCapacityConflicts({
+      userIds: [data.ownerId!],
+      startDate: data.startDate || data.endDate || '',
+      endDate: data.endDate || data.startDate || '',
+      totalHours: Math.max(data.estimatedHours || 0, data.effortHours || 0),
+    })
+  }
+
   async function onSubmit(data: FormData) {
+    if (data.ownerId && (data.startDate || data.endDate) && Math.max(data.estimatedHours || 0, data.effortHours || 0) > 0) {
+      setCapacityChecking(true)
+      try {
+        const conflicts = await runCapacityCheck(data)
+        if (conflicts.days.length > 0) {
+          setPendingData(data)
+          setCapacityPerson(conflicts.person)
+          setCapacityDays(conflicts.days)
+          setCapacityOpen(true)
+          return
+        }
+      } catch (e: unknown) {
+        toast.error(e instanceof Error ? e.message : 'Could not check capacity')
+        return
+      } finally {
+        setCapacityChecking(false)
+      }
+    }
+    await doSubmit(data)
+  }
+
+  async function doSubmit(data: FormData) {
     setLoading(true)
     try {
       const res = await fetch('/api/tasks', {
@@ -82,6 +123,7 @@ export function CreateTaskDialog({
   }
 
   return (
+    <>
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-lg">
         <DialogHeader><DialogTitle>New Task</DialogTitle></DialogHeader>
@@ -157,13 +199,29 @@ export function CreateTaskDialog({
 
           <div className="flex justify-end gap-2 pt-2">
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
-            <Button type="submit" disabled={loading}>
-              {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              Create Task
+            <Button type="submit" disabled={loading || capacityChecking}>
+              {(loading || capacityChecking) && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              {capacityChecking ? 'Checking capacity…' : 'Create Task'}
             </Button>
           </div>
         </form>
       </DialogContent>
     </Dialog>
+
+    <CapacityConflictDialog
+      open={capacityOpen}
+      onOpenChange={setCapacityOpen}
+      personLabel={capacityPerson}
+      days={capacityDays}
+      onDaysChange={setCapacityDays}
+      refetch={async () => pendingData ? (await runCapacityCheck(pendingData)).days : []}
+      onProceed={async () => { setCapacityOpen(false); if (pendingData) await doSubmit(pendingData); setPendingData(null) }}
+      proceeding={loading}
+      proceedLabel="Create anyway"
+      proceedingLabel="Creating..."
+      currentUserId={currentUser?.id}
+      currentUserRole={currentUser?.role}
+    />
+    </>
   )
 }

@@ -22,6 +22,21 @@ enum ProjectType {
   OTHER
 }
 
+enum Quarter {
+  Q1
+  Q2
+  Q3
+  Q4
+}
+
+enum Region {
+  ASIA
+  LAR
+  NAR
+  EMEA
+  OTHER
+}
+
 enum ProjectStatus {
   PLANNING
   ACTIVE
@@ -159,8 +174,39 @@ model User {
   leaves                     Leave[]
   meetings                   Meeting[]
   documentLinks              DocumentLink[]     @relation("DocumentLinkCreator")
+  utilizationOverrides        UtilizationOverride[]
 
   @@map("users")
+}
+
+// Admin-set fixed value that replaces the calculated weekly utilization % for a
+// specific date range wherever it's displayed (Reports, Resources, Dashboard).
+// Only the entry overlapping the real current week (if any) is ever active. Never
+// affects overload detection or capacity-conflict checks -- those always use real
+// assigned hours, so this can't accidentally hide a genuine scheduling conflict.
+model UtilizationOverride {
+  id        String   @id @default(cuid())
+  userId    String
+  fromDate  DateTime
+  toDate    DateTime
+  pct       Int
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("utilization_overrides")
+}
+
+// A single shared passphrase, separate from account passwords, gating access to
+// the admin-only Workload Admin tool. Deliberately not tied to any one user.
+model AdminPasscode {
+  id           String   @id @default("singleton")
+  passwordHash String?
+  updatedAt    DateTime @updatedAt
+  updatedById  String?
+
+  @@map("admin_passcode")
 }
 
 model Session {
@@ -219,6 +265,8 @@ model Project {
   planStatus            PlanStatus         @default(DRAFT)
   category              String?
   productType           String?
+  quarter               Quarter?
+  region                Region?
   projectLinks          String[]
   projectClassification String?
   numberOfProducts      Int?
@@ -285,10 +333,18 @@ model Task {
   createdAt       DateTime   @default(now())
   updatedAt       DateTime   @updatedAt
 
+  // Links an auto-generated teardown/costing task back to the specific
+  // Product + subsystem (or costing type) it represents, so reassigning the
+  // task's owner here can sync back into that Product's ProductResource
+  // entries instead of only being derivable one-way from Products -> Task.
+  productId           String?
+  productSubsystem    String?
+
   workstream      Workstream       @relation(fields: [workstreamId], references: [id], onDelete: Cascade)
   owner           User?            @relation("TaskOwner", fields: [ownerId], references: [id], onDelete: SetNull)
   assignedBy      User?            @relation("TaskAssignedBy", fields: [assignedById], references: [id], onDelete: SetNull)
   approvedBy      User?            @relation("TaskApprovedBy", fields: [approvedById], references: [id], onDelete: SetNull)
+  product         Product?         @relation(fields: [productId], references: [id], onDelete: SetNull)
   documents       Document[]
   scheduleChanges ScheduleChange[] @relation("AffectedTask")
   notifications   Notification[]
@@ -449,20 +505,26 @@ model DocumentLink {
 }
 
 model Product {
-  id            String   @id @default(cuid())
-  projectId     String
-  brand         String
-  modelNo       String
-  leadId        String?
-  resourceCount Int?
-  order         Int      @default(0)
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id                String   @id @default(cuid())
+  projectId         String
+  brand             String
+  modelNo           String
+  leadId            String?
+  resourceCount     Int?
+  order             Int      @default(0)
+  // Category subsystems that don't apply to this specific brand/model —
+  // toggled off from the Products tab, removing this product's linked
+  // teardown/costing tasks for that subsystem without affecting other
+  // products in the same project.
+  excludedSubsystems String[] @default([])
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
 
   project   Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
   lead      User?            @relation("ProductLead", fields: [leadId], references: [id], onDelete: SetNull)
   resources ProductResource[]
   history   ProductHistory[]
+  tasks     Task[]
 
   @@map("products")
 }
@@ -586,4 +648,110 @@ model TaskOwnerHistory {
   changedBy User  @relation("TaskOwnerChangeBy", fields: [changedById], references: [id], onDelete: Cascade)
 
   @@map("task_owner_history")
+}
+
+// ── No-code admin configuration: project categories & teardown templates ──
+
+model TemplateCategory {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  order     Int      @default(0)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  modelTypes  TemplateModelType[]
+  workstreams TemplateWorkstream[]
+  subsystems  TemplateSubsystem[]
+
+  @@map("template_categories")
+}
+
+model TemplateModelType {
+  id         String @id @default(cuid())
+  categoryId String
+  code       String
+  label      String
+  order      Int    @default(0)
+
+  category    TemplateCategory     @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  workstreams TemplateWorkstream[]
+
+  @@unique([categoryId, code])
+  @@map("template_model_types")
+}
+
+model TemplateWorkstream {
+  id          String  @id @default(cuid())
+  categoryId  String
+  // Null = shared across every model type in this category (the default,
+  // and the only option before per-model-type templates existed). Set =
+  // this workstream only applies to projects set up with that model type.
+  modelTypeId String?
+  name        String
+  order       Int     @default(0)
+
+  category  TemplateCategory   @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  modelType TemplateModelType? @relation(fields: [modelTypeId], references: [id], onDelete: Cascade)
+  tasks     TemplateTask[]
+
+  @@map("template_workstreams")
+}
+
+model TemplateTask {
+  id             String  @id @default(cuid())
+  workstreamId   String
+  name           String
+  durationDays   Float
+  estimatedHours Float
+  order          Int     @default(0)
+  // Tasks sharing the same non-null parallelGroup value (anywhere in the
+  // category, any number of them) all start together instead of stacking in
+  // series — lets a template model work that really happens side-by-side,
+  // shortening the total schedule instead of always summing every task.
+  parallelGroup  String?
+
+  workstream TemplateWorkstream @relation(fields: [workstreamId], references: [id], onDelete: Cascade)
+
+  @@map("template_tasks")
+}
+
+model TemplateSubsystem {
+  id         String @id @default(cuid())
+  categoryId String
+  name       String
+  order      Int    @default(0)
+
+  category TemplateCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@unique([categoryId, name])
+  @@map("template_subsystems")
+}
+
+model TemplateCostingType {
+  id    String @id @default(cuid())
+  code  String @unique
+  label String
+  order Int    @default(0)
+
+  @@map("template_costing_types")
+}
+
+model TemplateProjectType {
+  id    String @id @default(cuid())
+  name  String @unique
+  order Int    @default(0)
+
+  @@map("template_project_types")
+}
+
+// Admin-editable dashboard banner image (replaces the hardcoded
+// "2026 CAA Project Plan" image). Single row, always upserted by id "default".
+model DashboardBanner {
+  id        String   @id @default("default")
+  title     String
+  imagePath String
+  updatedAt DateTime @updatedAt
+
+  @@map("dashboard_banner")
 }

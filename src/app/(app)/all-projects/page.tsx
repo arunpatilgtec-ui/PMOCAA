@@ -6,7 +6,9 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { AlertTriangle, ChevronLeft, ChevronRight } from 'lucide-react'
+import { AlertTriangle, ChevronLeft, ChevronRight, Download } from 'lucide-react'
+import { rangeOverlapsYear, QuarterFilter, ALL_QUARTERS, matchesQuarter, RegionFilter, ALL_REGIONS, matchesRegion } from '@/components/filters/year-filter'
+import { downloadCsv } from '@/lib/csv-export'
 import {
   differenceInDays, format, startOfYear, endOfYear,
   eachMonthOfInterval,
@@ -17,6 +19,8 @@ interface Project {
   name: string
   status: string
   priority?: string
+  quarter?: string
+  region?: string
   startDate?: string
   endDate?: string
   lead?: { id: string; name: string }
@@ -67,6 +71,8 @@ export default function AllProjectsPage() {
   const [year, setYear] = useState(new Date().getFullYear())
   const [filterStatus, setFilterStatus] = useState('ONGOING')
   const [filterPriority, setFilterPriority] = useState('ALL')
+  const [filterQuarter, setFilterQuarter] = useState(ALL_QUARTERS)
+  const [filterRegion, setFilterRegion] = useState(ALL_REGIONS)
 
   const canAccess = user && ['ADMIN', 'MANAGER', 'PLANNER'].includes(user.role)
 
@@ -117,6 +123,9 @@ export default function AllProjectsPage() {
         return p.status === filterStatus || (filterStatus === 'ACTIVE' && p.status === 'IN_PROGRESS')
       })
       .filter(p => filterPriority === 'ALL' || p.priority === filterPriority)
+      .filter(p => matchesQuarter(p.quarter, filterQuarter))
+      .filter(p => matchesRegion(p.region, filterRegion))
+      .filter(p => rangeOverlapsYear(p.startDate, p.endDate, String(year)))
       .sort((a, b) => {
         const pa = PRIORITY_RANK[a.priority ?? ''] ?? 0
         const pb = PRIORITY_RANK[b.priority ?? ''] ?? 0
@@ -124,7 +133,29 @@ export default function AllProjectsPage() {
         const ord: Record<string, number> = { ACTIVE: 5, IN_PROGRESS: 5, PLANNING: 4, ON_HOLD: 3, COMPLETED: 2, CANCELLED: 1 }
         return (ord[b.status] ?? 0) - (ord[a.status] ?? 0)
       })
-  }, [projects, filterStatus, filterPriority])
+  }, [projects, filterStatus, filterPriority, filterQuarter, filterRegion, year])
+
+  function exportCsv() {
+    downloadCsv(
+      `all-projects-${year}`,
+      filtered.map((p) => ({
+        name: p.name,
+        status: STATUS_LABEL[p.status] ?? p.status,
+        priority: p.priority ?? '',
+        startDate: p.startDate ? p.startDate.slice(0, 10) : '',
+        endDate: p.endDate ? p.endDate.slice(0, 10) : '',
+        lead: p.lead?.name ?? '',
+      })),
+      [
+        { key: 'name', label: 'Project' },
+        { key: 'status', label: 'Status' },
+        { key: 'priority', label: 'Priority' },
+        { key: 'startDate', label: 'Start Date' },
+        { key: 'endDate', label: 'End Date' },
+        { key: 'lead', label: 'Lead' },
+      ]
+    )
+  }
 
   const stats = useMemo(() => {
     const ONGOING = ['PLANNING', 'ACTIVE', 'IN_PROGRESS', 'ON_HOLD']
@@ -221,12 +252,19 @@ export default function AllProjectsPage() {
             </SelectContent>
           </Select>
 
-          {(filterStatus !== 'ONGOING' || filterPriority !== 'ALL') && (
+          <QuarterFilter value={filterQuarter} onChange={setFilterQuarter} className="h-8 w-28 text-xs" />
+          <RegionFilter value={filterRegion} onChange={setFilterRegion} className="h-8 w-28 text-xs" />
+
+          {(filterStatus !== 'ONGOING' || filterPriority !== 'ALL' || filterQuarter !== ALL_QUARTERS || filterRegion !== ALL_REGIONS) && (
             <Button variant="ghost" size="sm" className="h-8 text-xs"
-              onClick={() => { setFilterStatus('ONGOING'); setFilterPriority('ALL') }}>
+              onClick={() => { setFilterStatus('ONGOING'); setFilterPriority('ALL'); setFilterQuarter(ALL_QUARTERS); setFilterRegion(ALL_REGIONS) }}>
               Reset
             </Button>
           )}
+
+          <Button variant="outline" size="sm" className="h-8 text-xs" onClick={exportCsv} disabled={filtered.length === 0}>
+            <Download className="h-3.5 w-3.5 mr-1" /> Export CSV
+          </Button>
 
           <span className="ml-auto text-xs text-muted-foreground">{filtered.length} shown</span>
         </div>

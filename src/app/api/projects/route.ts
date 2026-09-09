@@ -102,6 +102,8 @@ export async function POST(req: NextRequest) {
         projectLinks: data.projectLinks || [],
         projectClassification: data.projectClassification || null,
         numberOfProducts: data.numberOfProducts ? parseInt(String(data.numberOfProducts), 10) : null,
+        quarter: data.quarter || null,
+        region: data.region || null,
       },
       include: {
         lead: { select: { id: true, name: true } },

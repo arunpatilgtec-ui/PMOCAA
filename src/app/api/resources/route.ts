@@ -214,7 +214,7 @@ export async function GET(req: NextRequest) {
               select: {
                 id: true,
                 name: true,
-                project: { select: { id: true, name: true } },
+                project: { select: { id: true, name: true, quarter: true, region: true } },
               },
             },
           },
@@ -244,6 +244,23 @@ export async function GET(req: NextRequest) {
       orderBy: { name: 'asc' },
     })
 
+    // Utilization overrides overlapping the REAL current week (not the requested
+    // gantt range) -- utilizationPct below always reflects "this week", so that's
+    // the only window an override can ever apply against.
+    const overridesAll = await prisma.utilizationOverride.findMany({
+      where: {
+        userId: { in: users.map(u => u.id) },
+        fromDate: { lte: weekEnd },
+        toDate: { gte: weekStart },
+      },
+      orderBy: { createdAt: 'desc' },
+    })
+    const overrideByUser = new Map<string, number>()
+    for (const o of overridesAll) {
+      if (overrideByUser.has(o.userId)) continue // most recently created overlapping entry wins
+      overrideByUser.set(o.userId, o.pct)
+    }
+
     // Completed tasks overlapping the requested range (last 60 days by default).
     const sixtyDaysAgo = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000)
     const completedRangeStart = fromParam || toParam ? rangeStart : sixtyDaysAgo
@@ -268,7 +285,7 @@ export async function GET(req: NextRequest) {
         endDate: true,
         statusChangedAt: true,
         ownerId: true,
-        workstream: { select: { id: true, name: true, project: { select: { id: true, name: true } } } },
+        workstream: { select: { id: true, name: true, project: { select: { id: true, name: true, quarter: true, region: true } } } },
       },
     })
     const completedByUser = new Map<string, typeof completedTasksAll>()
@@ -464,9 +481,13 @@ export async function GET(req: NextRequest) {
       const thisWeekHours = Math.round(dailyValues.reduce((s, h) => s + h, 0) * 10) / 10
       const maxDailyHours = Math.round(Math.max(0, ...dailyValues) * 10) / 10
 
-      const utilizationPct = weeklyCapacityHours > 0
+      // Overload flags always reflect real hours vs. capacity -- computed below from
+      // thisWeekHours/maxDailyHours, never from the override -- so a manual display
+      // override can never mask a genuine capacity conflict elsewhere in the app.
+      const computedUtilizationPct = weeklyCapacityHours > 0
         ? Math.round(thisWeekHours / weeklyCapacityHours * 100)
         : 0
+      const utilizationPct = overrideByUser.get(user.id) ?? computedUtilizationPct
 
       const isOverloadedWeekly = thisWeekHours > weeklyCapacityHours
       const isOverloadedDaily  = maxDailyHours  > dailyCapacityHours
@@ -549,6 +570,8 @@ export async function GET(req: NextRequest) {
         delayedDailyHoursMap,
         // Utilization
         utilizationPct,
+        computedUtilizationPct,
+        isUtilizationOverridden: overrideByUser.has(user.id),
         // Overload flags
         isOverloaded,
         isOverloadedWeekly,

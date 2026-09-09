@@ -18,6 +18,7 @@ import {
   LayoutGrid, BarChart2, Video, Palmtree,
 } from 'lucide-react'
 import { AssignWorkDialog } from '@/components/assign-work-dialog'
+import { YearFilter, ALL_YEARS, rangeOverlapsYear, QuarterFilter, ALL_QUARTERS, matchesQuarter, RegionFilter, ALL_REGIONS, matchesRegion } from '@/components/filters/year-filter'
 
 interface AssignedTask {
   id: string
@@ -33,7 +34,7 @@ interface AssignedTask {
   workstream: {
     id: string
     name: string
-    project: { id: string; name: string }
+    project: { id: string; name: string; quarter?: string | null; region?: string | null }
   }
 }
 
@@ -48,7 +49,7 @@ interface CompletedTask {
   workstream: {
     id: string
     name: string
-    project: { id: string; name: string }
+    project: { id: string; name: string; quarter?: string | null; region?: string | null }
   }
 }
 
@@ -1203,6 +1204,9 @@ export default function ResourcesPage() {
   const loadInFlightRef = useRef(false)
   const [search,    setSearch]    = useState('')
   const [filter,    setFilter]    = useState<string | null>('ALL')
+  const [yearFilter, setYearFilter] = useState(ALL_YEARS)
+  const [quarterFilter, setQuarterFilter] = useState(ALL_QUARTERS)
+  const [regionFilter, setRegionFilter] = useState(ALL_REGIONS)
   const [view,      setView]      = useState<'cards' | 'gantt'>('cards')
 
   const [detailResource, setDetailResource] = useState<Resource | null>(null)
@@ -1263,7 +1267,20 @@ export default function ResourcesPage() {
       !filter || filter === 'ALL' ||
       (filter === 'OVERLOADED' && r.isOverloaded) ||
       (filter === 'AVAILABLE' && !r.isOverloaded && r.utilizationPct < 80)
-    return matchSearch && matchFilter
+    const matchYear = yearFilter === ALL_YEARS || [
+      ...r.ownedTasks,
+      ...(r.strategicTasks ?? []),
+      ...(r.completedTasks ?? []),
+    ].some(t => rangeOverlapsYear(t.startDate, t.endDate, yearFilter))
+    const matchQuarter = quarterFilter === ALL_QUARTERS || [
+      ...r.ownedTasks,
+      ...(r.completedTasks ?? []),
+    ].some(t => matchesQuarter(t.workstream.project.quarter, quarterFilter))
+    const matchRegion = regionFilter === ALL_REGIONS || [
+      ...r.ownedTasks,
+      ...(r.completedTasks ?? []),
+    ].some(t => matchesRegion(t.workstream.project.region, regionFilter))
+    return matchSearch && matchFilter && matchYear && matchQuarter && matchRegion
   })
 
   const overloaded = resources.filter(r => r.isOverloaded).length
@@ -1361,6 +1378,9 @@ export default function ResourcesPage() {
                 <SelectItem value="AVAILABLE">Available</SelectItem>
               </SelectContent>
             </Select>
+            <QuarterFilter value={quarterFilter} onChange={setQuarterFilter} className="w-32" />
+            <RegionFilter value={regionFilter} onChange={setRegionFilter} className="w-32" />
+            <YearFilter value={yearFilter} onChange={setYearFilter} className="w-36" />
           </div>
 
           {loading ? (
